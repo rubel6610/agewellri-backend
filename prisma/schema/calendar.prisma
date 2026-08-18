@@ -1,0 +1,25 @@
+model CalendarConnection {
+  id                 String           @id @default(auto()) @map("_id") @db.ObjectId
+  userId             String           @db.ObjectId
+  provider           CalendarProvider
+  externalAccountId  String
+  externalCalendarId String?
+  syncStatus         SyncStatus       @default(PENDING)
+  lastSyncedAt       DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  calendarEvents CalendarEvent[]
+}
+
+model CalendarEvent {
+  id              String             @id @default(auto()) @map("_id") @db.ObjectId
+  connectionId    String             @db.ObjectId
+  connection      CalendarConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  appointmentId   String             @db.ObjectId
+  appointment     Appointment        @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  externalEventId String
+  syncStatus      SyncStatus         @default(SYNCED)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+}

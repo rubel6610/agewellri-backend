@@ -1,0 +1,23 @@
+model ServiceAgreement {
+  id                 String          @id @default(auto()) @map("_id") @db.ObjectId
+  clientId           String          @db.ObjectId
+  client             Client          @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  subscriptionId     String?         @db.ObjectId
+  subscription       Subscription?   @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  templateVersion    String          @default("v1.0")
+  status             AgreementStatus @default(DRAFT)
+  provider           String?
+  externalDocumentId String?
+  documentUrl        String?
+  sentAt             DateTime?
+  signedAt           DateTime?
+  executedAt         DateTime?
+  cancelledAt        DateTime?
+  isArchived         Boolean         @default(false)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@index([clientId])
+  @@index([subscriptionId])
+  @@index([status])
+}

@@ -1,0 +1,27 @@
+model Client {
+  id                       String           @id @default(auto()) @map("_id") @db.ObjectId
+  userId                   String           @unique @db.ObjectId
+  user                     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientNumber             String           @unique
+  address                  String
+  city                     String
+  state                    String
+  postalCode               String
+  country                  String           @default("USA")
+  emergencyContactName     String?
+  emergencyContactPhone    String?
+  emergencyContactRelation String?
+  onboardingStatus         OnboardingStatus @default(INVITED)
+  isArchived               Boolean          @default(false)
+  archivedAt               DateTime?
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+
+  invitations   Invitation[]
+  agreements    ServiceAgreement[]
+  subscriptions Subscription[]
+  invoices      Invoice[]
+  payments      Payment[]
+  appointments  Appointment[]
+  reports       Report[]
+}

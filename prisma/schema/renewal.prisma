@@ -1,0 +1,19 @@
+model Renewal {
+  id                   String              @id @default(auto()) @map("_id") @db.ObjectId
+  subscriptionId       String              @db.ObjectId
+  subscription         Subscription        @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  previousPeriodId     String?             @db.ObjectId
+  previousPeriod       SubscriptionPeriod? @relation("PreviousPeriodRenewals", fields: [previousPeriodId], references: [id], onDelete: SetNull)
+  newPeriodId          String?             @db.ObjectId
+  newPeriod            SubscriptionPeriod? @relation("NewPeriodRenewals", fields: [newPeriodId], references: [id], onDelete: SetNull)
+  invoiceId            String?             @db.ObjectId
+  invoice              Invoice?            @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  paymentId            String?             @db.ObjectId
+  payment              Payment?            @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  status               RenewalStatus       @default(PENDING)
+  scheduledRenewalDate DateTime
+  processedAt          DateTime?
+  failureReason        String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+}

@@ -1,0 +1,19 @@
+model Visit {
+  id            String      @id @default(auto()) @map("_id") @db.ObjectId
+  appointmentId String      @unique @db.ObjectId
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+  technicianId  String      @db.ObjectId
+  technician    Technician  @relation(fields: [technicianId], references: [id], onDelete: Restrict)
+  status        VisitStatus @default(SCHEDULED)
+  startedAt     DateTime?
+  completedAt   DateTime?
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  assessment Assessment?
+  reports    Report[]
+
+  @@index([technicianId])
+  @@index([status])
+}

@@ -1,0 +1,64 @@
+model Subscription {
+  id                      String             @id @default(auto()) @map("_id") @db.ObjectId
+  clientId                String             @db.ObjectId
+  client                  Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  planId                  String             @db.ObjectId
+  plan                    ServicePlan        @relation(fields: [planId], references: [id], onDelete: Restrict)
+  status                  SubscriptionStatus @default(PENDING)
+  billingInterval         BillingInterval    @default(QUARTERLY)
+  billingMethod           BillingMethod      @default(AUTOMATIC)
+  currentPeriodStart      DateTime
+  currentPeriodEnd        DateTime
+  nextRenewalDate         DateTime?
+  autoRenew               Boolean            @default(true)
+  cancellationRequestedAt DateTime?
+  cancellationReason      String?
+  cancellationEffectiveAt DateTime?
+  cancelledAt             DateTime?
+  isArchived              Boolean            @default(false)
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  periods    SubscriptionPeriod[]
+  agreements ServiceAgreement[]
+  invoices   Invoice[]
+  payments   Payment[]
+  renewals   Renewal[]
+
+  @@index([clientId])
+  @@index([status])
+  @@index([nextRenewalDate])
+}
+
+model SubscriptionPeriod {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  subscriptionId String       @db.ObjectId
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  periodNumber   Int
+  startDate      DateTime
+  endDate        DateTime
+  isCurrent      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  allocations            VisitAllocation[]
+  appointments           Appointment[]
+  previousPeriodRenewals Renewal[]           @relation("PreviousPeriodRenewals")
+  newPeriodRenewals      Renewal[]           @relation("NewPeriodRenewals")
+
+  @@index([subscriptionId])
+}
+
+model VisitAllocation {
+  id                   String             @id @default(auto()) @map("_id") @db.ObjectId
+  subscriptionPeriodId String             @db.ObjectId
+  subscriptionPeriod   SubscriptionPeriod @relation(fields: [subscriptionPeriodId], references: [id], onDelete: Cascade)
+  serviceTypeId        String             @db.ObjectId
+  serviceType          ServiceType        @relation(fields: [serviceTypeId], references: [id], onDelete: Restrict)
+  allocatedCount       Int
+  usedCount            Int                @default(0)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@unique([subscriptionPeriodId, serviceTypeId])
+}

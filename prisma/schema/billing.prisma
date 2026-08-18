@@ -1,0 +1,52 @@
+model Invoice {
+  id                String        @id @default(auto()) @map("_id") @db.ObjectId
+  invoiceNumber     String        @unique
+  clientId          String        @db.ObjectId
+  client            Client        @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  subscriptionId    String?       @db.ObjectId
+  subscription      Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  amount            Float
+  currency          String        @default("USD")
+  status            InvoiceStatus @default(DRAFT)
+  dueDate           DateTime
+  issuedAt          DateTime?
+  paidAt            DateTime?
+  externalInvoiceId String?
+  invoiceUrl        String?
+  isArchived        Boolean       @default(false)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  payments Payment[]
+  renewals Renewal[]
+
+  @@index([clientId])
+  @@index([status])
+}
+
+model Payment {
+  id                String        @id @default(auto()) @map("_id") @db.ObjectId
+  clientId          String        @db.ObjectId
+  client            Client        @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  subscriptionId    String?       @db.ObjectId
+  subscription      Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  invoiceId         String?       @db.ObjectId
+  invoice           Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  amount            Float
+  currency          String        @default("USD")
+  status            PaymentStatus @default(PENDING)
+  paymentMethod     BillingMethod @default(AUTOMATIC)
+  externalProvider  String?
+  externalPaymentId String?
+  paidAt            DateTime?
+  failedAt          DateTime?
+  failureReason     String?
+  isArchived        Boolean       @default(false)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  renewals Renewal[]
+
+  @@index([clientId])
+  @@index([status])
+}

@@ -1,0 +1,21 @@
+model User {
+  id              String       @id @default(auto()) @map("_id") @db.ObjectId
+  email           String       @unique
+  passwordHash    String?
+  firstName       String
+  lastName        String
+  phone           String?
+  role            UserRole     @default(CLIENT)
+  status          UserStatus   @default(ACTIVE)
+  emailVerifiedAt DateTime?
+  lastLoginAt     DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  client              Client?
+  technician          Technician?
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+  createdInvitations  Invitation[]       @relation("CreatedInvitations")
+  createdAppointments Appointment[]      @relation("CreatedAppointments")
+}

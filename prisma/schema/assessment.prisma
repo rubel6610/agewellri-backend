@@ -1,0 +1,54 @@
+model AssessmentTemplate {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  version   String   @default("1.0")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  questions   AssessmentQuestion[]
+  assessments Assessment[]
+}
+
+model AssessmentQuestion {
+  id           String             @id @default(auto()) @map("_id") @db.ObjectId
+  templateId   String             @db.ObjectId
+  template     AssessmentTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  category     String
+  questionText String
+  weight       Float              @default(1.0)
+  order        Int
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  responses AssessmentResponse[]
+}
+
+model Assessment {
+  id          String             @id @default(auto()) @map("_id") @db.ObjectId
+  visitId     String             @unique @db.ObjectId
+  visit       Visit              @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  templateId  String             @db.ObjectId
+  template    AssessmentTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  score       Float?
+  isCompleted Boolean            @default(false)
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  responses AssessmentResponse[]
+}
+
+model AssessmentResponse {
+  id           String             @id @default(auto()) @map("_id") @db.ObjectId
+  assessmentId String             @db.ObjectId
+  assessment   Assessment         @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  questionId   String             @db.ObjectId
+  question     AssessmentQuestion @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  scoreValue   Float?
+  notes        String?
+  flaggedRisk  Boolean            @default(false)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+}

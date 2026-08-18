@@ -1,0 +1,16 @@
+model Invitation {
+  id              String           @id @default(auto()) @map("_id") @db.ObjectId
+  email           String
+  clientId        String?          @db.ObjectId
+  client          Client?          @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  tokenHash       String           @unique
+  status          InvitationStatus @default(PENDING)
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  createdByUserId String           @db.ObjectId
+  createdByUser   User             @relation("CreatedInvitations", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([email])
+}

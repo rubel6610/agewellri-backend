@@ -1,0 +1,19 @@
+model Report {
+  id          String       @id @default(auto()) @map("_id") @db.ObjectId
+  clientId    String       @db.ObjectId
+  client      Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  visitId     String       @db.ObjectId
+  visit       Visit        @relation(fields: [visitId], references: [id], onDelete: Restrict)
+  reportType  ReportType   @default(HOME_SAFETY_SCORE)
+  status      ReportStatus @default(PENDING)
+  fileUrl     String?
+  generatedAt DateTime?
+  uploadedAt  DateTime?
+  emailedAt   DateTime?
+  isArchived  Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([clientId])
+  @@index([visitId])
+}

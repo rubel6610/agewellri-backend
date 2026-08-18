@@ -1,0 +1,153 @@
+enum UserRole {
+  CLIENT
+  ADMIN
+  TECHNICIAN
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
+enum OnboardingStatus {
+  INVITED
+  ACCOUNT_CREATED
+  AGREEMENT_PENDING
+  AGREEMENT_SIGNED
+  PAYMENT_PENDING
+  PAYMENT_COMPLETED
+  ACTIVE
+}
+
+enum AgreementStatus {
+  DRAFT
+  SENT
+  SIGNED
+  EXECUTED
+  CANCELLED
+  EXPIRED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PENDING
+  PAUSED
+  CANCELLED
+  EXPIRED
+  PAYMENT_FAILED
+  CANCELLATION_REQUESTED
+}
+
+enum BillingInterval {
+  QUARTERLY
+  MONTHLY
+  ANNUAL
+  ONE_TIME
+}
+
+enum BillingMethod {
+  AUTOMATIC
+  INVOICE
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  OVERDUE
+}
+
+enum ServiceTypeCategory {
+  CLEANING
+  SAFETY_OVERSIGHT
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  RESCHEDULED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum AppointmentCreatorRole {
+  CLIENT
+  ADMIN
+  OWNER
+  SYSTEM
+}
+
+enum VisitStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  MISSED
+  CANCELLED
+}
+
+enum ReportStatus {
+  PENDING
+  GENERATED
+  UPLOADED
+  EMAILED
+}
+
+enum ReportType {
+  HOME_SAFETY_SCORE
+  VISIT_SUMMARY
+  CLEANING_CHECKLIST
+}
+
+enum NotificationType {
+  ACCOUNT_CREATED
+  AGREEMENT_SENT
+  AGREEMENT_SIGNED
+  PAYMENT_SUCCESS
+  PAYMENT_FAILED
+  APPOINTMENT_CREATED
+  APPOINTMENT_RESCHEDULED
+  APPOINTMENT_CANCELLED
+  REPORT_READY
+  RENEWAL_REMINDER
+  SUBSCRIPTION_RENEWED
+  SUBSCRIPTION_CANCELLED
+}
+
+enum CalendarProvider {
+  GOOGLE
+  OUTLOOK
+  APPLE
+}
+
+enum SyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+}
+
+enum RenewalStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
