@@ -8,9 +8,17 @@ model Client {
   state                    String
   postalCode               String
   country                  String           @default("USA")
+  dateOfBirth              String?
+  primaryContactName       String?
+  primaryContactPhone      String?
+  primaryContactEmail      String?
+  primaryContactRelation   String?
   emergencyContactName     String?
   emergencyContactPhone    String?
   emergencyContactRelation String?
+  selectedPlan             String?
+  hasCleaningAddon         Boolean          @default(false)
+  hasCompletedAgreement    Boolean          @default(false)
   onboardingStatus         OnboardingStatus @default(INVITED)
   isArchived               Boolean          @default(false)
   archivedAt               DateTime?

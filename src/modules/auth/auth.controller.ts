@@ -1,6 +1,12 @@
 import { Request, Response, NextFunction } from "express";
 import { AuthenticatedRequest } from "../../middlewares/auth.middleware";
-import { registerSchema, loginSchema, changePasswordSchema, updateProfileSchema } from "./auth.validation";
+import {
+  registerSchema,
+  loginSchema,
+  changePasswordSchema,
+  updateProfileSchema,
+  submitAgreementSchema,
+} from "./auth.validation";
 import * as authService from "./auth.service";
 import sendResponse from "../../utils/sendResponse";
 
@@ -141,6 +147,47 @@ export async function handleUpdateProfile(req: AuthenticatedRequest, res: Respon
 }
 
 /**
+ * POST /api/v1/auth/agreement
+ */
+export async function handleSubmitAgreement(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) {
+      sendResponse(res, {
+        statusCode: 401,
+        success: false,
+        message: "Unauthorized",
+      });
+      return;
+    }
+
+    const parseResult = submitAgreementSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      sendResponse(res, {
+        statusCode: 400,
+        success: false,
+        message: "Validation failed",
+        errors: parseResult.error.flatten().fieldErrors,
+      });
+      return;
+    }
+
+    const result = await authService.submitClientAgreement(req.user.id, parseResult.data);
+    sendResponse(res, {
+      statusCode: 201,
+      success: true,
+      message: "Client Service Agreement signed and submitted successfully",
+      data: result,
+    });
+  } catch (error: any) {
+    sendResponse(res, {
+      statusCode: 400,
+      success: false,
+      message: error.message || "Failed to submit agreement",
+    });
+  }
+}
+
+/**
  * PATCH /api/v1/auth/change-password
  */
 export async function handleChangePassword(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
@@ -179,4 +226,5 @@ export async function handleChangePassword(req: AuthenticatedRequest, res: Respo
     });
   }
 }
+
 

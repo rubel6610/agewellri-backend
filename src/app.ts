@@ -3,6 +3,7 @@ import express, { Application, Request, Response } from "express";
 import cors from "cors";
 import routes from "./routes";
 import { setupSwagger } from "./config/swagger";
+import { requestLogger, errorLogger } from "./middlewares/logger.middleware";
 
 const app: Application = express();
 
@@ -10,6 +11,9 @@ const app: Application = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Terminal Request Logger
+app.use(requestLogger);
 
 // Swagger UI Documentation
 setupSwagger(app);
@@ -26,4 +30,7 @@ app.get("/", (req: Request, res: Response) => {
 // Global API v1 Routes
 app.use("/api/v1", routes);
 
-export default app;
+// Global Error Logger
+app.use(errorLogger);
+
+export default app;

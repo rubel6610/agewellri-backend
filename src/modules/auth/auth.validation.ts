@@ -38,7 +38,36 @@ export const updateProfileSchema = z.object({
   emergencyContactRelation: z.string().optional().nullable(),
 });
 
+export const submitAgreementSchema = z.object({
+  clientFullName: z.string().min(1, "Client full name is required"),
+  address: z.string().min(1, "Address is required"),
+  city: z.string().min(1, "City is required"),
+  state: z.string().min(1, "State is required"),
+  postalCode: z.string().min(1, "Postal code is required"),
+  phone: z.string().min(1, "Phone number is required"),
+  dob: z.string().min(1, "Date of birth is required"),
+  email: z.string().email("Valid email required").optional(),
+  primaryContactName: z.string().optional().nullable(),
+  primaryContactPhone: z.string().optional().nullable(),
+  primaryContactEmail: z.string().optional().nullable(),
+  primaryContactRelation: z.string().optional().nullable(),
+  emergencyContactName: z.string().min(1, "Emergency contact name is required"),
+  emergencyContactPhone: z.string().min(1, "Emergency contact phone is required"),
+  emergencyContactRelation: z.string().optional().nullable(),
+  selectedPlan: z.enum(["ESSENTIAL_GUARD", "GUARDIAN_PLUS"]).default("ESSENTIAL_GUARD"),
+  hasCleaningAddon: z.boolean().default(false),
+  clientPrintedName: z.string().min(1, "Printed name is required"),
+  authorizedRepName: z.string().optional().nullable(),
+  relationshipToClient: z.string().optional().nullable(),
+  agreementDate: z.string().min(1, "Date is required"),
+  clientSignature: z.string().min(1, "Signature is required"),
+  agreedToTerms: z.literal(true, {
+    errorMap: () => ({ message: "You must agree to the terms of the Client Service Agreement" }),
+  }),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+export type SubmitAgreementInput = z.infer<typeof submitAgreementSchema>;

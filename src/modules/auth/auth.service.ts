@@ -2,7 +2,43 @@ import { UserRole, UserStatus, OnboardingStatus } from "@prisma/client";
 import prisma from "../../lib/prisma";
 import { hashPassword, comparePassword } from "../../utils/password";
 import { generateToken } from "../../utils/jwt";
-import { RegisterInput, LoginInput, ChangePasswordInput, UpdateProfileInput } from "./auth.validation";
+import {
+  RegisterInput,
+  LoginInput,
+  ChangePasswordInput,
+  UpdateProfileInput,
+  SubmitAgreementInput,
+} from "./auth.validation";
+
+/**
+ * Helper to compute agreement status flags.
+ */
+function computeAgreementFlags(user: { role: UserRole; client?: any }) {
+  if (user.role !== UserRole.CLIENT) {
+    return {
+      hasCompletedAgreement: true,
+      requiresAgreement: false,
+    };
+  }
+
+  const client = user.client;
+  const hasCompleted = Boolean(
+    client?.hasCompletedAgreement ||
+      client?.onboardingStatus === OnboardingStatus.AGREEMENT_SIGNED ||
+      client?.onboardingStatus === OnboardingStatus.ACTIVE ||
+      client?.onboardingStatus === OnboardingStatus.PAYMENT_PENDING ||
+      client?.onboardingStatus === OnboardingStatus.PAYMENT_COMPLETED ||
+      (client?.agreements &&
+        client.agreements.some(
+          (a: any) => a.status === "SIGNED" || a.status === "EXECUTED"
+        ))
+  );
+
+  return {
+    hasCompletedAgreement: hasCompleted,
+    requiresAgreement: !hasCompleted,
+  };
+}
 
 /**
  * Register a new user (and auto-create Client profile if role is CLIENT).
@@ -39,7 +75,6 @@ export async function registerUser(input: RegisterInput) {
       createdAt: true,
     },
   });
-  console.log("User created:", user);
 
   // If role is CLIENT, create associated Client profile with unique clientNumber
   let client = null;
@@ -57,6 +92,7 @@ export async function registerUser(input: RegisterInput) {
         postalCode: input.postalCode || "00000",
         country: "USA",
         onboardingStatus: OnboardingStatus.ACCOUNT_CREATED,
+        hasCompletedAgreement: false,
       },
     });
   }
@@ -67,10 +103,12 @@ export async function registerUser(input: RegisterInput) {
     role: user.role,
   });
 
+  const fullUserProfile = await getUserProfile(user.id);
+
   return {
     token,
-    user,
-    client,
+    user: fullUserProfile,
+    client: fullUserProfile.client,
   };
 }
 
@@ -80,10 +118,6 @@ export async function registerUser(input: RegisterInput) {
 export async function loginUser(input: LoginInput) {
   const user = await prisma.user.findUnique({
     where: { email: input.email.toLowerCase() },
-    include: {
-      client: true,
-      technician: true,
-    },
   });
 
   if (!user || !user.passwordHash) {
@@ -111,16 +145,16 @@ export async function loginUser(input: LoginInput) {
     role: user.role,
   });
 
-  const { passwordHash, ...userProfile } = user;
+  const fullUserProfile = await getUserProfile(user.id);
 
   return {
     token,
-    user: userProfile,
+    user: fullUserProfile,
   };
 }
 
 /**
- * Fetch authenticated user profile.
+ * Fetch authenticated user profile with computed agreement flags.
  */
 export async function getUserProfile(userId: string) {
   const user = await prisma.user.findUnique({
@@ -137,7 +171,14 @@ export async function getUserProfile(userId: string) {
       lastLoginAt: true,
       createdAt: true,
       updatedAt: true,
-      client: true,
+      client: {
+        include: {
+          agreements: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+        },
+      },
       technician: true,
     },
   });
@@ -146,7 +187,12 @@ export async function getUserProfile(userId: string) {
     throw new Error("User profile not found.");
   }
 
-  return user;
+  const flags = computeAgreementFlags(user);
+
+  return {
+    ...user,
+    ...flags,
+  };
 }
 
 /**
@@ -213,6 +259,115 @@ export async function updateUserProfile(userId: string, input: UpdateProfileInpu
 }
 
 /**
+ * Submit initial client service agreement.
+ */
+export async function submitClientAgreement(userId: string, input: SubmitAgreementInput) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { client: true },
+  });
+
+  if (!user) {
+    throw new Error("User not found.");
+  }
+
+  if (user.role !== UserRole.CLIENT) {
+    throw new Error("Only clients are required to sign the client service agreement.");
+  }
+
+  // Update / create client
+  let clientId = user.client?.id;
+  if (!clientId) {
+    const clientCount = await prisma.client.count();
+    const clientNumber = `AW-${1001 + clientCount}`;
+    const newClient = await prisma.client.create({
+      data: {
+        userId: user.id,
+        clientNumber,
+        address: input.address,
+        city: input.city,
+        state: input.state,
+        postalCode: input.postalCode,
+        country: "USA",
+        dateOfBirth: input.dob,
+        primaryContactName: input.primaryContactName,
+        primaryContactPhone: input.primaryContactPhone,
+        primaryContactEmail: input.primaryContactEmail,
+        primaryContactRelation: input.primaryContactRelation,
+        emergencyContactName: input.emergencyContactName,
+        emergencyContactPhone: input.emergencyContactPhone,
+        emergencyContactRelation: input.emergencyContactRelation,
+        selectedPlan: input.selectedPlan,
+        hasCleaningAddon: input.hasCleaningAddon,
+        hasCompletedAgreement: true,
+        onboardingStatus: OnboardingStatus.AGREEMENT_SIGNED,
+      },
+    });
+    clientId = newClient.id;
+  } else {
+    await prisma.client.update({
+      where: { id: clientId },
+      data: {
+        address: input.address,
+        city: input.city,
+        state: input.state,
+        postalCode: input.postalCode,
+        dateOfBirth: input.dob,
+        primaryContactName: input.primaryContactName,
+        primaryContactPhone: input.primaryContactPhone,
+        primaryContactEmail: input.primaryContactEmail,
+        primaryContactRelation: input.primaryContactRelation,
+        emergencyContactName: input.emergencyContactName,
+        emergencyContactPhone: input.emergencyContactPhone,
+        emergencyContactRelation: input.emergencyContactRelation,
+        selectedPlan: input.selectedPlan,
+        hasCleaningAddon: input.hasCleaningAddon,
+        hasCompletedAgreement: true,
+        onboardingStatus: OnboardingStatus.AGREEMENT_SIGNED,
+      },
+    });
+  }
+
+  // Calculate plan price
+  const basePrice = input.selectedPlan === "GUARDIAN_PLUS" ? 1800 : 99;
+  const finalPrice = input.hasCleaningAddon ? basePrice + 50 : basePrice;
+
+  // Create ServiceAgreement record
+  const agreement = await prisma.serviceAgreement.create({
+    data: {
+      clientId,
+      templateVersion: "v1.0",
+      status: "SIGNED" as any,
+      selectedPlan: input.selectedPlan,
+      planPrice: finalPrice,
+      hasCleaningAddon: input.hasCleaningAddon,
+      clientPrintedName: input.clientPrintedName,
+      authorizedRepName: input.authorizedRepName,
+      relationshipToClient: input.relationshipToClient,
+      clientSignature: input.clientSignature,
+      agreementDate: new Date(input.agreementDate),
+      signedAt: new Date(),
+      executedAt: new Date(),
+    },
+  });
+
+  // Update User phone
+  if (input.phone) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { phone: input.phone },
+    });
+  }
+
+  const updatedProfile = await getUserProfile(userId);
+
+  return {
+    agreement,
+    user: updatedProfile,
+  };
+}
+
+/**
  * Change password for authenticated user.
  */
 export async function changeUserPassword(userId: string, input: ChangePasswordInput) {
@@ -238,3 +393,4 @@ export async function changeUserPassword(userId: string, input: ChangePasswordIn
 
   return { message: "Password updated successfully." };
 }
+

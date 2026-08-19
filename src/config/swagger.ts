@@ -189,6 +189,26 @@ const options: swaggerJSDoc.Options = {
           },
         },
       },
+      "/api/v1/auth/agreement": {
+        post: {
+          tags: ["Authentication"],
+          summary: "Sign & Submit Initial Client Service Agreement",
+          description: "Submits client agreement details, signature, and updates onboarding status to AGREEMENT_SIGNED.",
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "201": {
+              description: "Agreement signed successfully",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ApiResponse" },
+                },
+              },
+            },
+            "400": { description: "Validation error" },
+            "401": { description: "Unauthorized" },
+          },
+        },
+      },
       "/api/v1/auth/change-password": {
         patch: {
           tags: ["Authentication"],
