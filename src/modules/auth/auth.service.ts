@@ -368,6 +368,65 @@ export async function submitClientAgreement(userId: string, input: SubmitAgreeme
 }
 
 /**
+ * Fetch full active client agreement for the current user.
+ */
+export async function getMyAgreement(userId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      client: {
+        include: {
+          agreements: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+        },
+      },
+    },
+  });
+
+  if (!user) {
+    throw new Error("User not found.");
+  }
+
+  const client = user.client;
+  const latestAgreement = client?.agreements?.[0];
+  const fullName = `${user.firstName} ${user.lastName}`.trim();
+
+  return {
+    id: latestAgreement?.id,
+    templateVersion: latestAgreement?.templateVersion,
+    status: latestAgreement?.status || (client?.hasCompletedAgreement ? "SIGNED" : "DRAFT"),
+    selectedPlan: latestAgreement?.selectedPlan || client?.selectedPlan || "ESSENTIAL_GUARD",
+    planPrice: latestAgreement?.planPrice || (client?.selectedPlan === "GUARDIAN_PLUS" ? 1800 : 99),
+    hasCleaningAddon: latestAgreement?.hasCleaningAddon || client?.hasCleaningAddon || false,
+    clientFullName: fullName,
+    clientPrintedName: latestAgreement?.clientPrintedName || fullName,
+    authorizedRepName: latestAgreement?.authorizedRepName || client?.primaryContactName || null,
+    relationshipToClient: latestAgreement?.relationshipToClient || client?.primaryContactRelation || null,
+    clientSignature: latestAgreement?.clientSignature || null,
+    agreementDate: latestAgreement?.agreementDate || latestAgreement?.signedAt || latestAgreement?.createdAt || new Date(),
+    signedAt: latestAgreement?.signedAt || null,
+    executedAt: latestAgreement?.executedAt || null,
+    address: client?.address ,
+    city: client?.city ,
+    state: client?.state ,
+    postalCode: client?.postalCode ,
+    phone: user.phone ,
+    dob: client?.dateOfBirth,
+    email: user.email,
+    primaryContactName: client?.primaryContactName,
+    primaryContactPhone: client?.primaryContactPhone ,
+    primaryContactEmail: client?.primaryContactEmail,
+    primaryContactRelation: client?.primaryContactRelation,
+    emergencyContactName: client?.emergencyContactName,
+    emergencyContactPhone: client?.emergencyContactPhone,
+    emergencyContactRelation: client?.emergencyContactRelation,
+    clientNumber: client?.clientNumber,
+  };
+}
+
+/**
  * Change password for authenticated user.
  */
 export async function changeUserPassword(userId: string, input: ChangePasswordInput) {
@@ -393,4 +452,5 @@ export async function changeUserPassword(userId: string, input: ChangePasswordIn
 
   return { message: "Password updated successfully." };
 }
+
 

@@ -188,6 +188,36 @@ export async function handleSubmitAgreement(req: AuthenticatedRequest, res: Resp
 }
 
 /**
+ * GET /api/v1/auth/my-agreement
+ */
+export async function handleGetMyAgreement(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) {
+      sendResponse(res, {
+        statusCode: 401,
+        success: false,
+        message: "Unauthorized",
+      });
+      return;
+    }
+
+    const agreement = await authService.getMyAgreement(req.user.id);
+    sendResponse(res, {
+      statusCode: 200,
+      success: true,
+      message: "Agreement retrieved successfully",
+      data: agreement,
+    });
+  } catch (error: any) {
+    sendResponse(res, {
+      statusCode: 500,
+      success: false,
+      message: error.message || "Failed to retrieve agreement",
+    });
+  }
+}
+
+/**
  * PATCH /api/v1/auth/change-password
  */
 export async function handleChangePassword(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
@@ -226,5 +256,6 @@ export async function handleChangePassword(req: AuthenticatedRequest, res: Respo
     });
   }
 }
+
 
 

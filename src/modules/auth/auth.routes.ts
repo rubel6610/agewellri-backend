@@ -6,6 +6,7 @@ import {
   handleGetMe,
   handleUpdateProfile,
   handleSubmitAgreement,
+  handleGetMyAgreement,
   handleChangePassword,
 } from "./auth.controller";
 
@@ -19,6 +20,8 @@ router.post("/login", handleLogin);
 router.get("/me", authenticate, handleGetMe);
 router.patch("/profile", authenticate, handleUpdateProfile);
 router.post("/agreement", authenticate, handleSubmitAgreement);
+router.get("/my-agreement", authenticate, handleGetMyAgreement);
 router.patch("/change-password", authenticate, handleChangePassword);
 
 export default router;
+
