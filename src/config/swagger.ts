@@ -285,6 +285,32 @@ const options: swaggerJSDoc.Options = {
           },
         },
       },
+      "/api/v1/auth/refresh-token": {
+        post: {
+          tags: ["Authentication"],
+          summary: "Refresh Access Token & Session",
+          description: "Exchanges a valid refresh token for a newly signed access token and user session.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["refreshToken"],
+                  properties: {
+                    refreshToken: { type: "string", description: "Long-lived refresh token" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "Token refreshed successfully" },
+            "400": { description: "Missing refresh token" },
+            "401": { description: "Invalid or expired refresh token" },
+          },
+        },
+      },
       "/api/v1/auth/change-password": {
         patch: {
           tags: ["Authentication"],

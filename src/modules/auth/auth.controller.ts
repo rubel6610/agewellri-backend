@@ -9,6 +9,7 @@ import {
   forgotPasswordSchema,
   verifyOtpSchema,
   resetPasswordSchema,
+  refreshTokenSchema,
 } from "./auth.validation";
 import * as authService from "./auth.service";
 import sendResponse from "../../utils/sendResponse";
@@ -355,3 +356,41 @@ export async function handleChangePassword(req: AuthenticatedRequest, res: Respo
     });
   }
 }
+
+/**
+ * POST /api/v1/auth/refresh-token
+ */
+export async function handleRefreshToken(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const rawRefreshToken =
+      req.body?.refreshToken ||
+      req.headers["x-refresh-token"] ||
+      (req.cookies && req.cookies.refreshToken);
+
+    const parseResult = refreshTokenSchema.safeParse({ refreshToken: rawRefreshToken });
+    if (!parseResult.success) {
+      sendResponse(res, {
+        statusCode: 400,
+        success: false,
+        message: "Refresh token is required.",
+        errors: parseResult.error.flatten().fieldErrors,
+      });
+      return;
+    }
+
+    const result = await authService.refreshUserToken(parseResult.data);
+    sendResponse(res, {
+      statusCode: 200,
+      success: true,
+      message: "Token refreshed successfully",
+      data: result,
+    });
+  } catch (error: any) {
+    sendResponse(res, {
+      statusCode: 401,
+      success: false,
+      message: error.message || "Invalid or expired refresh token",
+    });
+  }
+}
+

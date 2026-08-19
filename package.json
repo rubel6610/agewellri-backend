@@ -21,7 +21,11 @@
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "postinstall": "prisma generate",
-    "db:seed": "prisma db seed"
+    "seed:admin": "tsx prisma/seed.ts",
+    "db:seed": "tsx prisma/seed.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

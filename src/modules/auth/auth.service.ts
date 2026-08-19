@@ -1,7 +1,7 @@
 import { UserRole, UserStatus, OnboardingStatus } from "@prisma/client";
 import prisma from "../../lib/prisma";
 import { hashPassword, comparePassword } from "../../utils/password";
-import { generateToken } from "../../utils/jwt";
+import { generateToken, generateAuthTokens, verifyRefreshToken } from "../../utils/jwt";
 import { sendPasswordResetOtpEmail } from "../../utils/email";
 import {
   RegisterInput,
@@ -12,6 +12,7 @@ import {
   ForgotPasswordInput,
   VerifyOtpInput,
   ResetPasswordInput,
+  RefreshTokenInput,
 } from "./auth.validation";
 
 /**
@@ -101,7 +102,7 @@ export async function registerUser(input: RegisterInput) {
     });
   }
 
-  const token = generateToken({
+  const authTokens = generateAuthTokens({
     userId: user.id,
     email: user.email,
     role: user.role,
@@ -110,7 +111,8 @@ export async function registerUser(input: RegisterInput) {
   const fullUserProfile = await getUserProfile(user.id);
 
   return {
-    token,
+    token: authTokens.token,
+    refreshToken: authTokens.refreshToken,
     user: fullUserProfile,
     client: fullUserProfile.client,
   };
@@ -143,7 +145,7 @@ export async function loginUser(input: LoginInput) {
     data: { lastLoginAt: new Date() },
   });
 
-  const token = generateToken({
+  const authTokens = generateAuthTokens({
     userId: user.id,
     email: user.email,
     role: user.role,
@@ -152,7 +154,8 @@ export async function loginUser(input: LoginInput) {
   const fullUserProfile = await getUserProfile(user.id);
 
   return {
-    token,
+    token: authTokens.token,
+    refreshToken: authTokens.refreshToken,
     user: fullUserProfile,
   };
 }
@@ -561,3 +564,46 @@ export async function changeUserPassword(userId: string, input: ChangePasswordIn
 
   return { message: "Password updated successfully." };
 }
+
+/**
+ * Refresh user access token and revalidate session.
+ */
+export async function refreshUserToken(input: RefreshTokenInput) {
+  let decoded: any;
+  try {
+    decoded = verifyRefreshToken(input.refreshToken);
+  } catch (error) {
+    throw new Error("Invalid or expired refresh token. Please sign in again.");
+  }
+
+  if (!decoded || !decoded.userId) {
+    throw new Error("Invalid refresh token payload.");
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: decoded.userId },
+  });
+
+  if (!user) {
+    throw new Error("User account no longer exists.");
+  }
+
+  if (user.status !== UserStatus.ACTIVE) {
+    throw new Error(`Your account is currently ${user.status.toLowerCase()}.`);
+  }
+
+  const authTokens = generateAuthTokens({
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+  });
+
+  const fullUserProfile = await getUserProfile(user.id);
+
+  return {
+    token: authTokens.token,
+    refreshToken: authTokens.refreshToken,
+    user: fullUserProfile,
+  };
+}
+
