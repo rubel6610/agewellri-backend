@@ -100,7 +100,6 @@ export async function sendPasswordResetOtpEmail({
   // Always log OTP to terminal console for easy visibility
   console.log(`\n======================================================`);
   console.log(`🔑 [EMAIL SERVICE] Password Reset OTP for ${to}:`);
-  console.log(`👉 OTP CODE: ${otp} (Valid for ${expiresInMinutes} minutes)`);
   console.log(`======================================================\n`);
 
   const transporter = createTransporter();
