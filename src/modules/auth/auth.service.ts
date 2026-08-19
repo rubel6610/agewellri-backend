@@ -2,12 +2,16 @@ import { UserRole, UserStatus, OnboardingStatus } from "@prisma/client";
 import prisma from "../../lib/prisma";
 import { hashPassword, comparePassword } from "../../utils/password";
 import { generateToken } from "../../utils/jwt";
+import { sendPasswordResetOtpEmail } from "../../utils/email";
 import {
   RegisterInput,
   LoginInput,
   ChangePasswordInput,
   UpdateProfileInput,
   SubmitAgreementInput,
+  ForgotPasswordInput,
+  VerifyOtpInput,
+  ResetPasswordInput,
 } from "./auth.validation";
 
 /**
@@ -427,6 +431,111 @@ export async function getMyAgreement(userId: string) {
 }
 
 /**
+ * Request Password Reset OTP
+ */
+export async function forgotPassword(input: ForgotPasswordInput) {
+  const email = input.email.trim().toLowerCase();
+  const user = await prisma.user.findUnique({
+    where: { email },
+  });
+
+  if (!user) {
+    throw new Error("No account found with this email address.");
+  }
+
+  // Generate 6-digit numeric OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+  await (prisma.user.update as any)({
+    where: { id: user.id },
+    data: {
+      resetOtp: otp,
+      resetOtpExpires: expiresAt,
+    },
+  });
+
+  // Send branded OTP Email using Nodemailer
+  await sendPasswordResetOtpEmail({
+    to: user.email,
+    name: user.firstName,
+    otp,
+    expiresInMinutes: 10,
+  });
+
+  return {
+    message: "A 6-digit verification code has been sent to your email.",
+    email: user.email,
+  };
+}
+
+/**
+ * Verify 6-digit OTP code
+ */
+export async function verifyOtp(input: VerifyOtpInput) {
+  const email = input.email.trim().toLowerCase();
+  const user = await (prisma.user.findUnique as any)({
+    where: { email },
+  });
+
+  if (!user) {
+    throw new Error("User account not found.");
+  }
+
+  if (!user.resetOtp || user.resetOtp !== input.otp.trim()) {
+    throw new Error("Invalid verification code. Please check your email and try again.");
+  }
+
+  if (!user.resetOtpExpires || new Date(user.resetOtpExpires) < new Date()) {
+    throw new Error("Verification code has expired. Please request a new code.");
+  }
+
+  return {
+    success: true,
+    message: "Verification code confirmed.",
+    email: user.email,
+  };
+}
+
+/**
+ * Reset password using verified OTP code
+ */
+export async function resetPassword(input: ResetPasswordInput) {
+  const email = input.email.trim().toLowerCase();
+  const user = await (prisma.user.findUnique as any)({
+    where: { email },
+  });
+
+  if (!user) {
+    throw new Error("User account not found.");
+  }
+
+  if (!user.resetOtp || user.resetOtp !== input.otp.trim()) {
+    throw new Error("Invalid verification code.");
+  }
+
+  if (!user.resetOtpExpires || new Date(user.resetOtpExpires) < new Date()) {
+    throw new Error("Verification code has expired. Please request a new code.");
+  }
+
+  const newHashedPassword = await hashPassword(input.newPassword);
+
+  await (prisma.user.update as any)({
+    where: { id: user.id },
+    data: {
+      passwordHash: newHashedPassword,
+      resetOtp: null,
+      resetOtpExpires: null,
+    },
+  });
+
+  return {
+    success: true,
+    message: "Your password has been reset successfully. You can now log in with your new password.",
+  };
+}
+
+/**
  * Change password for authenticated user.
  */
 export async function changeUserPassword(userId: string, input: ChangePasswordInput) {
@@ -452,5 +561,3 @@ export async function changeUserPassword(userId: string, input: ChangePasswordIn
 
   return { message: "Password updated successfully." };
 }
-
-

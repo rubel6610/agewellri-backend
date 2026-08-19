@@ -6,6 +6,9 @@ import {
   changePasswordSchema,
   updateProfileSchema,
   submitAgreementSchema,
+  forgotPasswordSchema,
+  verifyOtpSchema,
+  resetPasswordSchema,
 } from "./auth.validation";
 import * as authService from "./auth.service";
 import sendResponse from "../../utils/sendResponse";
@@ -218,6 +221,102 @@ export async function handleGetMyAgreement(req: AuthenticatedRequest, res: Respo
 }
 
 /**
+ * POST /api/v1/auth/forgot-password
+ */
+export async function handleForgotPassword(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const parseResult = forgotPasswordSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      sendResponse(res, {
+        statusCode: 400,
+        success: false,
+        message: "Validation failed",
+        errors: parseResult.error.flatten().fieldErrors,
+      });
+      return;
+    }
+
+    const result = await authService.forgotPassword(parseResult.data);
+    sendResponse(res, {
+      statusCode: 200,
+      success: true,
+      message: result.message,
+      data: { email: result.email },
+    });
+  } catch (error: any) {
+    sendResponse(res, {
+      statusCode: 400,
+      success: false,
+      message: error.message || "Failed to process forgot password request",
+    });
+  }
+}
+
+/**
+ * POST /api/v1/auth/verify-otp
+ */
+export async function handleVerifyOtp(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const parseResult = verifyOtpSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      sendResponse(res, {
+        statusCode: 400,
+        success: false,
+        message: "Validation failed",
+        errors: parseResult.error.flatten().fieldErrors,
+      });
+      return;
+    }
+
+    const result = await authService.verifyOtp(parseResult.data);
+    sendResponse(res, {
+      statusCode: 200,
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (error: any) {
+    sendResponse(res, {
+      statusCode: 400,
+      success: false,
+      message: error.message || "Invalid or expired verification code",
+    });
+  }
+}
+
+/**
+ * POST /api/v1/auth/reset-password
+ */
+export async function handleResetPassword(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const parseResult = resetPasswordSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      sendResponse(res, {
+        statusCode: 400,
+        success: false,
+        message: "Validation failed",
+        errors: parseResult.error.flatten().fieldErrors,
+      });
+      return;
+    }
+
+    const result = await authService.resetPassword(parseResult.data);
+    sendResponse(res, {
+      statusCode: 200,
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (error: any) {
+    sendResponse(res, {
+      statusCode: 400,
+      success: false,
+      message: error.message || "Password reset failed",
+    });
+  }
+}
+
+/**
  * PATCH /api/v1/auth/change-password
  */
 export async function handleChangePassword(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
@@ -256,6 +355,3 @@ export async function handleChangePassword(req: AuthenticatedRequest, res: Respo
     });
   }
 }
-
-
-

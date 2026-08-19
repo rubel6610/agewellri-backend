@@ -7,6 +7,9 @@ import {
   handleUpdateProfile,
   handleSubmitAgreement,
   handleGetMyAgreement,
+  handleForgotPassword,
+  handleVerifyOtp,
+  handleResetPassword,
   handleChangePassword,
 } from "./auth.controller";
 
@@ -15,6 +18,9 @@ const router = Router();
 // Public routes
 router.post("/register", handleRegister);
 router.post("/login", handleLogin);
+router.post("/forgot-password", handleForgotPassword);
+router.post("/verify-otp", handleVerifyOtp);
+router.post("/reset-password", handleResetPassword);
 
 // Protected routes (require valid JWT)
 router.get("/me", authenticate, handleGetMe);
@@ -24,4 +30,5 @@ router.get("/my-agreement", authenticate, handleGetMyAgreement);
 router.patch("/change-password", authenticate, handleChangePassword);
 
 export default router;
+
 

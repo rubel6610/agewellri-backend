@@ -7,6 +7,8 @@ model User {
   phone           String?
   role            UserRole     @default(CLIENT)
   status          UserStatus   @default(ACTIVE)
+  resetOtp        String?
+  resetOtpExpires DateTime?
   emailVerifiedAt DateTime?
   lastLoginAt     DateTime?
   createdAt       DateTime     @default(now())
@@ -19,3 +21,4 @@ model User {
   createdInvitations  Invitation[]       @relation("CreatedInvitations")
   createdAppointments Appointment[]      @relation("CreatedAppointments")
 }
+

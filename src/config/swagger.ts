@@ -209,6 +209,82 @@ const options: swaggerJSDoc.Options = {
           },
         },
       },
+      "/api/v1/auth/forgot-password": {
+        post: {
+          tags: ["Authentication"],
+          summary: "Send Password Reset OTP Code",
+          description: "Sends a 6-digit verification code to the registered email address via Nodemailer.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["email"],
+                  properties: { email: { type: "string", format: "email" } },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "OTP sent to email" },
+            "400": { description: "User not found or validation error" },
+          },
+        },
+      },
+      "/api/v1/auth/verify-otp": {
+        post: {
+          tags: ["Authentication"],
+          summary: "Verify Password Reset OTP",
+          description: "Verifies whether the 6-digit OTP is valid and within the 10-minute expiry window.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["email", "otp"],
+                  properties: {
+                    email: { type: "string", format: "email" },
+                    otp: { type: "string", example: "123456" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "OTP confirmed" },
+            "400": { description: "Invalid or expired OTP" },
+          },
+        },
+      },
+      "/api/v1/auth/reset-password": {
+        post: {
+          tags: ["Authentication"],
+          summary: "Reset Password with Verified OTP",
+          description: "Resets account password to new password after validating the 6-digit OTP code.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["email", "otp", "newPassword"],
+                  properties: {
+                    email: { type: "string", format: "email" },
+                    otp: { type: "string", example: "123456" },
+                    newPassword: { type: "string", format: "password", minLength: 8 },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "Password reset successful" },
+            "400": { description: "Invalid OTP or validation error" },
+          },
+        },
+      },
       "/api/v1/auth/change-password": {
         patch: {
           tags: ["Authentication"],
