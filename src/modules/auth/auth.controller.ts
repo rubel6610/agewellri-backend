@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { AuthenticatedRequest } from "../../middlewares/auth.middleware";
-import { registerSchema, loginSchema, changePasswordSchema } from "./auth.validation";
+import { registerSchema, loginSchema, changePasswordSchema, updateProfileSchema } from "./auth.validation";
 import * as authService from "./auth.service";
 import sendResponse from "../../utils/sendResponse";
 
@@ -100,6 +100,47 @@ export async function handleGetMe(req: AuthenticatedRequest, res: Response, next
 }
 
 /**
+ * PATCH /api/v1/auth/profile
+ */
+export async function handleUpdateProfile(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) {
+      sendResponse(res, {
+        statusCode: 401,
+        success: false,
+        message: "Unauthorized",
+      });
+      return;
+    }
+
+    const parseResult = updateProfileSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      sendResponse(res, {
+        statusCode: 400,
+        success: false,
+        message: "Validation failed",
+        errors: parseResult.error.flatten().fieldErrors,
+      });
+      return;
+    }
+
+    const updatedProfile = await authService.updateUserProfile(req.user.id, parseResult.data);
+    sendResponse(res, {
+      statusCode: 200,
+      success: true,
+      message: "Profile updated successfully",
+      data: updatedProfile,
+    });
+  } catch (error: any) {
+    sendResponse(res, {
+      statusCode: 400,
+      success: false,
+      message: error.message || "Failed to update profile",
+    });
+  }
+}
+
+/**
  * PATCH /api/v1/auth/change-password
  */
 export async function handleChangePassword(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
@@ -138,3 +179,4 @@ export async function handleChangePassword(req: AuthenticatedRequest, res: Respo
     });
   }
 }
+

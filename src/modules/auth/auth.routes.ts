@@ -4,6 +4,7 @@ import {
   handleRegister,
   handleLogin,
   handleGetMe,
+  handleUpdateProfile,
   handleChangePassword,
 } from "./auth.controller";
 
@@ -15,6 +16,7 @@ router.post("/login", handleLogin);
 
 // Protected routes (require valid JWT)
 router.get("/me", authenticate, handleGetMe);
+router.patch("/profile", authenticate, handleUpdateProfile);
 router.patch("/change-password", authenticate, handleChangePassword);
 
 export default router;

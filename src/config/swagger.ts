@@ -72,6 +72,21 @@ const options: swaggerJSDoc.Options = {
             newPassword: { type: "string", minLength: 6, example: "NewPassword123!" },
           },
         },
+        UpdateProfileInput: {
+          type: "object",
+          properties: {
+            firstName: { type: "string", example: "Eleanor" },
+            lastName: { type: "string", example: "Vance" },
+            phone: { type: "string", example: "401-555-0199" },
+            address: { type: "string", example: "148 Hope Street" },
+            city: { type: "string", example: "Providence" },
+            state: { type: "string", example: "RI" },
+            postalCode: { type: "string", example: "02906" },
+            emergencyContactName: { type: "string", example: "Sarah Jenkins" },
+            emergencyContactPhone: { type: "string", example: "401-555-0182" },
+            emergencyContactRelation: { type: "string", example: "Daughter" },
+          },
+        },
       },
     },
     paths: {
@@ -143,6 +158,34 @@ const options: swaggerJSDoc.Options = {
               },
             },
             "401": { description: "Unauthorized or token missing/invalid" },
+          },
+        },
+      },
+      "/api/v1/auth/profile": {
+        patch: {
+          tags: ["Authentication"],
+          summary: "Update user profile (email is immutable)",
+          description: "Updates user profile information such as name, phone, service address, and emergency contact details. Email cannot be changed.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/UpdateProfileInput" },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "Profile updated successfully",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ApiResponse" },
+                },
+              },
+            },
+            "400": { description: "Validation error" },
+            "401": { description: "Unauthorized" },
           },
         },
       },

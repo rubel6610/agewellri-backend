@@ -2,7 +2,7 @@ import { UserRole, UserStatus, OnboardingStatus } from "@prisma/client";
 import prisma from "../../lib/prisma";
 import { hashPassword, comparePassword } from "../../utils/password";
 import { generateToken } from "../../utils/jwt";
-import { RegisterInput, LoginInput, ChangePasswordInput } from "./auth.validation";
+import { RegisterInput, LoginInput, ChangePasswordInput, UpdateProfileInput } from "./auth.validation";
 
 /**
  * Register a new user (and auto-create Client profile if role is CLIENT).
@@ -147,6 +147,69 @@ export async function getUserProfile(userId: string) {
   }
 
   return user;
+}
+
+/**
+ * Update authenticated user profile (email cannot be modified).
+ */
+export async function updateUserProfile(userId: string, input: UpdateProfileInput) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { client: true },
+  });
+
+  if (!user) {
+    throw new Error("User not found.");
+  }
+
+  // Update User table fields (firstName, lastName, phone)
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      ...(input.firstName !== undefined && { firstName: input.firstName.trim() }),
+      ...(input.lastName !== undefined && { lastName: input.lastName.trim() }),
+      ...(input.phone !== undefined && { phone: input.phone }),
+    },
+  });
+
+  // If user has a client profile or client fields are provided
+  if (user.role === UserRole.CLIENT) {
+    const clientData: Record<string, unknown> = {};
+    if (input.address !== undefined) clientData.address = input.address;
+    if (input.city !== undefined) clientData.city = input.city;
+    if (input.state !== undefined) clientData.state = input.state;
+    if (input.postalCode !== undefined) clientData.postalCode = input.postalCode;
+    if (input.emergencyContactName !== undefined) clientData.emergencyContactName = input.emergencyContactName;
+    if (input.emergencyContactPhone !== undefined) clientData.emergencyContactPhone = input.emergencyContactPhone;
+    if (input.emergencyContactRelation !== undefined) clientData.emergencyContactRelation = input.emergencyContactRelation;
+
+    if (Object.keys(clientData).length > 0) {
+      if (user.client) {
+        await prisma.client.update({
+          where: { id: user.client.id },
+          data: clientData,
+        });
+      } else {
+        const clientCount = await prisma.client.count();
+        const clientNumber = `AW-${1001 + clientCount}`;
+        await prisma.client.create({
+          data: {
+            userId: user.id,
+            clientNumber,
+            address: input.address || "TBD",
+            city: input.city || "TBD",
+            state: input.state || "RI",
+            postalCode: input.postalCode || "00000",
+            emergencyContactName: input.emergencyContactName,
+            emergencyContactPhone: input.emergencyContactPhone,
+            emergencyContactRelation: input.emergencyContactRelation,
+          },
+        });
+      }
+    }
+  }
+
+  return getUserProfile(userId);
 }
 
 /**
