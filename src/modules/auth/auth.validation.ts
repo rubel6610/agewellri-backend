@@ -54,7 +54,7 @@ export const submitAgreementSchema = z.object({
   emergencyContactName: z.string().min(1, "Emergency contact name is required"),
   emergencyContactPhone: z.string().min(1, "Emergency contact phone is required"),
   emergencyContactRelation: z.string().optional().nullable(),
-  selectedPlan: z.enum(["ESSENTIAL_GUARD", "GUARDIAN_PLUS"]).default("ESSENTIAL_GUARD"),
+  selectedPlan: z.enum(["ESSENTIAL_GUARD", "GUARDIAN_PLUS", "STANDALONE_CLEANING"]).default("ESSENTIAL_GUARD"),
   hasCleaningAddon: z.boolean().default(false),
   paymentMethodId: z.string().optional().nullable(),
   setupIntentId: z.string().optional().nullable(),
