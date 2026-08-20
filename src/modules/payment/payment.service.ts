@@ -36,10 +36,10 @@ export async function getOrCreateStripeCustomer(userId: string) {
       data: {
         userId: user.id,
         clientNumber,
-        address: "148 Hope Street",
-        city: "Providence",
-        state: "RI",
-        postalCode: "02906",
+        address: "",
+        city: "",
+        state: "",
+        postalCode: "",
         country: "USA",
       },
     });
@@ -246,15 +246,15 @@ async function ensurePlansAndServices() {
     },
   });
 
-  // 3. Essential Guard plan ($99/quarter)
+  // 3. Essential Guard plan ($995/quarter · 6 visits/quarter: 6 safety oversight visits, no cleanings)
   const essentialPlan = await prisma.servicePlan.upsert({
     where: { code: "ESSENTIAL_GUARD" },
-    update: { price: 99 },
+    update: { price: 995, name: "Essential Guard" },
     create: {
       name: "Essential Guard",
       code: "ESSENTIAL_GUARD",
-      description: "Standard quarterly safety inspection, home hazard oversight, and caregiver reports.",
-      price: 99,
+      description: "Essential Guard (6 visits/quarter: 6 safety oversight visits, no cleanings).",
+      price: 995,
       billingInterval: BillingInterval.QUARTERLY,
       isActive: true,
     },
@@ -267,28 +267,29 @@ async function ensurePlansAndServices() {
         serviceTypeId: safetyService.id,
       },
     },
-    update: { allocatedVisits: 4 },
+    update: { allocatedVisits: 6 },
     create: {
       planId: essentialPlan.id,
       serviceTypeId: safetyService.id,
-      allocatedVisits: 4,
+      allocatedVisits: 6,
     },
   });
 
-  // 4. Guardian Plus plan ($1,800/quarter)
+  // 4. Guardian Plus plan ($1,892/quarter · 12 visits/quarter: 6 safety + 6 cleaning)
   const guardianPlan = await prisma.servicePlan.upsert({
     where: { code: "GUARDIAN_PLUS" },
-    update: { price: 1800 },
+    update: { price: 1892, name: "Guardian Plus" },
     create: {
       name: "Guardian Plus",
       code: "GUARDIAN_PLUS",
-      description: "Comprehensive bi-weekly safety oversight, deep hazard elimination, and priority support.",
-      price: 1800,
+      description: "Guardian Plus (12 visits/quarter: 6 cleaning and 6 safety oversight visits).",
+      price: 1892,
       billingInterval: BillingInterval.QUARTERLY,
       isActive: true,
     },
   });
 
+  // Guardian Plus: 6 safety visits
   await prisma.planService.upsert({
     where: {
       planId_serviceTypeId: {
@@ -296,15 +297,60 @@ async function ensurePlansAndServices() {
         serviceTypeId: safetyService.id,
       },
     },
-    update: { allocatedVisits: 8 },
+    update: { allocatedVisits: 6 },
     create: {
       planId: guardianPlan.id,
       serviceTypeId: safetyService.id,
-      allocatedVisits: 8,
+      allocatedVisits: 6,
     },
   });
 
-  return { safetyService, cleaningService, essentialPlan, guardianPlan };
+  // Guardian Plus: 6 cleaning visits
+  await prisma.planService.upsert({
+    where: {
+      planId_serviceTypeId: {
+        planId: guardianPlan.id,
+        serviceTypeId: cleaningService.id,
+      },
+    },
+    update: { allocatedVisits: 6 },
+    create: {
+      planId: guardianPlan.id,
+      serviceTypeId: cleaningService.id,
+      allocatedVisits: 6,
+    },
+  });
+
+  // 5. Standalone One-Time Cleaning ($179 · 1 visit)
+  const standaloneCleaningPlan = await prisma.servicePlan.upsert({
+    where: { code: "STANDALONE_CLEANING" },
+    update: { price: 179, name: "Standalone One-Time Cleaning" },
+    create: {
+      name: "Standalone One-Time Cleaning",
+      code: "STANDALONE_CLEANING",
+      description: "A single comprehensive deep cleaning and allergen mitigation visit ($179).",
+      price: 179,
+      billingInterval: BillingInterval.ONE_TIME,
+      isActive: true,
+    },
+  });
+
+  await prisma.planService.upsert({
+    where: {
+      planId_serviceTypeId: {
+        planId: standaloneCleaningPlan.id,
+        serviceTypeId: cleaningService.id,
+      },
+    },
+    update: { allocatedVisits: 1 },
+    create: {
+      planId: standaloneCleaningPlan.id,
+      serviceTypeId: cleaningService.id,
+      allocatedVisits: 1,
+    },
+  });
+
+  return { safetyService, cleaningService, essentialPlan, guardianPlan, standaloneCleaningPlan };
 }
 
 /**
@@ -316,7 +362,7 @@ export async function processAgreementPayment(
   userId: string,
   input: ProcessAgreementPaymentInput
 ) {
-  const { safetyService, cleaningService, essentialPlan, guardianPlan } =
+  const { safetyService, cleaningService, essentialPlan, guardianPlan, standaloneCleaningPlan } =
     await ensurePlansAndServices();
 
   const user = await prisma.user.findUnique({
@@ -365,11 +411,28 @@ export async function processAgreementPayment(
   const selectedPlanCode = input.selectedPlan || client.selectedPlan || "ESSENTIAL_GUARD";
   const hasCleaningAddon = input.hasCleaningAddon ?? client.hasCleaningAddon ?? false;
 
-  const targetPlan =
-    selectedPlanCode === "GUARDIAN_PLUS" ? guardianPlan : essentialPlan;
+  let targetPlan = essentialPlan;
+  let safetyCount = 6;
+  let cleaningCount = 0;
+  let isOneTime = false;
+
+  if (selectedPlanCode === "GUARDIAN_PLUS") {
+    targetPlan = guardianPlan;
+    safetyCount = 6;
+    cleaningCount = 6 + (hasCleaningAddon ? 6 : 0); // Guardian Plus: 6 cleaning + 6 safety (12 total, or 18 with add-on)
+  } else if (selectedPlanCode === "STANDALONE_CLEANING") {
+    targetPlan = standaloneCleaningPlan;
+    safetyCount = 0;
+    cleaningCount = 1 + (hasCleaningAddon ? 6 : 0); // Standalone: 1 single cleaning visit (or 7 with add-on)
+    isOneTime = true;
+  } else {
+    targetPlan = essentialPlan;
+    safetyCount = 6;
+    cleaningCount = hasCleaningAddon ? 6 : 0; // Essential Guard: 6 safety (or 6 safety + 6 cleaning with add-on)
+  }
 
   const basePrice = targetPlan.price;
-  const addonPrice = hasCleaningAddon ? 50 : 0;
+  const addonPrice = hasCleaningAddon ? 60 : 0;
   const totalQuarterlyPrice = basePrice + addonPrice;
 
   const now = new Date();
@@ -384,12 +447,12 @@ export async function processAgreementPayment(
         clientId: client.id,
         planId: targetPlan.id,
         status: SubscriptionStatus.ACTIVE,
-        billingInterval: BillingInterval.QUARTERLY,
+        billingInterval: isOneTime ? BillingInterval.ONE_TIME : BillingInterval.QUARTERLY,
         billingMethod: BillingMethod.AUTOMATIC,
         currentPeriodStart: now,
-        currentPeriodEnd: threeMonthsLater,
-        nextRenewalDate: threeMonthsLater,
-        autoRenew: true,
+        currentPeriodEnd: isOneTime ? now : threeMonthsLater,
+        nextRenewalDate: isOneTime ? null : threeMonthsLater,
+        autoRenew: !isOneTime,
       },
     });
 
@@ -399,28 +462,30 @@ export async function processAgreementPayment(
         subscriptionId: subscription.id,
         periodNumber: 1,
         startDate: now,
-        endDate: threeMonthsLater,
+        endDate: isOneTime ? now : threeMonthsLater,
         isCurrent: true,
       },
     });
 
-    // Allocate visits
-    const safetyCount = selectedPlanCode === "GUARDIAN_PLUS" ? 8 : 4;
-    await prisma.visitAllocation.create({
-      data: {
-        subscriptionPeriodId: period.id,
-        serviceTypeId: safetyService.id,
-        allocatedCount: safetyCount,
-        usedCount: 0,
-      },
-    });
+    // Allocate safety visits
+    if (safetyCount > 0) {
+      await prisma.visitAllocation.create({
+        data: {
+          subscriptionPeriodId: period.id,
+          serviceTypeId: safetyService.id,
+          allocatedCount: safetyCount,
+          usedCount: 0,
+        },
+      });
+    }
 
-    if (hasCleaningAddon) {
+    // Allocate cleaning visits
+    if (cleaningCount > 0) {
       await prisma.visitAllocation.create({
         data: {
           subscriptionPeriodId: period.id,
           serviceTypeId: cleaningService.id,
-          allocatedCount: 2,
+          allocatedCount: cleaningCount,
           usedCount: 0,
         },
       });
@@ -432,7 +497,7 @@ export async function processAgreementPayment(
       data: {
         planId: targetPlan.id,
         status: SubscriptionStatus.ACTIVE,
-        autoRenew: true,
+        autoRenew: !isOneTime,
       },
     });
   }
@@ -538,12 +603,19 @@ export async function getBillingOverview(userId: string) {
   const client = user.client as any;
   const activeSub = client.subscriptions?.[0];
 
-  const planName =
-    activeSub?.plan?.name ||
-    (client.selectedPlan === "GUARDIAN_PLUS" ? "Guardian Plus" : "Essential Guard");
+  let planName = activeSub?.plan?.name;
+  if (!planName) {
+    if (client.selectedPlan === "GUARDIAN_PLUS") planName = "Guardian Plus";
+    else if (client.selectedPlan === "STANDALONE_CLEANING") planName = "Standalone One-Time Cleaning";
+    else planName = "Essential Guard";
+  }
 
-  const basePrice = client.selectedPlan === "GUARDIAN_PLUS" ? 1800 : 99;
-  const totalPrice = client.hasCleaningAddon ? basePrice + 50 : basePrice;
+  let basePrice = 995;
+  if (client.selectedPlan === "GUARDIAN_PLUS") basePrice = 1892;
+  else if (client.selectedPlan === "STANDALONE_CLEANING") basePrice = 179;
+  else basePrice = 995;
+
+  const totalPrice = (client.hasCleaningAddon && client.selectedPlan === "ESSENTIAL_GUARD") ? basePrice + 60 : basePrice;
 
   const nextRenewal = activeSub?.nextRenewalDate
     ? new Date(activeSub.nextRenewalDate).toLocaleDateString("en-US", {

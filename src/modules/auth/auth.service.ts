@@ -92,10 +92,10 @@ export async function registerUser(input: RegisterInput) {
       data: {
         userId: user.id,
         clientNumber: clientNumber,
-        address: input.address || "TBD",
-        city: input.city || "TBD",
-        state: input.state || "RI",
-        postalCode: input.postalCode || "00000",
+        address: input.address || "",
+        city: input.city || "",
+        state: input.state || "",
+        postalCode: input.postalCode || "",
         country: "USA",
         onboardingStatus: OnboardingStatus.ACCOUNT_CREATED,
         hasCompletedAgreement: false,
@@ -336,9 +336,16 @@ export async function submitClientAgreement(userId: string, input: SubmitAgreeme
     });
   }
 
-  // Calculate plan price
-  const basePrice = input.selectedPlan === "GUARDIAN_PLUS" ? 1800 : 99;
-  const finalPrice = input.hasCleaningAddon ? basePrice + 50 : basePrice;
+  // Calculate plan price ($995 for Essential Guard, $1892 for Guardian Plus, $179 for Standalone Cleaning, +$60 cleaning addon for any package)
+  let basePrice = 995;
+  if (input.selectedPlan === "GUARDIAN_PLUS") {
+    basePrice = 1892;
+  } else if (input.selectedPlan === "STANDALONE_CLEANING") {
+    basePrice = 179;
+  } else {
+    basePrice = 995;
+  }
+  const finalPrice = input.hasCleaningAddon ? basePrice + 60 : basePrice;
 
   // Create ServiceAgreement record
   const agreement = await (prisma.serviceAgreement.create as any)({
@@ -418,12 +425,16 @@ export async function getMyAgreement(userId: string) {
   const latestAgreement = client?.agreements?.[0] as any;
   const fullName = `${user.firstName} ${user.lastName}`.trim();
 
+  let defaultPlanPrice = 995;
+  if (client?.selectedPlan === "GUARDIAN_PLUS") defaultPlanPrice = 1892;
+  else if (client?.selectedPlan === "STANDALONE_CLEANING") defaultPlanPrice = 179;
+
   return {
     id: latestAgreement?.id,
     templateVersion: latestAgreement?.templateVersion,
     status: latestAgreement?.status || (client?.hasCompletedAgreement ? "SIGNED" : "DRAFT"),
     selectedPlan: latestAgreement?.selectedPlan || client?.selectedPlan || "ESSENTIAL_GUARD",
-    planPrice: latestAgreement?.planPrice || (client?.selectedPlan === "GUARDIAN_PLUS" ? 1800 : 99),
+    planPrice: latestAgreement?.planPrice || defaultPlanPrice,
     hasCleaningAddon: latestAgreement?.hasCleaningAddon || client?.hasCleaningAddon || false,
     clientFullName: fullName,
     clientPrintedName: latestAgreement?.clientPrintedName || fullName,

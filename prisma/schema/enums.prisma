@@ -1,7 +1,6 @@
 enum UserRole {
   CLIENT
   ADMIN
-  TECHNICIAN
 }
 
 enum UserStatus {

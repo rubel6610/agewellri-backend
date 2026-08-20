@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const createSetupIntentSchema = z.object({
-  plan: z.enum(["ESSENTIAL_GUARD", "GUARDIAN_PLUS"]).optional(),
+  plan: z.enum(["ESSENTIAL_GUARD", "GUARDIAN_PLUS", "STANDALONE_CLEANING"]).optional(),
   hasCleaningAddon: z.boolean().optional(),
 });
 
@@ -9,7 +9,7 @@ export const createPaymentIntentSchema = z.object({
   amount: z.number().positive("Amount must be greater than zero"),
   currency: z.string().default("usd").optional(),
   description: z.string().optional(),
-  selectedPlan: z.enum(["ESSENTIAL_GUARD", "GUARDIAN_PLUS"]).optional(),
+  selectedPlan: z.enum(["ESSENTIAL_GUARD", "GUARDIAN_PLUS", "STANDALONE_CLEANING"]).optional(),
   hasCleaningAddon: z.boolean().optional(),
 });
 
@@ -25,7 +25,7 @@ export const processAgreementPaymentSchema = z.object({
   agreementId: z.string().optional(),
   paymentMethodId: z.string().optional(),
   setupIntentId: z.string().optional(),
-  selectedPlan: z.enum(["ESSENTIAL_GUARD", "GUARDIAN_PLUS"]).default("ESSENTIAL_GUARD"),
+  selectedPlan: z.enum(["ESSENTIAL_GUARD", "GUARDIAN_PLUS", "STANDALONE_CLEANING"]).default("ESSENTIAL_GUARD"),
   hasCleaningAddon: z.boolean().default(false),
 });
 
