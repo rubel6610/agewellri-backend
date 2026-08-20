@@ -12,6 +12,8 @@ model Invoice {
   issuedAt          DateTime?
   paidAt            DateTime?
   externalInvoiceId String?
+  stripeInvoiceId   String?
+  stripePaymentIntentId String?
   invoiceUrl        String?
   isArchived        Boolean       @default(false)
   createdAt         DateTime      @default(now())
@@ -38,6 +40,9 @@ model Payment {
   paymentMethod     BillingMethod @default(AUTOMATIC)
   externalProvider  String?
   externalPaymentId String?
+  stripePaymentIntentId String?
+  stripeChargeId    String?
+  receiptUrl        String?
   paidAt            DateTime?
   failedAt          DateTime?
   failureReason     String?

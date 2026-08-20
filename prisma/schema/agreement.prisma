@@ -21,6 +21,9 @@ model ServiceAgreement {
   signedAt             DateTime?
   executedAt           DateTime?
   cancelledAt          DateTime?
+  stripePaymentMethodId String?
+  stripeSetupIntentId   String?
+  stripeSubscriptionId  String?
   isArchived           Boolean         @default(false)
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt

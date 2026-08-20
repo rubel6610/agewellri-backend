@@ -24,9 +24,6 @@
     "seed:admin": "tsx prisma/seed.ts",
     "db:seed": "tsx prisma/seed.ts"
   },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
-  },
   "dependencies": {
     "@prisma/client": "^6.19.3",
     "bcryptjs": "^3.0.2",
@@ -36,6 +33,7 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.11.0",
     "nodemailer": "^9.0.5",
+    "stripe": "^22.5.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "zod": "^3.24.2"

@@ -8,8 +8,19 @@ import { requestLogger, errorLogger } from "./middlewares/logger.middleware";
 const app: Application = express();
 
 // Middlewares
-app.use(cors());
-app.use(express.json());
+app.use(
+  cors({
+    origin: ["http://localhost:5173",process.env.FRONTEND_URL!,],
+    credentials: true,
+  })
+);
+app.use(
+  express.json({
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true }));
 
 // Terminal Request Logger
@@ -33,4 +44,4 @@ app.use("/api/v1", routes);
 // Global Error Logger
 app.use(errorLogger);
 
-export default app;
+export default app;

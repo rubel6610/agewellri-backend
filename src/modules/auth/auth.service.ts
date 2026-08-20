@@ -3,6 +3,7 @@ import prisma from "../../lib/prisma";
 import { hashPassword, comparePassword } from "../../utils/password";
 import { generateToken, generateAuthTokens, verifyRefreshToken } from "../../utils/jwt";
 import { sendPasswordResetOtpEmail } from "../../utils/email";
+import { processAgreementPayment } from "../payment/payment.service";
 import {
   RegisterInput,
   LoginInput,
@@ -340,11 +341,11 @@ export async function submitClientAgreement(userId: string, input: SubmitAgreeme
   const finalPrice = input.hasCleaningAddon ? basePrice + 50 : basePrice;
 
   // Create ServiceAgreement record
-  const agreement = await prisma.serviceAgreement.create({
+  const agreement = await (prisma.serviceAgreement.create as any)({
     data: {
       clientId,
       templateVersion: "v1.0",
-      status: "SIGNED" as any,
+      status: "SIGNED",
       selectedPlan: input.selectedPlan,
       planPrice: finalPrice,
       hasCleaningAddon: input.hasCleaningAddon,
@@ -355,6 +356,8 @@ export async function submitClientAgreement(userId: string, input: SubmitAgreeme
       agreementDate: new Date(input.agreementDate),
       signedAt: new Date(),
       executedAt: new Date(),
+      stripePaymentMethodId: input.paymentMethodId || null,
+      stripeSetupIntentId: input.setupIntentId || null,
     },
   });
 
@@ -364,6 +367,21 @@ export async function submitClientAgreement(userId: string, input: SubmitAgreeme
       where: { id: userId },
       data: { phone: input.phone },
     });
+  }
+
+  // If payment method or setup intent was provided, provision active subscription & billing
+  if (input.paymentMethodId || input.setupIntentId) {
+    try {
+      await processAgreementPayment(userId, {
+        agreementId: agreement.id,
+        paymentMethodId: input.paymentMethodId || undefined,
+        setupIntentId: input.setupIntentId || undefined,
+        selectedPlan: input.selectedPlan,
+        hasCleaningAddon: input.hasCleaningAddon,
+      });
+    } catch (paymentErr) {
+      console.warn("⚠️ Agreement payment provisioning notice:", paymentErr);
+    }
   }
 
   const updatedProfile = await getUserProfile(userId);
@@ -396,8 +414,8 @@ export async function getMyAgreement(userId: string) {
     throw new Error("User not found.");
   }
 
-  const client = user.client;
-  const latestAgreement = client?.agreements?.[0];
+  const client = user.client as any;
+  const latestAgreement = client?.agreements?.[0] as any;
   const fullName = `${user.firstName} ${user.lastName}`.trim();
 
   return {
@@ -430,6 +448,10 @@ export async function getMyAgreement(userId: string) {
     emergencyContactPhone: client?.emergencyContactPhone,
     emergencyContactRelation: client?.emergencyContactRelation,
     clientNumber: client?.clientNumber,
+    stripePaymentMethodId: latestAgreement?.stripePaymentMethodId || client?.stripePaymentMethodId || null,
+    stripeSetupIntentId: latestAgreement?.stripeSetupIntentId || null,
+    cardBrand: client?.cardBrand || null,
+    cardLast4: client?.cardLast4 || null,
   };
 }
 

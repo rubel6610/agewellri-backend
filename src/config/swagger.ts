@@ -16,7 +16,7 @@ const options: swaggerJSDoc.Options = {
     },
     servers: [
       {
-        url: "http://localhost:3001",
+        url: "http://localhost:"+process.env.PORT,
         description: "Local Development Server",
       },
     ],
@@ -328,6 +328,151 @@ const options: swaggerJSDoc.Options = {
           responses: {
             "200": { description: "Password updated successfully" },
             "400": { description: "Incorrect current password or invalid input" },
+            "401": { description: "Unauthorized" },
+          },
+        },
+      },
+      "/api/v1/payments/config": {
+        get: {
+          tags: ["Payments & Stripe"],
+          summary: "Get Stripe Publishable Key",
+          description: "Returns the Stripe publishable key to initialize frontend Stripe Elements SDK.",
+          responses: {
+            "200": { description: "Stripe configuration retrieved" },
+          },
+        },
+      },
+      "/api/v1/payments/create-setup-intent": {
+        post: {
+          tags: ["Payments & Stripe"],
+          summary: "Create Stripe SetupIntent",
+          description: "Generates a SetupIntent clientSecret for saving a card during Agreement signing or billing management.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    plan: { type: "string", enum: ["ESSENTIAL_GUARD", "GUARDIAN_PLUS"] },
+                    hasCleaningAddon: { type: "boolean" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "SetupIntent created successfully" },
+            "401": { description: "Unauthorized" },
+          },
+        },
+      },
+      "/api/v1/payments/create-payment-intent": {
+        post: {
+          tags: ["Payments & Stripe"],
+          summary: "Create Stripe PaymentIntent",
+          description: "Generates a PaymentIntent clientSecret for charging a specific amount directly.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["amount"],
+                  properties: {
+                    amount: { type: "number", example: 99.0 },
+                    currency: { type: "string", example: "usd" },
+                    description: { type: "string", example: "Quarterly Safety Membership" },
+                    selectedPlan: { type: "string", enum: ["ESSENTIAL_GUARD", "GUARDIAN_PLUS"] },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "PaymentIntent created successfully" },
+            "400": { description: "Validation error" },
+            "401": { description: "Unauthorized" },
+          },
+        },
+      },
+      "/api/v1/payments/save-payment-method": {
+        post: {
+          tags: ["Payments & Stripe"],
+          summary: "Attach and save PaymentMethod",
+          description: "Attaches a confirmed Stripe payment method (pm_...) to the client customer record.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["paymentMethodId"],
+                  properties: {
+                    paymentMethodId: { type: "string", example: "pm_card_visa" },
+                    setAsDefault: { type: "boolean", default: true },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "Payment method attached successfully" },
+            "400": { description: "Invalid paymentMethodId" },
+            "401": { description: "Unauthorized" },
+          },
+        },
+      },
+      "/api/v1/payments/payment-methods": {
+        get: {
+          tags: ["Payments & Stripe"],
+          summary: "List saved payment methods",
+          description: "Retrieves all saved cards attached to the authenticated client's Stripe customer account.",
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": { description: "List of payment methods retrieved" },
+            "401": { description: "Unauthorized" },
+          },
+        },
+      },
+      "/api/v1/payments/billing-info": {
+        get: {
+          tags: ["Payments & Stripe"],
+          summary: "Get Billing Overview & Invoices",
+          description: "Returns client active subscription plan, stored card details, renewal date, and invoice history.",
+          security: [{ bearerAuth: [] }],
+          responses: {
+            "200": { description: "Billing information retrieved" },
+            "401": { description: "Unauthorized" },
+          },
+        },
+      },
+      "/api/v1/payments/process-agreement-payment": {
+        post: {
+          tags: ["Payments & Stripe"],
+          summary: "Process Agreement Payment & Activate Membership",
+          description: "Attaches Stripe payment method, provisions the client's quarterly subscription, visit allocations, and generates the initial invoice.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    paymentMethodId: { type: "string", example: "pm_card_visa" },
+                    setupIntentId: { type: "string", example: "seti_12345" },
+                    selectedPlan: { type: "string", enum: ["ESSENTIAL_GUARD", "GUARDIAN_PLUS"], default: "ESSENTIAL_GUARD" },
+                    hasCleaningAddon: { type: "boolean", default: false },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "Agreement payment processed and membership activated" },
+            "400": { description: "Invalid input" },
             "401": { description: "Unauthorized" },
           },
         },

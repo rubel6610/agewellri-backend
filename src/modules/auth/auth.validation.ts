@@ -56,6 +56,8 @@ export const submitAgreementSchema = z.object({
   emergencyContactRelation: z.string().optional().nullable(),
   selectedPlan: z.enum(["ESSENTIAL_GUARD", "GUARDIAN_PLUS"]).default("ESSENTIAL_GUARD"),
   hasCleaningAddon: z.boolean().default(false),
+  paymentMethodId: z.string().optional().nullable(),
+  setupIntentId: z.string().optional().nullable(),
   clientPrintedName: z.string().min(1, "Printed name is required"),
   authorizedRepName: z.string().optional().nullable(),
   relationshipToClient: z.string().optional().nullable(),

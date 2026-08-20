@@ -20,6 +20,12 @@ model Client {
   hasCleaningAddon         Boolean          @default(false)
   hasCompletedAgreement    Boolean          @default(false)
   onboardingStatus         OnboardingStatus @default(INVITED)
+  stripeCustomerId         String?          @unique
+  stripePaymentMethodId    String?
+  cardBrand                String?
+  cardLast4                String?
+  cardExpMonth             Int?
+  cardExpYear              Int?
   isArchived               Boolean          @default(false)
   archivedAt               DateTime?
   createdAt                DateTime         @default(now())
