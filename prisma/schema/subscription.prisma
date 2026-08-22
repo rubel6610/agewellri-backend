@@ -4,6 +4,12 @@ model Subscription {
   client                  Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
   planId                  String             @db.ObjectId
   plan                    ServicePlan        @relation(fields: [planId], references: [id], onDelete: Restrict)
+  planVersionId           String?            @db.ObjectId
+  planVersion             PlanVersion?       @relation(fields: [planVersionId], references: [id], onDelete: SetNull)
+  planPriceId             String?            @db.ObjectId
+  planPrice               PlanPrice?         @relation(fields: [planPriceId], references: [id], onDelete: SetNull)
+  contractedPrice         Float?
+  currency                String             @default("USD")
   status                  SubscriptionStatus @default(PENDING)
   billingInterval         BillingInterval    @default(QUARTERLY)
   billingMethod           BillingMethod      @default(AUTOMATIC)
@@ -11,6 +17,7 @@ model Subscription {
   currentPeriodEnd        DateTime
   nextRenewalDate         DateTime?
   autoRenew               Boolean            @default(true)
+  cancelAtPeriodEnd       Boolean            @default(false)
   cancellationRequestedAt DateTime?
   cancellationReason      String?
   cancellationEffectiveAt DateTime?
@@ -33,15 +40,19 @@ model Subscription {
 }
 
 model SubscriptionPeriod {
-  id             String       @id @default(auto()) @map("_id") @db.ObjectId
-  subscriptionId String       @db.ObjectId
-  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-  periodNumber   Int
-  startDate      DateTime
-  endDate        DateTime
-  isCurrent      Boolean      @default(false)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id              String       @id @default(auto()) @map("_id") @db.ObjectId
+  subscriptionId  String       @db.ObjectId
+  subscription    Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  periodNumber    Int
+  startDate       DateTime
+  endDate         DateTime
+  isCurrent       Boolean      @default(false)
+  status          String       @default("ACTIVE")
+  amount          Float?
+  contractedPrice Float?
+  currency        String       @default("USD")
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   allocations            VisitAllocation[]
   appointments           Appointment[]

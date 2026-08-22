@@ -1,11 +1,13 @@
 import "dotenv/config";
 import bcrypt from "bcryptjs";
 import { PrismaClient, UserRole, UserStatus } from "@prisma/client";
+import { seedInitialPlansAndServices } from "../src/modules/plan/plan.service";
+import { seedDefaultSpecialists } from "../src/modules/specialist/specialist.service";
 
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log("🌱 Starting Admin Seeding...");
+  console.log("🌱 Starting Admin, Plans and Specialists Seeding...");
 
   const adminEmail = (process.env.ADMIN_EMAIL || "admin@yopmail.com").toLowerCase().trim();
   const adminPassword = process.env.ADMIN_PASSWORD || "Admin123!";
@@ -48,11 +50,19 @@ async function main() {
   console.log(`🟢 Status:   ${adminUser.status}`);
   console.log(`🆔 ID:       ${adminUser.id}`);
   console.log("=======================================================\n");
+
+  console.log("📦 Seeding initial dynamic service plans & catalog...");
+  await seedInitialPlansAndServices();
+  console.log("✅ Service plans & services catalog ready!");
+
+  console.log("👷 Seeding default Rhode Island safety specialists...");
+  await seedDefaultSpecialists();
+  console.log("✅ Default specialists created successfully!\n");
 }
 
 main()
   .catch((e) => {
-    console.error("❌ Error seeding admin user:", e);
+    console.error("❌ Error seeding database:", e);
     process.exit(1);
   })
   .finally(async () => {

@@ -3,6 +3,8 @@ import { authenticate } from "../../middlewares/auth.middleware";
 import {
   handleRegister,
   handleLogin,
+  handleRequestSmsOtp,
+  handleVerifySmsOtp,
   handleGetMe,
   handleUpdateProfile,
   handleSubmitAgreement,
@@ -19,6 +21,8 @@ const router = Router();
 // Public routes
 router.post("/register", handleRegister);
 router.post("/login", handleLogin);
+router.post("/sms-otp/request", handleRequestSmsOtp);
+router.post("/sms-otp/verify", handleVerifySmsOtp);
 router.post("/forgot-password", handleForgotPassword);
 router.post("/verify-otp", handleVerifyOtp);
 router.post("/reset-password", handleResetPassword);
@@ -33,6 +37,3 @@ router.get("/my-agreement", authenticate, handleGetMyAgreement);
 router.patch("/change-password", authenticate, handleChangePassword);
 
 export default router;
-
-
-

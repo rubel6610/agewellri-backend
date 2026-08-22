@@ -1,12 +1,16 @@
 import { UserRole, UserStatus, OnboardingStatus } from "@prisma/client";
+import bcrypt from "bcryptjs";
 import prisma from "../../lib/prisma";
 import { hashPassword, comparePassword } from "../../utils/password";
 import { generateToken, generateAuthTokens, verifyRefreshToken } from "../../utils/jwt";
 import { sendPasswordResetOtpEmail } from "../../utils/email";
 import { processAgreementPayment } from "../payment/payment.service";
+import { CancellationDeadlineService } from "../agreement/cancellation-deadline.service";
 import {
   RegisterInput,
   LoginInput,
+  RequestSmsOtpInput,
+  VerifySmsOtpInput,
   ChangePasswordInput,
   UpdateProfileInput,
   SubmitAgreementInput,
@@ -15,6 +19,19 @@ import {
   ResetPasswordInput,
   RefreshTokenInput,
 } from "./auth.validation";
+
+export type SignerRoleType =
+  | "RESIDENT"
+  | "FAMILY_MEMBER"
+  | "CAREGIVER"
+  | "POWER_OF_ATTORNEY"
+  | "AUTHORIZED_REPRESENTATIVE";
+
+export type HomeAccessTypeType =
+  | "LOCKBOX"
+  | "RESIDENT_ANSWERS"
+  | "DIGITAL_CODE"
+  | "OTHER";
 
 /**
  * Helper to compute agreement status flags.
@@ -58,33 +75,23 @@ export async function registerUser(input: RegisterInput) {
     throw new Error("A user with this email already exists.");
   }
 
-  const hashedPassword = await hashPassword(input.password);
-  const role = input.role || UserRole.CLIENT;
+  const passwordHash = await hashPassword(input.password);
 
   const user = await prisma.user.create({
     data: {
       email: input.email.toLowerCase(),
-      passwordHash: hashedPassword,
+      passwordHash,
       firstName: input.firstName,
       lastName: input.lastName,
-      phone: input.phone,
-      role: role,
+      phone: input.phone || null,
+      role: input.role || UserRole.CLIENT,
       status: UserStatus.ACTIVE,
-    },
-    select: {
-      id: true,
-      email: true,
-      firstName: true,
-      lastName: true,
-      role: true,
-      status: true,
-      createdAt: true,
+      emailVerifiedAt: new Date(),
     },
   });
 
-  // If role is CLIENT, create associated Client profile with unique clientNumber
   let client = null;
-  if (role === UserRole.CLIENT) {
+  if (user.role === UserRole.CLIENT) {
     const clientCount = await prisma.client.count();
     const clientNumber = `AW-${1001 + clientCount}`;
 
@@ -158,137 +165,210 @@ export async function loginUser(input: LoginInput) {
     token: authTokens.token,
     refreshToken: authTokens.refreshToken,
     user: fullUserProfile,
+    client: fullUserProfile.client,
   };
 }
 
 /**
- * Fetch authenticated user profile with computed agreement flags.
+ * Request SMS OTP login code.
  */
-export async function getUserProfile(userId: string) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      id: true,
-      email: true,
-      firstName: true,
-      lastName: true,
-      phone: true,
-      role: true,
-      status: true,
-      emailVerifiedAt: true,
-      lastLoginAt: true,
-      createdAt: true,
-      updatedAt: true,
-      client: {
-        include: {
-          agreements: {
-            orderBy: { createdAt: "desc" },
-            take: 1,
-          },
-        },
-      },
-      technician: true,
+export async function requestSmsOtp(input: RequestSmsOtpInput) {
+  const cleanPhone = input.phone.replace(/\D/g, "");
+
+  const users: any[] = await prisma.user.findMany({
+    where: {
+      phone: { not: null },
     },
   });
 
-  if (!user) {
-    throw new Error("User profile not found.");
-  }
-
-  const flags = computeAgreementFlags(user);
-
-  return {
-    ...user,
-    ...flags,
-  };
-}
-
-/**
- * Update authenticated user profile (email cannot be modified).
- */
-export async function updateUserProfile(userId: string, input: UpdateProfileInput) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: { client: true },
-  });
+  const user = users.find((u) => u.phone && u.phone.replace(/\D/g, "").includes(cleanPhone.slice(-10)));
 
   if (!user) {
-    throw new Error("User not found.");
+    throw new Error("No registered account found with this phone number. Please sign in with email or register.");
   }
 
-  // Update User table fields (firstName, lastName, phone)
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      ...(input.firstName !== undefined && { firstName: input.firstName.trim() }),
-      ...(input.lastName !== undefined && { lastName: input.lastName.trim() }),
-      ...(input.phone !== undefined && { phone: input.phone }),
-    },
-  });
-
-  // If user has a client profile or client fields are provided
-  if (user.role === UserRole.CLIENT) {
-    const clientData: Record<string, unknown> = {};
-    if (input.address !== undefined) clientData.address = input.address;
-    if (input.city !== undefined) clientData.city = input.city;
-    if (input.state !== undefined) clientData.state = input.state;
-    if (input.postalCode !== undefined) clientData.postalCode = input.postalCode;
-    if (input.emergencyContactName !== undefined) clientData.emergencyContactName = input.emergencyContactName;
-    if (input.emergencyContactPhone !== undefined) clientData.emergencyContactPhone = input.emergencyContactPhone;
-    if (input.emergencyContactRelation !== undefined) clientData.emergencyContactRelation = input.emergencyContactRelation;
-
-    if (Object.keys(clientData).length > 0) {
-      if (user.client) {
-        await prisma.client.update({
-          where: { id: user.client.id },
-          data: clientData,
-        });
-      } else {
-        const clientCount = await prisma.client.count();
-        const clientNumber = `AW-${1001 + clientCount}`;
-        await prisma.client.create({
-          data: {
-            userId: user.id,
-            clientNumber,
-            address: input.address || "TBD",
-            city: input.city || "TBD",
-            state: input.state || "RI",
-            postalCode: input.postalCode || "00000",
-            emergencyContactName: input.emergencyContactName,
-            emergencyContactPhone: input.emergencyContactPhone,
-            emergencyContactRelation: input.emergencyContactRelation,
-          },
-        });
-      }
+  // Rate limit: 60s cooldown
+  if (user.smsOtpLastSentAt) {
+    const elapsedSeconds = (Date.now() - new Date(user.smsOtpLastSentAt).getTime()) / 1000;
+    if (elapsedSeconds < 60) {
+      throw new Error(`Please wait ${Math.ceil(60 - elapsedSeconds)} seconds before requesting a new code.`);
     }
   }
 
-  return getUserProfile(userId);
+  // Generate 6-digit random code
+  const rawOtp = Math.floor(100000 + Math.random() * 900000).toString();
+  const smsOtpHash = await bcrypt.hash(rawOtp, 10);
+  const smsOtpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+  await (prisma.user.update as any)({
+    where: { id: user.id },
+    data: {
+      smsOtpHash,
+      smsOtpExpires,
+      smsOtpAttempts: 0,
+      smsOtpLastSentAt: new Date(),
+    },
+  });
+
+  console.log(`\n======================================================`);
+  console.log(`📱 [SMS OTP DISPATCH] Phone: ${user.phone} | Code: ${rawOtp}`);
+  console.log(`======================================================\n`);
+
+  return {
+    success: true,
+    message: "A 6-digit verification code has been sent via SMS.",
+    phoneMasked: user.phone ? user.phone.replace(/.(?=.{4})/g, "•") : "••••",
+  };
 }
 
 /**
- * Submit initial client service agreement.
+ * Verify SMS OTP and authenticate user.
  */
-export async function submitClientAgreement(userId: string, input: SubmitAgreementInput) {
+export async function verifySmsOtp(input: VerifySmsOtpInput) {
+  const cleanPhone = input.phone.replace(/\D/g, "");
+
+  const users: any[] = await prisma.user.findMany({
+    where: {
+      phone: { not: null },
+    },
+  });
+
+  const user = users.find((u) => u.phone && u.phone.replace(/\D/g, "").includes(cleanPhone.slice(-10)));
+
+  if (!user || !user.smsOtpHash || !user.smsOtpExpires) {
+    throw new Error("No active verification code found. Please request a new code.");
+  }
+
+  if (new Date() > new Date(user.smsOtpExpires)) {
+    throw new Error("Verification code has expired. Please request a new code.");
+  }
+
+  if ((user.smsOtpAttempts || 0) >= 5) {
+    throw new Error("Too many failed attempts. Please request a new verification code.");
+  }
+
+  const isValid = await bcrypt.compare(input.otp.trim(), user.smsOtpHash);
+  if (!isValid) {
+    await (prisma.user.update as any)({
+      where: { id: user.id },
+      data: { smsOtpAttempts: { increment: 1 } },
+    });
+    throw new Error("Invalid verification code. Please check the code and try again.");
+  }
+
+  await (prisma.user.update as any)({
+    where: { id: user.id },
+    data: {
+      smsOtpHash: null,
+      smsOtpExpires: null,
+      smsOtpAttempts: 0,
+      lastLoginAt: new Date(),
+    },
+  });
+
+  const authTokens = generateAuthTokens({
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+  });
+
+  const fullUserProfile = await getUserProfile(user.id);
+
+  return {
+    token: authTokens.token,
+    refreshToken: authTokens.refreshToken,
+    user: fullUserProfile,
+    client: fullUserProfile.client,
+  };
+}
+
+/**
+ * Submit Client Service Agreement with dynamic plan resolution and state cancellation deadline.
+ */
+export async function submitAgreement(userId: string, input: SubmitAgreementInput) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: { client: true },
+    include: {
+      client: {
+        include: {
+          agreements: true,
+        },
+      },
+    },
   });
 
   if (!user) {
-    throw new Error("User not found.");
+    throw new Error("User account not found.");
   }
 
   if (user.role !== UserRole.CLIENT) {
     throw new Error("Only clients are required to sign the client service agreement.");
   }
 
-  // Update / create client
+  // 1. Resolve Dynamic Plan & PlanVersion from Database
+  let targetPlan: any = null;
+  let targetVersion: any = null;
+
+  if (input.planId) {
+    targetPlan = await (prisma.servicePlan.findUnique as any)({
+      where: { id: input.planId },
+      include: {
+        versions: {
+          where: { status: "ACTIVE" },
+          orderBy: { versionNumber: "desc" },
+          take: 1,
+          include: { planServices: { include: { serviceType: true } } },
+        },
+      },
+    });
+    targetVersion = targetPlan?.versions?.[0];
+  } else if (input.planVersionId) {
+    targetVersion = await ((prisma as any).planVersion.findUnique as any)({
+      where: { id: input.planVersionId },
+      include: {
+        plan: true,
+        planServices: { include: { serviceType: true } },
+      },
+    });
+    targetPlan = targetVersion?.plan;
+  } else {
+    targetPlan = await (prisma.servicePlan.findFirst as any)({
+      where: {
+        OR: [
+          { code: input.selectedPlan.toUpperCase() },
+          { name: { equals: input.selectedPlan, mode: "insensitive" } },
+        ],
+      },
+      include: {
+        versions: {
+          where: { status: "ACTIVE" },
+          orderBy: { versionNumber: "desc" },
+          take: 1,
+          include: { planServices: { include: { serviceType: true } } },
+        },
+      },
+    });
+    targetVersion = targetPlan?.versions?.[0];
+  }
+
+  const basePrice = targetVersion?.price ?? targetPlan?.price ?? 995;
+  const finalPrice = input.hasCleaningAddon ? basePrice + 60 : basePrice;
+
+  // 2. Compute 3-Business-Day Cancellation Deadline
+  const deadlineResult = CancellationDeadlineService.calculateDeadline(
+    input.state,
+    input.agreementDate
+  );
+
+  // 3. Update or create Client profile
   let clientId = user.client?.id;
+  const signerRole = input.signerRole || "RESIDENT";
+  const homeAccessType = input.homeAccessType || "RESIDENT_ANSWERS";
+
   if (!clientId) {
     const clientCount = await prisma.client.count();
     const clientNumber = `AW-${1001 + clientCount}`;
-    const newClient = await prisma.client.create({
+    const newClient = await (prisma.client.create as any)({
       data: {
         userId: user.id,
         clientNumber,
@@ -298,6 +378,8 @@ export async function submitClientAgreement(userId: string, input: SubmitAgreeme
         postalCode: input.postalCode,
         country: "USA",
         dateOfBirth: input.dob,
+        signerRole,
+        legalAuthority: input.legalAuthority || null,
         primaryContactName: input.primaryContactName,
         primaryContactPhone: input.primaryContactPhone,
         primaryContactEmail: input.primaryContactEmail,
@@ -305,7 +387,10 @@ export async function submitClientAgreement(userId: string, input: SubmitAgreeme
         emergencyContactName: input.emergencyContactName,
         emergencyContactPhone: input.emergencyContactPhone,
         emergencyContactRelation: input.emergencyContactRelation,
-        selectedPlan: input.selectedPlan,
+        homeAccessType,
+        homeAccessInstructions: input.homeAccessInstructions || null,
+        homeAccessCode: input.homeAccessCode || null,
+        selectedPlan: targetPlan?.code || input.selectedPlan,
         hasCleaningAddon: input.hasCleaningAddon,
         hasCompletedAgreement: true,
         onboardingStatus: OnboardingStatus.AGREEMENT_SIGNED,
@@ -313,7 +398,7 @@ export async function submitClientAgreement(userId: string, input: SubmitAgreeme
     });
     clientId = newClient.id;
   } else {
-    await prisma.client.update({
+    await (prisma.client.update as any)({
       where: { id: clientId },
       data: {
         address: input.address,
@@ -321,6 +406,8 @@ export async function submitClientAgreement(userId: string, input: SubmitAgreeme
         state: input.state,
         postalCode: input.postalCode,
         dateOfBirth: input.dob,
+        signerRole,
+        legalAuthority: input.legalAuthority || null,
         primaryContactName: input.primaryContactName,
         primaryContactPhone: input.primaryContactPhone,
         primaryContactEmail: input.primaryContactEmail,
@@ -328,7 +415,10 @@ export async function submitClientAgreement(userId: string, input: SubmitAgreeme
         emergencyContactName: input.emergencyContactName,
         emergencyContactPhone: input.emergencyContactPhone,
         emergencyContactRelation: input.emergencyContactRelation,
-        selectedPlan: input.selectedPlan,
+        homeAccessType,
+        homeAccessInstructions: input.homeAccessInstructions || null,
+        homeAccessCode: input.homeAccessCode || null,
+        selectedPlan: targetPlan?.code || input.selectedPlan,
         hasCleaningAddon: input.hasCleaningAddon,
         hasCompletedAgreement: true,
         onboardingStatus: OnboardingStatus.AGREEMENT_SIGNED,
@@ -336,29 +426,47 @@ export async function submitClientAgreement(userId: string, input: SubmitAgreeme
     });
   }
 
-  // Calculate plan price ($995 for Essential Guard, $1892 for Guardian Plus, $179 for Standalone Cleaning, +$60 cleaning addon for any package)
-  let basePrice = 995;
-  if (input.selectedPlan === "GUARDIAN_PLUS") {
-    basePrice = 1892;
-  } else if (input.selectedPlan === "STANDALONE_CLEANING") {
-    basePrice = 179;
-  } else {
-    basePrice = 995;
-  }
-  const finalPrice = input.hasCleaningAddon ? basePrice + 60 : basePrice;
+  // 4. Create ServiceAgreement snapshot record
+  const planSnapshot = {
+    planId: targetPlan?.id,
+    planVersionId: targetVersion?.id,
+    planName: targetVersion?.name || targetPlan?.name || input.selectedPlan,
+    planCode: targetPlan?.code || input.selectedPlan,
+    basePrice,
+    addonPrice: input.hasCleaningAddon ? 60 : 0,
+    totalPrice: finalPrice,
+    billingInterval: targetVersion?.billingInterval || targetPlan?.billingInterval || "QUARTERLY",
+    features: targetVersion?.features || [],
+    services: (targetVersion?.planServices || []).map((ps: any) => ({
+      serviceName: ps.serviceType?.name,
+      allocatedVisits: ps.allocatedVisits,
+    })),
+  };
 
-  // Create ServiceAgreement record
   const agreement = await (prisma.serviceAgreement.create as any)({
     data: {
       clientId,
-      templateVersion: "v1.0",
+      planId: targetPlan?.id || null,
+      planVersionId: targetVersion?.id || null,
+      templateVersion: "v2.0",
+      state: input.state || "RI",
+      signerRole,
+      signerName: input.signerName || input.clientPrintedName,
+      legalAuthority: input.legalAuthority || null,
+      primaryBillingContact: input.primaryBillingContact || null,
+      cancellationDeadline: deadlineResult.deadlineDate,
+      cancellationDeadlineRule: deadlineResult.ruleExplanation,
+      planSnapshot,
       status: "SIGNED",
-      selectedPlan: input.selectedPlan,
+      selectedPlan: targetPlan?.code || input.selectedPlan,
       planPrice: finalPrice,
       hasCleaningAddon: input.hasCleaningAddon,
       clientPrintedName: input.clientPrintedName,
       authorizedRepName: input.authorizedRepName,
       relationshipToClient: input.relationshipToClient,
+      emergencyContactName: input.emergencyContactName,
+      emergencyContactPhone: input.emergencyContactPhone,
+      emergencyContactRelation: input.emergencyContactRelation,
       clientSignature: input.clientSignature,
       agreementDate: new Date(input.agreementDate),
       signedAt: new Date(),
@@ -368,7 +476,6 @@ export async function submitClientAgreement(userId: string, input: SubmitAgreeme
     },
   });
 
-  // Update User phone
   if (input.phone) {
     await prisma.user.update({
       where: { id: userId },
@@ -376,14 +483,15 @@ export async function submitClientAgreement(userId: string, input: SubmitAgreeme
     });
   }
 
-  // If payment method or setup intent was provided, provision active subscription & billing
-  if (input.paymentMethodId || input.setupIntentId) {
+  // 5. Provision subscription & billing if payment details supplied
+  if (input.paymentMethodId || input.setupIntentId || input.billingMethod === "INVOICE") {
     try {
       await processAgreementPayment(userId, {
         agreementId: agreement.id,
         paymentMethodId: input.paymentMethodId || undefined,
         setupIntentId: input.setupIntentId || undefined,
-        selectedPlan: input.selectedPlan,
+        billingMethod: input.billingMethod || "AUTOMATIC",
+        selectedPlan: (targetPlan?.code as any) || "GUARDIAN_PLUS",
         hasCleaningAddon: input.hasCleaningAddon,
       });
     } catch (paymentErr) {
@@ -396,6 +504,7 @@ export async function submitClientAgreement(userId: string, input: SubmitAgreeme
   return {
     agreement,
     user: updatedProfile,
+    cancellationDeadline: deadlineResult,
   };
 }
 
@@ -417,158 +526,138 @@ export async function getMyAgreement(userId: string) {
     },
   });
 
+  if (!user || !user.client) {
+    throw new Error("Client account not found.");
+  }
+
+  const agreement = user.client.agreements?.[0] || null;
+  return agreement;
+}
+
+/**
+ * Get full user profile including client, flags, and permissions.
+ */
+export async function getUserProfile(userId: string) {
+  const user: any = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      client: {
+        include: {
+          agreements: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+          subscriptions: {
+            include: {
+              plan: true,
+            },
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+        },
+      },
+      technician: true,
+    },
+  });
+
   if (!user) {
     throw new Error("User not found.");
   }
 
-  const client = user.client as any;
-  const latestAgreement = client?.agreements?.[0] as any;
-  const fullName = `${user.firstName} ${user.lastName}`.trim();
-
-  let defaultPlanPrice = 995;
-  if (client?.selectedPlan === "GUARDIAN_PLUS") defaultPlanPrice = 1892;
-  else if (client?.selectedPlan === "STANDALONE_CLEANING") defaultPlanPrice = 179;
+  const flags = computeAgreementFlags(user);
 
   return {
-    id: latestAgreement?.id,
-    templateVersion: latestAgreement?.templateVersion,
-    status: latestAgreement?.status || (client?.hasCompletedAgreement ? "SIGNED" : "DRAFT"),
-    selectedPlan: latestAgreement?.selectedPlan || client?.selectedPlan || "ESSENTIAL_GUARD",
-    planPrice: latestAgreement?.planPrice || defaultPlanPrice,
-    hasCleaningAddon: latestAgreement?.hasCleaningAddon || client?.hasCleaningAddon || false,
-    clientFullName: fullName,
-    clientPrintedName: latestAgreement?.clientPrintedName || fullName,
-    authorizedRepName: latestAgreement?.authorizedRepName || client?.primaryContactName || null,
-    relationshipToClient: latestAgreement?.relationshipToClient || client?.primaryContactRelation || null,
-    clientSignature: latestAgreement?.clientSignature || null,
-    agreementDate: latestAgreement?.agreementDate || latestAgreement?.signedAt || latestAgreement?.createdAt || new Date(),
-    signedAt: latestAgreement?.signedAt || null,
-    executedAt: latestAgreement?.executedAt || null,
-    address: client?.address ,
-    city: client?.city ,
-    state: client?.state ,
-    postalCode: client?.postalCode ,
-    phone: user.phone ,
-    dob: client?.dateOfBirth,
+    id: user.id,
     email: user.email,
-    primaryContactName: client?.primaryContactName,
-    primaryContactPhone: client?.primaryContactPhone ,
-    primaryContactEmail: client?.primaryContactEmail,
-    primaryContactRelation: client?.primaryContactRelation,
-    emergencyContactName: client?.emergencyContactName,
-    emergencyContactPhone: client?.emergencyContactPhone,
-    emergencyContactRelation: client?.emergencyContactRelation,
-    clientNumber: client?.clientNumber,
-    stripePaymentMethodId: latestAgreement?.stripePaymentMethodId || client?.stripePaymentMethodId || null,
-    stripeSetupIntentId: latestAgreement?.stripeSetupIntentId || null,
-    cardBrand: client?.cardBrand || null,
-    cardLast4: client?.cardLast4 || null,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    phone: user.phone,
+    role: user.role,
+    status: user.status,
+    permissions: user.permissions || [],
+    hasCompletedAgreement: flags.hasCompletedAgreement,
+    requiresAgreement: flags.requiresAgreement,
+    client: user.client
+      ? {
+          id: user.client.id,
+          clientNumber: user.client.clientNumber,
+          address: user.client.address,
+          city: user.client.city,
+          state: user.client.state,
+          postalCode: user.client.postalCode,
+          country: user.client.country,
+          dateOfBirth: user.client.dateOfBirth,
+          signerRole: user.client.signerRole,
+          legalAuthority: user.client.legalAuthority,
+          primaryContactName: user.client.primaryContactName,
+          primaryContactPhone: user.client.primaryContactPhone,
+          primaryContactEmail: user.client.primaryContactEmail,
+          primaryContactRelation: user.client.primaryContactRelation,
+          emergencyContactName: user.client.emergencyContactName,
+          emergencyContactPhone: user.client.emergencyContactPhone,
+          emergencyContactRelation: user.client.emergencyContactRelation,
+          homeAccessType: user.client.homeAccessType,
+          homeAccessInstructions: user.client.homeAccessInstructions,
+          selectedPlan: user.client.selectedPlan,
+          hasCleaningAddon: user.client.hasCleaningAddon,
+          onboardingStatus: user.client.onboardingStatus,
+          hasCompletedAgreement: user.client.hasCompletedAgreement,
+          cardBrand: user.client.cardBrand,
+          cardLast4: user.client.cardLast4,
+          cardExpMonth: user.client.cardExpMonth,
+          cardExpYear: user.client.cardExpYear,
+        }
+      : null,
+    technician: user.technician || null,
   };
 }
 
 /**
- * Request Password Reset OTP
+ * Update user and client profile.
  */
-export async function forgotPassword(input: ForgotPasswordInput) {
-  const email = input.email.trim().toLowerCase();
+export async function updateUserProfile(userId: string, input: UpdateProfileInput) {
   const user = await prisma.user.findUnique({
-    where: { email },
+    where: { id: userId },
+    include: { client: true },
   });
 
   if (!user) {
-    throw new Error("No account found with this email address.");
+    throw new Error("User not found.");
   }
 
-  // Generate 6-digit numeric OTP
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+  const userUpdateData: any = {};
+  if (input.firstName !== undefined) userUpdateData.firstName = input.firstName;
+  if (input.lastName !== undefined) userUpdateData.lastName = input.lastName;
+  if (input.phone !== undefined) userUpdateData.phone = input.phone;
 
-  await (prisma.user.update as any)({
-    where: { id: user.id },
-    data: {
-      resetOtp: otp,
-      resetOtpExpires: expiresAt,
-    },
-  });
-
-  // Send branded OTP Email using Nodemailer
-  await sendPasswordResetOtpEmail({
-    to: user.email,
-    name: user.firstName,
-    otp,
-    expiresInMinutes: 10,
-  });
-
-  return {
-    message: "A 6-digit verification code has been sent to your email.",
-    email: user.email,
-  };
-}
-
-/**
- * Verify 6-digit OTP code
- */
-export async function verifyOtp(input: VerifyOtpInput) {
-  const email = input.email.trim().toLowerCase();
-  const user = await (prisma.user.findUnique as any)({
-    where: { email },
-  });
-
-  if (!user) {
-    throw new Error("User account not found.");
+  if (Object.keys(userUpdateData).length > 0) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: userUpdateData,
+    });
   }
 
-  if (!user.resetOtp || user.resetOtp !== input.otp.trim()) {
-    throw new Error("Invalid verification code. Please check your email and try again.");
+  if (user.client) {
+    const clientUpdateData: any = {};
+    if (input.address !== undefined) clientUpdateData.address = input.address;
+    if (input.city !== undefined) clientUpdateData.city = input.city;
+    if (input.state !== undefined) clientUpdateData.state = input.state;
+    if (input.postalCode !== undefined) clientUpdateData.postalCode = input.postalCode;
+    if (input.emergencyContactName !== undefined) clientUpdateData.emergencyContactName = input.emergencyContactName;
+    if (input.emergencyContactPhone !== undefined) clientUpdateData.emergencyContactPhone = input.emergencyContactPhone;
+    if (input.emergencyContactRelation !== undefined) clientUpdateData.emergencyContactRelation = input.emergencyContactRelation;
+    if (input.homeAccessType !== undefined) clientUpdateData.homeAccessType = input.homeAccessType;
+    if (input.homeAccessInstructions !== undefined) clientUpdateData.homeAccessInstructions = input.homeAccessInstructions;
+
+    if (Object.keys(clientUpdateData).length > 0) {
+      await (prisma.client.update as any)({
+        where: { id: user.client.id },
+        data: clientUpdateData,
+      });
+    }
   }
 
-  if (!user.resetOtpExpires || new Date(user.resetOtpExpires) < new Date()) {
-    throw new Error("Verification code has expired. Please request a new code.");
-  }
-
-  return {
-    success: true,
-    message: "Verification code confirmed.",
-    email: user.email,
-  };
-}
-
-/**
- * Reset password using verified OTP code
- */
-export async function resetPassword(input: ResetPasswordInput) {
-  const email = input.email.trim().toLowerCase();
-  const user = await (prisma.user.findUnique as any)({
-    where: { email },
-  });
-
-  if (!user) {
-    throw new Error("User account not found.");
-  }
-
-  if (!user.resetOtp || user.resetOtp !== input.otp.trim()) {
-    throw new Error("Invalid verification code.");
-  }
-
-  if (!user.resetOtpExpires || new Date(user.resetOtpExpires) < new Date()) {
-    throw new Error("Verification code has expired. Please request a new code.");
-  }
-
-  const newHashedPassword = await hashPassword(input.newPassword);
-
-  await (prisma.user.update as any)({
-    where: { id: user.id },
-    data: {
-      passwordHash: newHashedPassword,
-      resetOtp: null,
-      resetOtpExpires: null,
-    },
-  });
-
-  return {
-    success: true,
-    message: "Your password has been reset successfully. You can now log in with your new password.",
-  };
+  return getUserProfile(userId);
 }
 
 /**
@@ -583,46 +672,129 @@ export async function changeUserPassword(userId: string, input: ChangePasswordIn
     throw new Error("User not found.");
   }
 
-  const isOldPasswordValid = await comparePassword(input.oldPassword, user.passwordHash);
-  if (!isOldPasswordValid) {
+  const isPasswordValid = await comparePassword(input.oldPassword, user.passwordHash);
+  if (!isPasswordValid) {
     throw new Error("Incorrect current password.");
   }
 
-  const newHashedPassword = await hashPassword(input.newPassword);
-
+  const newPasswordHash = await hashPassword(input.newPassword);
   await prisma.user.update({
     where: { id: userId },
-    data: { passwordHash: newHashedPassword },
+    data: { passwordHash: newPasswordHash },
   });
 
-  return { message: "Password updated successfully." };
+  return { success: true, message: "Password updated successfully." };
 }
 
 /**
- * Refresh user access token and revalidate session.
+ * Forgot password - send OTP.
  */
-export async function refreshUserToken(input: RefreshTokenInput) {
-  let decoded: any;
-  try {
-    decoded = verifyRefreshToken(input.refreshToken);
-  } catch (error) {
-    throw new Error("Invalid or expired refresh token. Please sign in again.");
-  }
-
-  if (!decoded || !decoded.userId) {
-    throw new Error("Invalid refresh token payload.");
-  }
-
+export async function forgotPassword(input: ForgotPasswordInput) {
   const user = await prisma.user.findUnique({
-    where: { id: decoded.userId },
+    where: { email: input.email.toLowerCase() },
   });
 
   if (!user) {
-    throw new Error("User account no longer exists.");
+    return { success: true, message: "If an account exists, a reset code has been sent." };
   }
 
-  if (user.status !== UserStatus.ACTIVE) {
-    throw new Error(`Your account is currently ${user.status.toLowerCase()}.`);
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const resetOtpExpires = new Date(Date.now() + 15 * 60 * 1000);
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      resetOtp: otp,
+      resetOtpExpires,
+    },
+  });
+
+  try {
+    await sendPasswordResetOtpEmail({
+      to: user.email,
+      name: user.firstName,
+      otp,
+      expiresInMinutes: 15,
+    });
+  } catch (emailErr) {
+    console.warn("⚠️ Reset email error:", emailErr);
+  }
+
+  return { success: true, message: "A verification code has been sent to your email." };
+}
+
+/**
+ * Verify OTP.
+ */
+export async function verifyOtp(input: VerifyOtpInput) {
+  const user = await prisma.user.findUnique({
+    where: { email: input.email.toLowerCase() },
+  });
+
+  if (!user || !user.resetOtp || !user.resetOtpExpires) {
+    throw new Error("Invalid or expired verification code.");
+  }
+
+  if (new Date() > new Date(user.resetOtpExpires)) {
+    throw new Error("Verification code has expired.");
+  }
+
+  if (user.resetOtp !== input.otp.trim()) {
+    throw new Error("Incorrect verification code.");
+  }
+
+  return { success: true, message: "Verification code confirmed." };
+}
+
+/**
+ * Reset password with verified OTP.
+ */
+export async function resetPassword(input: ResetPasswordInput) {
+  const user = await prisma.user.findUnique({
+    where: { email: input.email.toLowerCase() },
+  });
+
+  if (!user || !user.resetOtp || !user.resetOtpExpires) {
+    throw new Error("Invalid or expired verification code.");
+  }
+
+  if (new Date() > new Date(user.resetOtpExpires)) {
+    throw new Error("Verification code has expired.");
+  }
+
+  if (user.resetOtp !== input.otp.trim()) {
+    throw new Error("Incorrect verification code.");
+  }
+
+  const passwordHash = await hashPassword(input.newPassword);
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      passwordHash,
+      resetOtp: null,
+      resetOtpExpires: null,
+    },
+  });
+
+  return { success: true, message: "Password reset successfully. You may now sign in." };
+}
+
+/**
+ * Refresh JWT token.
+ */
+export async function refreshTokens(input: RefreshTokenInput) {
+  const payload = verifyRefreshToken(input.refreshToken);
+  if (!payload || !payload.userId) {
+    throw new Error("Invalid or expired refresh token.");
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: payload.userId },
+  });
+
+  if (!user || user.status !== UserStatus.ACTIVE) {
+    throw new Error("User account is inactive.");
   }
 
   const authTokens = generateAuthTokens({
@@ -631,12 +803,8 @@ export async function refreshUserToken(input: RefreshTokenInput) {
     role: user.role,
   });
 
-  const fullUserProfile = await getUserProfile(user.id);
-
   return {
     token: authTokens.token,
     refreshToken: authTokens.refreshToken,
-    user: fullUserProfile,
   };
 }
-

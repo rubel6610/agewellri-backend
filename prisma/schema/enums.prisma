@@ -39,6 +39,7 @@ enum AgreementStatus {
 enum SubscriptionStatus {
   ACTIVE
   PENDING
+  PAST_DUE
   PAUSED
   CANCELLED
   EXPIRED
@@ -60,23 +61,58 @@ enum BillingMethod {
 
 enum PaymentStatus {
   PENDING
+  PROCESSING
   PAID
   FAILED
-  REFUNDED
   CANCELLED
+  REFUNDED
+  PARTIALLY_REFUNDED
 }
 
 enum InvoiceStatus {
   DRAFT
   OPEN
   PAID
-  VOID
   OVERDUE
+  VOID
+  UNCOLLECTIBLE
+}
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+  IGNORED
+}
+
+enum PlanStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum SignerRole {
+  RESIDENT
+  FAMILY_MEMBER
+  CAREGIVER
+  POWER_OF_ATTORNEY
+  AUTHORIZED_REPRESENTATIVE
+}
+
+enum HomeAccessType {
+  LOCKBOX
+  RESIDENT_ANSWERS
+  DIGITAL_CODE
+  OTHER
 }
 
 enum ServiceTypeCategory {
   CLEANING
   SAFETY_OVERSIGHT
+  ASSESSMENT
+  WELLNESS
+  OTHER
 }
 
 enum AppointmentStatus {

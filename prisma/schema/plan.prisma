@@ -1,25 +1,90 @@
 model ServicePlan {
+  id                      String          @id @default(auto()) @map("_id") @db.ObjectId
+  name                    String          @unique
+  code                    String          @unique
+  shortDescription        String?
+  fullDescription         String?
+  price                   Float
+  billingInterval         BillingInterval @default(QUARTERLY)
+  displayOrder            Int             @default(0)
+  isActive                Boolean         @default(true)
+  isArchived              Boolean         @default(false)
+  supportsAutomaticBilling Boolean        @default(true)
+  supportsInvoiceBilling  Boolean         @default(true)
+  autoRenewDefault        Boolean         @default(true)
+  stripeProductId         String?
+  metadata                Json?
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+
+  versions      PlanVersion[]
+  planServices  PlanService[]
+  subscriptions Subscription[]
+  agreements    ServiceAgreement[]
+}
+
+model PlanVersion {
   id              String          @id @default(auto()) @map("_id") @db.ObjectId
-  name            String          @unique
-  code            String          @unique
+  planId          String          @db.ObjectId
+  plan            ServicePlan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  versionNumber   Int             @default(1)
+  name            String
   description     String?
-  price           Float
+  status          PlanStatus      @default(ACTIVE)
+  effectiveFrom   DateTime        @default(now())
+  effectiveTo     DateTime?
   billingInterval BillingInterval @default(QUARTERLY)
-  isActive        Boolean         @default(true)
+  currency        String          @default("USD")
+  price           Float
+  features        String[]
+  stripePriceId   String?
+  metadata        Json?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
+  prices        PlanPrice[]
   planServices  PlanService[]
   subscriptions Subscription[]
+  agreements    ServiceAgreement[]
+
+  @@unique([planId, versionNumber])
+  @@index([planId])
+  @@index([status])
+}
+
+model PlanPrice {
+  id              String          @id @default(auto()) @map("_id") @db.ObjectId
+  planVersionId   String          @db.ObjectId
+  planVersion     PlanVersion     @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  amount          Float
+  currency        String          @default("USD")
+  billingInterval BillingInterval @default(QUARTERLY)
+  intervalCount   Int             @default(1)
+  effectiveFrom   DateTime        @default(now())
+  effectiveTo     DateTime?
+  isActive        Boolean         @default(true)
+  stripePriceId   String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  subscriptions Subscription[]
+
+  @@index([planVersionId])
 }
 
 model ServiceType {
-  id          String              @id @default(auto()) @map("_id") @db.ObjectId
-  name        String              @unique
-  category    ServiceTypeCategory
-  description String?
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
+  id              String              @id @default(auto()) @map("_id") @db.ObjectId
+  name            String              @unique
+  code            String?
+  category        ServiceTypeCategory
+  description     String?
+  durationMinutes Int                 @default(60)
+  defaultPrice    Float?
+  isActive        Boolean             @default(true)
+  displayOrder    Int                 @default(0)
+  metadata        Json?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
 
   planServices     PlanService[]
   visitAllocations VisitAllocation[]
@@ -27,14 +92,20 @@ model ServiceType {
 }
 
 model PlanService {
-  id              String      @id @default(auto()) @map("_id") @db.ObjectId
-  planId          String      @db.ObjectId
-  plan            ServicePlan @relation(fields: [planId], references: [id], onDelete: Cascade)
-  serviceTypeId   String      @db.ObjectId
-  serviceType     ServiceType @relation(fields: [serviceTypeId], references: [id], onDelete: Cascade)
-  allocatedVisits Int
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  id              String       @id @default(auto()) @map("_id") @db.ObjectId
+  planId          String?      @db.ObjectId
+  plan            ServicePlan? @relation(fields: [planId], references: [id], onDelete: Cascade)
+  planVersionId   String?      @db.ObjectId
+  planVersion     PlanVersion? @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  serviceTypeId   String       @db.ObjectId
+  serviceType     ServiceType  @relation(fields: [serviceTypeId], references: [id], onDelete: Cascade)
+  allocatedVisits Int          @default(0)
+  unit            String       @default("visits")
+  durationMinutes Int?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
-  @@unique([planId, serviceTypeId])
+  @@index([planId])
+  @@index([planVersionId])
+  @@index([serviceTypeId])
 }

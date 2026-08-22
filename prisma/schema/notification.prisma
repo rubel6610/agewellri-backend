@@ -13,3 +13,16 @@ model Notification {
   @@index([userId])
   @@index([readAt])
 }
+
+model BillingNotificationRule {
+  id                     String          @id @default(auto()) @map("_id") @db.ObjectId
+  billingInterval        BillingInterval @unique
+  daysBeforeNotice       Int             @default(14)
+  templateSubject        String
+  templateBody           String
+  isActive               Boolean         @default(true)
+  sendToClient           Boolean         @default(true)
+  sendToDesignatedContact Boolean        @default(true)
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+}

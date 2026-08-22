@@ -1,23 +1,26 @@
 model Invoice {
-  id                String        @id @default(auto()) @map("_id") @db.ObjectId
-  invoiceNumber     String        @unique
-  clientId          String        @db.ObjectId
-  client            Client        @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  subscriptionId    String?       @db.ObjectId
-  subscription      Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
-  amount            Float
-  currency          String        @default("USD")
-  status            InvoiceStatus @default(DRAFT)
-  dueDate           DateTime
-  issuedAt          DateTime?
-  paidAt            DateTime?
-  externalInvoiceId String?
-  stripeInvoiceId   String?
+  id                    String             @id @default(auto()) @map("_id") @db.ObjectId
+  invoiceNumber         String             @unique
+  clientId              String             @db.ObjectId
+  client                Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  subscriptionId        String?            @db.ObjectId
+  subscription          Subscription?      @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  amount                Float
+  currency              String             @default("USD")
+  status                InvoiceStatus      @default(DRAFT)
+  billingMethod         BillingMethod      @default(AUTOMATIC)
+  dueDate               DateTime
+  issuedAt              DateTime?
+  paidAt                DateTime?
+  voidedAt              DateTime?
+  externalInvoiceId     String?
+  stripeInvoiceId       String?
   stripePaymentIntentId String?
-  invoiceUrl        String?
-  isArchived        Boolean       @default(false)
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  stripeHostedInvoiceUrl String?
+  invoiceUrl            String?
+  isArchived            Boolean            @default(false)
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
   payments Payment[]
   renewals Renewal[]
@@ -27,31 +30,51 @@ model Invoice {
 }
 
 model Payment {
-  id                String        @id @default(auto()) @map("_id") @db.ObjectId
-  clientId          String        @db.ObjectId
-  client            Client        @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  subscriptionId    String?       @db.ObjectId
-  subscription      Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
-  invoiceId         String?       @db.ObjectId
-  invoice           Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
-  amount            Float
-  currency          String        @default("USD")
-  status            PaymentStatus @default(PENDING)
-  paymentMethod     BillingMethod @default(AUTOMATIC)
-  externalProvider  String?
-  externalPaymentId String?
+  id                    String             @id @default(auto()) @map("_id") @db.ObjectId
+  clientId              String             @db.ObjectId
+  client                Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  subscriptionId        String?            @db.ObjectId
+  subscription          Subscription?      @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  invoiceId             String?            @db.ObjectId
+  invoice               Invoice?           @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  amount                Float
+  currency              String             @default("USD")
+  status                PaymentStatus      @default(PENDING)
+  paymentMethod         BillingMethod      @default(AUTOMATIC)
+  externalProvider      String?
+  externalPaymentId     String?
+  stripeCustomerId      String?
   stripePaymentIntentId String?
-  stripeChargeId    String?
-  receiptUrl        String?
-  paidAt            DateTime?
-  failedAt          DateTime?
-  failureReason     String?
-  isArchived        Boolean       @default(false)
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  stripeCheckoutSessionId String?
+  stripeInvoiceId       String?
+  stripePaymentMethodId String?
+  stripeChargeId        String?
+  receiptUrl            String?
+  paidAt                DateTime?
+  failedAt              DateTime?
+  failureReason         String?
+  refundedAt            DateTime?
+  metadata              Json?
+  isArchived            Boolean            @default(false)
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
   renewals Renewal[]
 
   @@index([clientId])
   @@index([status])
+  @@index([stripePaymentIntentId])
+}
+
+model StripeWebhookEvent {
+  id            String             @id @default(auto()) @map("_id") @db.ObjectId
+  stripeEventId String             @unique
+  eventType     String
+  status        WebhookEventStatus @default(PROCESSED)
+  errorMessage  String?
+  metadata      Json?
+  processedAt   DateTime           @default(now())
+  createdAt     DateTime           @default(now())
+
+  @@index([eventType])
 }

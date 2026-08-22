@@ -3,6 +3,8 @@ import { AuthenticatedRequest } from "../../middlewares/auth.middleware";
 import {
   registerSchema,
   loginSchema,
+  requestSmsOtpSchema,
+  verifySmsOtpSchema,
   changePasswordSchema,
   updateProfileSchema,
   submitAgreementSchema,
@@ -38,7 +40,6 @@ export async function handleRegister(req: Request, res: Response, next: NextFunc
       data: result,
     });
   } catch (error: any) {
-    console.log(error)
     sendResponse(res, {
       statusCode: 400,
       success: false,
@@ -75,6 +76,70 @@ export async function handleLogin(req: Request, res: Response, next: NextFunctio
       statusCode: 401,
       success: false,
       message: error.message || "Authentication failed",
+    });
+  }
+}
+
+/**
+ * POST /api/v1/auth/sms-otp/request
+ */
+export async function handleRequestSmsOtp(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const parseResult = requestSmsOtpSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      sendResponse(res, {
+        statusCode: 400,
+        success: false,
+        message: "Validation failed",
+        errors: parseResult.error.flatten().fieldErrors,
+      });
+      return;
+    }
+
+    const result = await authService.requestSmsOtp(parseResult.data);
+    sendResponse(res, {
+      statusCode: 200,
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (error: any) {
+    sendResponse(res, {
+      statusCode: 400,
+      success: false,
+      message: error.message || "Failed to request SMS OTP",
+    });
+  }
+}
+
+/**
+ * POST /api/v1/auth/sms-otp/verify
+ */
+export async function handleVerifySmsOtp(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const parseResult = verifySmsOtpSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      sendResponse(res, {
+        statusCode: 400,
+        success: false,
+        message: "Validation failed",
+        errors: parseResult.error.flatten().fieldErrors,
+      });
+      return;
+    }
+
+    const result = await authService.verifySmsOtp(parseResult.data);
+    sendResponse(res, {
+      statusCode: 200,
+      success: true,
+      message: "SMS authentication successful",
+      data: result,
+    });
+  } catch (error: any) {
+    sendResponse(res, {
+      statusCode: 401,
+      success: false,
+      message: error.message || "Failed to verify SMS OTP",
     });
   }
 }
@@ -175,11 +240,11 @@ export async function handleSubmitAgreement(req: AuthenticatedRequest, res: Resp
       return;
     }
 
-    const result = await authService.submitClientAgreement(req.user.id, parseResult.data);
+    const result = await authService.submitAgreement(req.user.id, parseResult.data);
     sendResponse(res, {
       statusCode: 201,
       success: true,
-      message: "Client Service Agreement signed and submitted successfully",
+      message: "Client Service Agreement signed and executed successfully",
       data: result,
     });
   } catch (error: any) {
@@ -242,7 +307,7 @@ export async function handleForgotPassword(req: Request, res: Response, next: Ne
       statusCode: 200,
       success: true,
       message: result.message,
-      data: { email: result.email },
+      data: result,
     });
   } catch (error: any) {
     sendResponse(res, {
@@ -378,7 +443,7 @@ export async function handleRefreshToken(req: Request, res: Response, next: Next
       return;
     }
 
-    const result = await authService.refreshUserToken(parseResult.data);
+    const result = await authService.refreshTokens(parseResult.data);
     sendResponse(res, {
       statusCode: 200,
       success: true,
@@ -393,4 +458,3 @@ export async function handleRefreshToken(req: Request, res: Response, next: Next
     });
   }
 }
-

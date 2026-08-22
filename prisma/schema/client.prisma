@@ -9,6 +9,8 @@ model Client {
   postalCode               String
   country                  String           @default("USA")
   dateOfBirth              String?
+  signerRole               SignerRole       @default(RESIDENT)
+  legalAuthority           String?
   primaryContactName       String?
   primaryContactPhone      String?
   primaryContactEmail      String?
@@ -16,11 +18,14 @@ model Client {
   emergencyContactName     String?
   emergencyContactPhone    String?
   emergencyContactRelation String?
+  homeAccessType           HomeAccessType   @default(RESIDENT_ANSWERS)
+  homeAccessInstructions   String?
+  homeAccessCode           String?
   selectedPlan             String?
   hasCleaningAddon         Boolean          @default(false)
   hasCompletedAgreement    Boolean          @default(false)
   onboardingStatus         OnboardingStatus @default(INVITED)
-  stripeCustomerId         String?          @unique
+  stripeCustomerId         String?
   stripePaymentMethodId    String?
   cardBrand                String?
   cardLast4                String?
@@ -38,4 +43,6 @@ model Client {
   payments      Payment[]
   appointments  Appointment[]
   reports       Report[]
+
+  @@index([stripeCustomerId])
 }

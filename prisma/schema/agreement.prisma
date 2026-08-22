@@ -1,32 +1,47 @@
 model ServiceAgreement {
-  id                   String          @id @default(auto()) @map("_id") @db.ObjectId
-  clientId             String          @db.ObjectId
-  client               Client          @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  subscriptionId       String?         @db.ObjectId
-  subscription         Subscription?   @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
-  templateVersion      String          @default("v1.0")
-  status               AgreementStatus @default(DRAFT)
-  provider             String?
-  externalDocumentId   String?
-  documentUrl          String?
-  selectedPlan         String?
-  planPrice            Float?
-  hasCleaningAddon     Boolean         @default(false)
-  clientSignature      String?
-  clientPrintedName    String?
-  authorizedRepName    String?
-  relationshipToClient String?
-  agreementDate        DateTime?
-  sentAt               DateTime?
-  signedAt             DateTime?
-  executedAt           DateTime?
-  cancelledAt          DateTime?
-  stripePaymentMethodId String?
-  stripeSetupIntentId   String?
-  stripeSubscriptionId  String?
-  isArchived           Boolean         @default(false)
-  createdAt            DateTime        @default(now())
-  updatedAt            DateTime        @updatedAt
+  id                       String          @id @default(auto()) @map("_id") @db.ObjectId
+  clientId                 String          @db.ObjectId
+  client                   Client          @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  subscriptionId           String?         @db.ObjectId
+  subscription             Subscription?   @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  planId                   String?         @db.ObjectId
+  plan                     ServicePlan?    @relation(fields: [planId], references: [id], onDelete: SetNull)
+  planVersionId            String?         @db.ObjectId
+  planVersion              PlanVersion?    @relation(fields: [planVersionId], references: [id], onDelete: SetNull)
+  templateVersion          String          @default("v2.0")
+  state                    String          @default("RI")
+  signerRole               SignerRole      @default(RESIDENT)
+  signerName               String?
+  legalAuthority           String?
+  primaryBillingContact    String?
+  cancellationDeadline     DateTime?
+  cancellationDeadlineRule String?
+  planSnapshot             Json?
+  status                   AgreementStatus @default(DRAFT)
+  provider                 String?
+  externalDocumentId       String?
+  documentUrl              String?
+  selectedPlan             String?
+  planPrice                Float?
+  hasCleaningAddon         Boolean         @default(false)
+  clientSignature          String?
+  clientPrintedName        String?
+  authorizedRepName        String?
+  relationshipToClient     String?
+  emergencyContactName     String?
+  emergencyContactPhone    String?
+  emergencyContactRelation String?
+  agreementDate            DateTime?
+  sentAt                   DateTime?
+  signedAt                 DateTime?
+  executedAt               DateTime?
+  cancelledAt              DateTime?
+  stripePaymentMethodId    String?
+  stripeSetupIntentId      String?
+  stripeSubscriptionId     String?
+  isArchived               Boolean         @default(false)
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
 
   @@index([clientId])
   @@index([subscriptionId])
