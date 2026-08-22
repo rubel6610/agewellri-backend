@@ -2,7 +2,7 @@ import { UserRole, UserStatus, OnboardingStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import prisma from "../../lib/prisma";
 import { hashPassword, comparePassword } from "../../utils/password";
-import { generateToken, generateAuthTokens, verifyRefreshToken } from "../../utils/jwt";
+import { generateAuthTokens, verifyRefreshToken } from "../../utils/jwt";
 import { sendPasswordResetOtpEmail } from "../../utils/email";
 import { processAgreementPayment } from "../payment/payment.service";
 import { CancellationDeadlineService } from "../agreement/cancellation-deadline.service";
@@ -530,8 +530,45 @@ export async function getMyAgreement(userId: string) {
     throw new Error("Client account not found.");
   }
 
-  const agreement = user.client.agreements?.[0] || null;
-  return agreement;
+  const client = user.client as any;
+  const latestAgreement = client?.agreements?.[0] as any;
+  const fullName = `${user.firstName} ${user.lastName}`.trim();
+
+  return {
+    id: latestAgreement?.id,
+    templateVersion: latestAgreement?.templateVersion,
+    status: latestAgreement?.status || (client?.hasCompletedAgreement ? "SIGNED" : "DRAFT"),
+    selectedPlan: latestAgreement?.selectedPlan || client?.selectedPlan || "ESSENTIAL_GUARD",
+    planPrice: latestAgreement?.planPrice || (client?.selectedPlan === "GUARDIAN_PLUS" ? 1892 : 995),
+    hasCleaningAddon: latestAgreement?.hasCleaningAddon || client?.hasCleaningAddon || false,
+    clientFullName: fullName,
+    clientPrintedName: latestAgreement?.clientPrintedName || fullName,
+    authorizedRepName: latestAgreement?.authorizedRepName || client?.primaryContactName || null,
+    relationshipToClient: latestAgreement?.relationshipToClient || client?.primaryContactRelation || null,
+    clientSignature: latestAgreement?.clientSignature || null,
+    agreementDate: latestAgreement?.agreementDate || latestAgreement?.signedAt || latestAgreement?.createdAt || new Date(),
+    signedAt: latestAgreement?.signedAt || null,
+    executedAt: latestAgreement?.executedAt || null,
+    address: client?.address,
+    city: client?.city,
+    state: client?.state,
+    postalCode: client?.postalCode,
+    phone: user.phone,
+    dob: client?.dateOfBirth,
+    email: user.email,
+    primaryContactName: client?.primaryContactName,
+    primaryContactPhone: client?.primaryContactPhone,
+    primaryContactEmail: client?.primaryContactEmail,
+    primaryContactRelation: client?.primaryContactRelation,
+    emergencyContactName: client?.emergencyContactName,
+    emergencyContactPhone: client?.emergencyContactPhone,
+    emergencyContactRelation: client?.emergencyContactRelation,
+    clientNumber: client?.clientNumber,
+    stripePaymentMethodId: latestAgreement?.stripePaymentMethodId || client?.stripePaymentMethodId || null,
+    stripeSetupIntentId: latestAgreement?.stripeSetupIntentId || null,
+    cardBrand: client?.cardBrand || null,
+    cardLast4: client?.cardLast4 || null,
+  };
 }
 
 /**
@@ -556,7 +593,6 @@ export async function getUserProfile(userId: string) {
           },
         },
       },
-      technician: true,
     },
   });
 
@@ -608,7 +644,6 @@ export async function getUserProfile(userId: string) {
           cardExpYear: user.client.cardExpYear,
         }
       : null,
-    technician: user.technician || null,
   };
 }
 
