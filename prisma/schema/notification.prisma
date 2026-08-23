@@ -26,3 +26,25 @@ model BillingNotificationRule {
   createdAt              DateTime        @default(now())
   updatedAt              DateTime        @updatedAt
 }
+
+model BillingNotificationLog {
+  id                   String          @id @default(auto()) @map("_id") @db.ObjectId
+  subscriptionId       String          @db.ObjectId
+  subscriptionPeriodId String?         @db.ObjectId
+  notificationType     NotificationType
+  recipientEmail       String
+  recipientRole        String          @default("CLIENT")
+  billingInterval      BillingInterval
+  scheduledRenewalDate DateTime
+  daysBeforeNotice     Int
+  sentAt               DateTime        @default(now())
+  status               String          @default("SENT")
+  messageId            String?
+  errorMessage         String?
+  createdAt            DateTime        @default(now())
+
+  @@unique([subscriptionId, notificationType, recipientEmail, scheduledRenewalDate])
+  @@index([subscriptionId])
+  @@index([sentAt])
+}
+

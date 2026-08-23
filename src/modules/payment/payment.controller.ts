@@ -460,6 +460,65 @@ export async function handleAdminRetryCharge(
 }
 
 /**
+ * GET /api/v1/payments/admin/renewals
+ * Admin upcoming quarterly & monthly renewals breakdown.
+ */
+export async function handleGetAdminUpcomingRenewals(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      res.status(403).json({ success: false, message: "Admin authorization required." });
+      return;
+    }
+
+    const { interval, billingMethod, daysRange } = req.query as any;
+    const renewals = await paymentService.getAdminUpcomingRenewals({
+      interval: interval ? String(interval) : undefined,
+      billingMethod: billingMethod ? String(billingMethod) : undefined,
+      daysRange: daysRange ? parseInt(String(daysRange), 10) : undefined,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Upcoming renewals retrieved.",
+      data: { renewals },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /api/v1/payments/admin/trigger-reminders
+ * Admin trigger for immediate renewal notice evaluation.
+ */
+export async function handleAdminTriggerReminders(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      res.status(403).json({ success: false, message: "Admin authorization required." });
+      return;
+    }
+
+    const result = await paymentService.adminTriggerRenewalCheck();
+
+    res.status(200).json({
+      success: true,
+      message: "Renewal reminder check completed successfully.",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
  * POST /api/v1/payments/webhook
  * Public endpoint for Stripe webhook events.
  */
@@ -486,3 +545,4 @@ export async function handleWebhook(
     });
   }
 }
+
