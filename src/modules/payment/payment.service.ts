@@ -185,11 +185,22 @@ export async function resolvePlanPricingDynamic(
 
     const totalVisits = services.reduce((sum: number, s: any) => sum + (s.allocatedVisits || 0), 0);
 
+    const planMeta: any = plan.metadata || {};
+    const features: string[] = activeVersion?.features && activeVersion.features.length > 0
+      ? activeVersion.features
+      : planMeta.features || [
+          "Quarterly Home Safety Audits & Hazard Score",
+          "Digital Family Portal Access with Live Reports",
+          "Dedicated Local Rhode Island Care Concierge",
+        ];
+
     return {
       planId: plan.id,
       versionId: activeVersion?.id || null,
       code: plan.code,
       planName: activeVersion?.name || plan.name,
+      planDescription: plan.shortDescription || plan.fullDescription || activeVersion?.description || "",
+      features,
       basePrice,
       addonPrice,
       totalPrice,
@@ -206,22 +217,57 @@ export async function resolvePlanPricingDynamic(
   const code = identifier.toUpperCase();
   let basePrice = 995;
   let planName = "Essential Guard";
+  let planDescription = "Essential non-medical home safety oversight and hazard mitigation.";
   let totalVisits = 6;
   let isOneTime = false;
+  let fallbackServices: any[] = [];
+  let fallbackFeatures: string[] = [];
 
   if (code === "GUARDIAN_PLUS") {
     basePrice = 1892;
     planName = "Guardian Plus";
+    planDescription = "Complete dual-protection safety oversight and specialized home cleaning.";
     totalVisits = 12 + (hasCleaningAddon ? 6 : 0);
+    fallbackServices = [
+      { serviceName: "Safety Oversight", allocatedVisits: 6, unit: "visits", category: "SAFETY_OVERSIGHT" },
+      { serviceName: "Home Cleaning", allocatedVisits: 6 + (hasCleaningAddon ? 6 : 0), unit: "visits", category: "CLEANING" },
+    ];
+    fallbackFeatures = [
+      "6 Safety Oversight Visits / Quarter",
+      "6 Home Cleaning Visits / Quarter",
+      "HEPA Allergen Deep Vacuuming & Sanitization",
+      "Home Safety Hazard Mitigation",
+      "Direct Caregiver & Family Report Dispatch",
+    ];
   } else if (code === "STANDALONE_CLEANING") {
     basePrice = 179;
     planName = "Standalone Cleaning";
+    planDescription = "Standalone Cleaning (1 single deep cleaning visit with HEPA allergen sanitization).";
     totalVisits = 1 + (hasCleaningAddon ? 6 : 0);
     isOneTime = true;
+    fallbackServices = [
+      { serviceName: "Home Cleaning", allocatedVisits: 1 + (hasCleaningAddon ? 6 : 0), unit: "visits", category: "CLEANING" },
+    ];
+    fallbackFeatures = [
+      "1 In-Depth Home Cleaning Visit",
+      "HEPA Allergen Vacuuming & Deep Sanitization",
+      "Pathway Clearance & Slip/Fall Hazard Removal",
+    ];
   } else {
     basePrice = 995;
     planName = "Essential Guard";
+    planDescription = "Essential non-medical home safety oversight and hazard mitigation.";
     totalVisits = 6 + (hasCleaningAddon ? 6 : 0);
+    fallbackServices = [
+      { serviceName: "Safety Oversight", allocatedVisits: 6, unit: "visits", category: "SAFETY_OVERSIGHT" },
+      ...(hasCleaningAddon ? [{ serviceName: "Home Cleaning", allocatedVisits: 6, unit: "visits", category: "CLEANING" }] : []),
+    ];
+    fallbackFeatures = [
+      "6 Safety Oversight Visits / Quarter",
+      "Home Safety Score & Hazard Assessment",
+      "Family Portal Access with Live Reports",
+      "Dedicated Local Care Concierge",
+    ];
   }
 
   const addonPrice = hasCleaningAddon ? 60 : 0;
@@ -232,13 +278,15 @@ export async function resolvePlanPricingDynamic(
     versionId: null,
     code,
     planName,
+    planDescription,
+    features: fallbackFeatures,
     basePrice,
     addonPrice,
     totalPrice,
     billingInterval: isOneTime ? BillingInterval.ONE_TIME : BillingInterval.QUARTERLY,
     currency: "USD",
     stripePriceId: null,
-    services: [],
+    services: fallbackServices,
     totalVisits,
     isOneTime,
   };
@@ -320,42 +368,129 @@ export async function ensurePlansAndServices() {
 
   const essentialPlan = await (prisma.servicePlan.upsert as any)({
     where: { code: "ESSENTIAL_GUARD" },
-    update: { price: 995, name: "Essential Guard" },
+    update: {
+      price: 995,
+      name: "Essential Guard",
+      shortDescription: "Essential non-medical home safety oversight and hazard mitigation.",
+      fullDescription: "Includes 6 comprehensive safety oversight visits per quarter with digitized wellness reports.",
+    },
     create: {
       name: "Essential Guard",
       code: "ESSENTIAL_GUARD",
-      description: "Essential Guard (6 safety oversight visits/quarter, no cleanings).",
+      shortDescription: "Essential non-medical home safety oversight and hazard mitigation.",
+      fullDescription: "Includes 6 comprehensive safety oversight visits per quarter with digitized wellness reports.",
       price: 995,
       billingInterval: BillingInterval.QUARTERLY,
       isActive: true,
+      metadata: {
+        features: [
+          "6 Safety Oversight Visits / Quarter",
+          "Home Safety Score & Hazard Assessment",
+          "Family Portal Access with Live Reports",
+          "Dedicated Local Care Concierge",
+        ],
+      },
     },
   });
 
   const guardianPlan = await (prisma.servicePlan.upsert as any)({
     where: { code: "GUARDIAN_PLUS" },
-    update: { price: 1892, name: "Guardian Plus" },
+    update: {
+      price: 1892,
+      name: "Guardian Plus",
+      shortDescription: "Complete dual-protection safety oversight and specialized home cleaning.",
+      fullDescription: "Includes 12 total visits per quarter (6 safety oversight and 6 home cleanings).",
+    },
     create: {
       name: "Guardian Plus",
       code: "GUARDIAN_PLUS",
-      description: "Guardian Plus (12 visits/quarter: 6 cleaning and 6 safety oversight visits).",
+      shortDescription: "Complete dual-protection safety oversight and specialized home cleaning.",
+      fullDescription: "Includes 12 total visits per quarter (6 safety oversight and 6 home cleanings).",
       price: 1892,
       billingInterval: BillingInterval.QUARTERLY,
       isActive: true,
+      metadata: {
+        features: [
+          "6 Safety Oversight Visits / Quarter",
+          "6 Home Cleaning Visits / Quarter",
+          "HEPA Allergen Deep Vacuuming & Sanitization",
+          "Home Safety Hazard Mitigation",
+          "Direct Caregiver & Family Report Dispatch",
+        ],
+      },
     },
   });
 
   const standaloneCleaningPlan = await (prisma.servicePlan.upsert as any)({
     where: { code: "STANDALONE_CLEANING" },
-    update: { price: 179, name: "Standalone Cleaning" },
+    update: {
+      price: 179,
+      name: "Standalone Cleaning",
+      shortDescription: "Standalone single deep cleaning visit.",
+      fullDescription: "Standalone Cleaning (1 single deep cleaning visit with HEPA allergen sanitization).",
+    },
     create: {
       name: "Standalone Cleaning",
       code: "STANDALONE_CLEANING",
-      description: "Standalone Cleaning (1 single deep cleaning visit).",
+      shortDescription: "Standalone single deep cleaning visit.",
+      fullDescription: "Standalone Cleaning (1 single deep cleaning visit with HEPA allergen sanitization).",
       price: 179,
       billingInterval: BillingInterval.ONE_TIME,
       isActive: true,
+      metadata: {
+        features: [
+          "1 In-Depth Home Cleaning Visit",
+          "HEPA Allergen Vacuuming & Deep Sanitization",
+          "Pathway Clearance & Slip/Fall Hazard Removal",
+        ],
+      },
     },
   });
+
+  // Ensure PlanServices exist for plans so visit allocation is accurate
+  const epServices = await (prisma.planService.count as any)({ where: { planId: essentialPlan.id } });
+  if (epServices === 0) {
+    await (prisma.planService.create as any)({
+      data: {
+        planId: essentialPlan.id,
+        serviceTypeId: safetyService.id,
+        allocatedVisits: 6,
+        unit: "visits",
+      },
+    });
+  }
+
+  const gpServices = await (prisma.planService.count as any)({ where: { planId: guardianPlan.id } });
+  if (gpServices === 0) {
+    await (prisma.planService.create as any)({
+      data: {
+        planId: guardianPlan.id,
+        serviceTypeId: safetyService.id,
+        allocatedVisits: 6,
+        unit: "visits",
+      },
+    });
+    await (prisma.planService.create as any)({
+      data: {
+        planId: guardianPlan.id,
+        serviceTypeId: cleaningService.id,
+        allocatedVisits: 6,
+        unit: "visits",
+      },
+    });
+  }
+
+  const scServices = await (prisma.planService.count as any)({ where: { planId: standaloneCleaningPlan.id } });
+  if (scServices === 0) {
+    await (prisma.planService.create as any)({
+      data: {
+        planId: standaloneCleaningPlan.id,
+        serviceTypeId: cleaningService.id,
+        allocatedVisits: 1,
+        unit: "visits",
+      },
+    });
+  }
 
   return {
     safetyService,
@@ -726,6 +861,86 @@ export async function processAgreementPayment(
       invoiceNumber,
     },
   });
+
+  // 7. Dispatch Plan Purchase Confirmation & Agreement Execution Email
+  try {
+    const agreement = input.agreementId
+      ? await prisma.serviceAgreement.findUnique({
+          where: { id: input.agreementId },
+        })
+      : await prisma.serviceAgreement.findFirst({
+          where: { clientId: client.id },
+          orderBy: { createdAt: "desc" },
+        });
+
+    const clientPrinted =
+      agreement?.clientPrintedName ||
+      `${user.firstName || ""} ${user.lastName || ""}`.trim() ||
+      "Valued Client";
+    const signerDisplay =
+      agreement?.authorizedRepName || agreement?.signerName || clientPrinted;
+    const isRepSigner =
+      agreement?.signerRole && agreement.signerRole !== "RESIDENT";
+
+    // Primary email provided in agreement form or client profile or user account
+    const agreementProvidedEmail =
+      client.primaryContactEmail?.trim() ||
+      agreement?.primaryBillingContact?.trim() ||
+      user.email;
+
+    // Collect all valid unique email recipients to ensure client gets notified at provided email
+    const recipientEmails = Array.from(
+      new Set(
+        [agreementProvidedEmail, client.primaryContactEmail, user.email]
+          .filter((e): e is string => Boolean(e && typeof e === "string" && e.includes("@")))
+          .map((e) => e.trim())
+      )
+    ).join(", ");
+
+    const serviceAddress = [
+      client.address,
+      client.city,
+      client.state,
+      client.postalCode,
+    ]
+      .filter(Boolean)
+      .join(", ");
+
+    const { sendPlanPurchaseConfirmationEmail } = await import("../../utils/email");
+    await sendPlanPurchaseConfirmationEmail({
+      to: recipientEmails,
+      clientName: clientPrinted,
+      clientNumber: client.clientNumber,
+      signerName:
+        isRepSigner && signerDisplay !== clientPrinted
+          ? signerDisplay
+          : undefined,
+      signerRole: agreement?.signerRole,
+      serviceAddress: serviceAddress || undefined,
+      planName: pricing.planName,
+      planCode: pricing.code,
+      planDescription: pricing.planDescription,
+      features: pricing.features,
+      services: pricing.services,
+      hasCleaningAddon: input.hasCleaningAddon,
+      amount: pricing.totalPrice,
+      currency: pricing.currency,
+      billingInterval: pricing.billingInterval,
+      billingMethod: isInvoiceBilling ? "INVOICE" : "AUTOMATIC",
+      paymentStatus: isInvoiceBilling ? "PENDING_INVOICE" : "PAID",
+      cardBrand: client.cardBrand || undefined,
+      cardLast4: client.cardLast4 || undefined,
+      invoiceNumber: invoice.invoiceNumber,
+      paidAt: isInvoiceBilling ? null : now,
+      coveragePeriodStart: now,
+      coveragePeriodEnd: periodEnd,
+      nextRenewalDate: pricing.isOneTime ? null : periodEnd,
+      cancellationDeadline: agreement?.cancellationDeadline,
+      cancellationDeadlineRule: agreement?.cancellationDeadlineRule,
+    });
+  } catch (emailErr) {
+    console.warn("⚠️ Failed to dispatch plan purchase confirmation email:", emailErr);
+  }
 
   return {
     success: true,

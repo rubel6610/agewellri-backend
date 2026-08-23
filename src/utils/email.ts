@@ -71,6 +71,43 @@ export interface SendAdminBillingAlertOptions {
   details?: string;
 }
 
+export interface SendPlanPurchaseConfirmationEmailOptions {
+  to: string | string[];
+  clientName: string;
+  clientNumber?: string;
+  signerName?: string;
+  signerRole?: string;
+  serviceAddress?: string;
+  planName: string;
+  planCode?: string;
+  planDescription?: string;
+  features?: string[];
+  services?: Array<{
+    serviceName: string;
+    allocatedVisits: number;
+    unit?: string;
+    description?: string;
+  }>;
+  hasCleaningAddon?: boolean;
+  amount: number;
+  currency?: string;
+  billingInterval?: "MONTHLY" | "QUARTERLY" | "ANNUAL" | "ONE_TIME" | string;
+  billingMethod?: "AUTOMATIC" | "INVOICE" | string;
+  paymentStatus?: "PAID" | "PENDING_INVOICE" | string;
+  cardBrand?: string;
+  cardLast4?: string;
+  invoiceNumber?: string;
+  paidAt?: Date | null;
+  coveragePeriodStart?: Date | null;
+  coveragePeriodEnd?: Date | null;
+  nextRenewalDate?: Date | null;
+  cancellationDeadline?: Date | null;
+  cancellationDeadlineRule?: string | null;
+  portalUrl?: string;
+  supportPhone?: string;
+  supportEmail?: string;
+}
+
 /**
  * Configure Nodemailer Transporter
  */
@@ -636,3 +673,301 @@ export async function sendAdminBillingAlertEmail(
 
   return { success: true, mode: "console" };
 }
+
+/**
+ * Plan / Service Purchase Confirmation & Agreement Execution Email
+ * Sent immediately after payment is confirmed or invoice billing agreement is finalized.
+ */
+export async function sendPlanPurchaseConfirmationEmail(
+  options: SendPlanPurchaseConfirmationEmailOptions
+): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
+  const {
+    to,
+    clientName,
+    clientNumber,
+    signerName,
+    signerRole,
+    serviceAddress,
+    planName,
+    planDescription,
+    features = [],
+    services = [],
+    hasCleaningAddon = false,
+    amount,
+    currency = "USD",
+    billingInterval = "QUARTERLY",
+    billingMethod = "AUTOMATIC",
+    paymentStatus = "PAID",
+    cardBrand,
+    cardLast4,
+    invoiceNumber,
+    paidAt,
+    coveragePeriodStart,
+    coveragePeriodEnd,
+    nextRenewalDate,
+    cancellationDeadline,
+    cancellationDeadlineRule,
+    portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
+    supportPhone = "(401) 555-0199",
+    supportEmail = "billing@agewellri.com",
+  } = options;
+
+  const isPaid = paymentStatus === "PAID";
+  const intervalLabel =
+    billingInterval === "MONTHLY"
+      ? "Monthly"
+      : billingInterval === "ANNUAL"
+      ? "Annual"
+      : billingInterval === "ONE_TIME"
+      ? "One-Time Service"
+      : "Quarterly (Every 3 Months)";
+
+  const paidDateFormatted = paidAt
+    ? new Date(paidAt).toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      })
+    : new Date().toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      });
+
+  const coveragePeriodFormatted =
+    coveragePeriodStart && coveragePeriodEnd
+      ? `${new Date(coveragePeriodStart).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })} – ${new Date(coveragePeriodEnd).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })}`
+      : null;
+
+  const nextRenewalDateFormatted =
+    nextRenewalDate && billingInterval !== "ONE_TIME"
+      ? new Date(nextRenewalDate).toLocaleDateString("en-US", {
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        })
+      : billingInterval === "ONE_TIME"
+      ? "N/A (Single Purchase)"
+      : null;
+
+  const cancellationDeadlineFormatted = cancellationDeadline
+    ? new Date(cancellationDeadline).toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      })
+    : null;
+
+  const subject = isPaid
+    ? `Confirmation & Receipt: Your AgeWellRI ${planName} Plan is Active`
+    : `Agreement Confirmed & Invoice Issued: AgeWellRI ${planName}`;
+
+  const displayName = signerName && signerName !== clientName
+    ? `${signerName} (on behalf of ${clientName})`
+    : clientName;
+
+  // Build Services breakdown rows
+  let servicesListHtml = "";
+  if (services && services.length > 0) {
+    servicesListHtml = `
+      <div style="margin-top: 8px;">
+        ${services
+          .map(
+            (s) => `
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 1px dashed #E2E8F0; font-size: 13px;">
+            <span style="color: #243746; font-weight: 700;">• ${s.serviceName}:</span>
+            <span style="color: #294B68; font-weight: 800; background: #EAF3F8; padding: 2px 8px; border-radius: 6px;">${s.allocatedVisits} ${s.unit || "visits"}</span>
+          </div>
+        `
+          )
+          .join("")}
+      </div>
+    `;
+  } else {
+    servicesListHtml = `
+      <div style="padding: 6px 0; font-size: 13px; color: #475569;">
+        • Complete Senior Safety Oversight &amp; Home Wellness Visits
+      </div>
+    `;
+  }
+
+  // Build Features list
+  let featuresListHtml = "";
+  if (features && features.length > 0) {
+    featuresListHtml = `
+      <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #E2E8F0;">
+        <div style="font-size: 11px; font-weight: 800; color: #64748B; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Key Plan Inclusions:</div>
+        <ul style="margin: 0; padding-left: 18px; font-size: 12px; color: #475569; line-height: 1.6;">
+          ${features.map((f) => `<li>${f}</li>`).join("")}
+        </ul>
+      </div>
+    `;
+  }
+
+  const content = `
+    <div class="greeting">Hello ${displayName},</div>
+
+    <div style="background: ${isPaid ? "#EBF8F2" : "#EFF6FF"}; border: 1px solid ${isPaid ? "#86EFAC" : "#93C5FD"}; border-radius: 12px; padding: 14px 18px; margin: 16px 0 24px 0;">
+      <div style="font-size: 13px; font-weight: 800; color: ${isPaid ? "#166534" : "#1E40AF"}; text-transform: uppercase; letter-spacing: 0.5px;">
+        ${isPaid ? "✓ Service Agreement Executed &amp; Membership Active" : "✓ Service Agreement Executed &amp; Invoice Statement Issued"}
+      </div>
+      <div style="font-size: 13px; color: #334155; margin-top: 4px; line-height: 1.5;">
+        ${
+          isPaid
+            ? `Thank you for partnering with AgeWellRI. Your payment for <strong>AgeWellRI ${planName}</strong> has been confirmed, and your membership is now active.`
+            : `Thank you for partnering with AgeWellRI. Your service agreement for <strong>AgeWellRI ${planName}</strong> has been executed. An invoice statement has been generated and sent for payment.`
+        }
+      </div>
+    </div>
+
+    <!-- Plan & Billing Overview Card -->
+    <div class="highlight-card">
+      <div style="font-size: 12px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.75px; margin-bottom: 12px; border-bottom: 1px solid #D9E4EC; padding-bottom: 6px;">
+        📋 Membership &amp; Billing Summary
+      </div>
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600; font-size: 13px;">Membership Plan:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; font-size: 13px; text-align: right;">${planName}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600; font-size: 13px;">Billing Interval:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; font-size: 13px; text-align: right;">${intervalLabel}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600; font-size: 13px;">Amount ${isPaid ? "Paid" : "Due"}:</td>
+          <td style="padding: 6px 0; color: ${isPaid ? "#166534" : "#1E40AF"}; font-weight: 900; font-size: 15px; text-align: right;">$${amount.toFixed(2)} ${currency}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600; font-size: 13px;">Payment Status:</td>
+          <td style="padding: 6px 0; color: ${isPaid ? "#166534" : "#B45309"}; font-weight: 800; font-size: 13px; text-align: right;">
+            ${isPaid ? `PAID (${cardBrand || "Card"} ending in ${cardLast4 || "••••"})` : "Invoice Statement Open (Due in 14 Days)"}
+          </td>
+        </tr>
+        ${
+          invoiceNumber
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600; font-size: 13px;">Invoice Ref:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 800; font-size: 13px; text-align: right;">${invoiceNumber}</td>
+              </tr>`
+            : ""
+        }
+        ${
+          coveragePeriodFormatted
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600; font-size: 13px;">Coverage Period:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 800; font-size: 13px; text-align: right;">${coveragePeriodFormatted}</td>
+              </tr>`
+            : ""
+        }
+        ${
+          nextRenewalDateFormatted
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600; font-size: 13px;">Next Renewal Date:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 800; font-size: 13px; text-align: right;">${nextRenewalDateFormatted}</td>
+              </tr>`
+            : ""
+        }
+        ${
+          clientNumber
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600; font-size: 13px;">Client ID:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 800; font-size: 13px; text-align: right;">${clientNumber}</td>
+              </tr>`
+            : ""
+        }
+        ${
+          serviceAddress
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600; font-size: 13px;">Service Address:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 700; font-size: 13px; text-align: right;">${serviceAddress}</td>
+              </tr>`
+            : ""
+        }
+      </table>
+    </div>
+
+    <!-- Included Care & Service Breakdown Card -->
+    <div class="highlight-card" style="background: #FFFFFF; border: 1px solid #CBD5E1;">
+      <div style="font-size: 12px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.75px; margin-bottom: 10px; border-bottom: 1px solid #E2E8F0; padding-bottom: 6px;">
+        🛡️ Included Care Services &amp; Quotas
+      </div>
+      ${planDescription ? `<div style="font-size: 13px; color: #334155; margin-bottom: 8px; font-style: italic;">${planDescription}</div>` : ""}
+      ${servicesListHtml}
+      ${
+        hasCleaningAddon
+          ? `<div style="margin-top: 8px; font-size: 13px; color: #166534; font-weight: 700; background: #F0FDF4; padding: 6px 10px; border-radius: 6px;">
+              ✨ Home Cleaning Add-on: Included (+6 Additional Visits)
+             </div>`
+          : ""
+      }
+      ${featuresListHtml}
+    </div>
+
+    <!-- Statutory Cancellation Notice (Rhode Island Law) -->
+    ${
+      cancellationDeadlineFormatted
+        ? `<div style="background: #F8FAFC; border-left: 4px solid #5E8FB2; border-radius: 0 8px 8px 0; padding: 12px 16px; margin: 20px 0; font-size: 12px; color: #475569; line-height: 1.5;">
+            <strong>Notice of Right of Cancellation (Rhode Island Law):</strong><br>
+            Under Rhode Island Law, you have three (3) business days from agreement signing to cancel this contract without penalty. Your cancellation deadline is <strong>${cancellationDeadlineFormatted}</strong>. ${cancellationDeadlineRule || ""}
+          </div>`
+        : ""
+    }
+
+    <!-- CTA Buttons -->
+    <div style="text-align: center; margin: 24px 0 16px 0;">
+      <a href="${portalUrl}/dashboard" class="btn-primary" style="margin: 0 6px 8px 6px;">Access Client Portal</a>
+      <a href="${portalUrl}/dashboard/calendar" class="btn-primary" style="background-color: #3F8F6B; margin: 0 6px 8px 6px;">View &amp; Schedule Visits</a>
+    </div>
+    <div style="text-align: center; margin-bottom: 24px;">
+      <a href="${portalUrl}/dashboard/billing" class="btn-secondary">View Billing &amp; Invoices</a>
+    </div>
+
+    <!-- Next Steps -->
+    <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 12px; color: #475569; line-height: 1.6;">
+      <strong style="color: #243746; font-size: 13px;">What to Expect Next:</strong><br>
+      1. <strong>Care Specialist Assignment:</strong> A dedicated, certified Rhode Island AgeWell Specialist is being matched with your home.<br>
+      2. <strong>First Visit Scheduling:</strong> Your coordinator will reach out to schedule your initial Comprehensive Home Safety Audit, or you can book online anytime.<br>
+      3. <strong>Live Family Portal:</strong> Family members and caregivers can view real-time visit reports and photo logs from any device.<br>
+      <br>
+      Need assistance? Contact our local Westerly, RI team: <strong>${supportPhone}</strong> | <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>
+    </div>
+  `;
+
+  const htmlContent = wrapHtmlEmail(subject, content);
+
+  const recipientString = Array.isArray(to) ? to.join(", ") : to;
+
+  console.log(`\n======================================================`);
+  console.log(`💳 [EMAIL SERVICE] Plan Purchase Confirmation Email dispatched to: ${recipientString}`);
+  console.log(`Plan: ${planName} | Amount: $${amount} | Status: ${paymentStatus} | Method: ${billingMethod}`);
+  console.log(`======================================================\n`);
+
+  const transporter = createTransporter();
+  if (transporter) {
+    try {
+      const info = await transporter.sendMail({
+        from: getDefaultFromAddress("AgeWellRI Care Coordination"),
+        to: recipientString,
+        subject,
+        html: htmlContent,
+      });
+      return { success: true, messageId: info.messageId, mode: "smtp" };
+    } catch (err: any) {
+      console.warn(`[EMAIL SERVICE] Plan purchase confirmation SMTP error: ${err.message}`);
+      return { success: true, mode: "console" };
+    }
+  }
+
+  return { success: true, mode: "console" };
+}
+
