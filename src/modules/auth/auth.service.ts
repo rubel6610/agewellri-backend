@@ -538,8 +538,12 @@ export async function getMyAgreement(userId: string) {
     id: latestAgreement?.id,
     templateVersion: latestAgreement?.templateVersion,
     status: latestAgreement?.status || (client?.hasCompletedAgreement ? "SIGNED" : "DRAFT"),
-    selectedPlan: latestAgreement?.selectedPlan || client?.selectedPlan || "ESSENTIAL_GUARD",
-    planPrice: latestAgreement?.planPrice || (client?.selectedPlan === "GUARDIAN_PLUS" ? 1892 : 995),
+    selectedPlan: latestAgreement?.selectedPlan || client?.selectedPlan || null,
+    planPrice:
+      latestAgreement?.planPrice ??
+      client?.subscriptions?.[0]?.contractedPrice ??
+      client?.plan?.price ??
+      0,
     hasCleaningAddon: latestAgreement?.hasCleaningAddon || client?.hasCleaningAddon || false,
     clientFullName: fullName,
     clientPrintedName: latestAgreement?.clientPrintedName || fullName,

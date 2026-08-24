@@ -10,7 +10,7 @@ const app: Application = express();
 // Middlewares
 app.use(
   cors({
-    origin: [process.env.FRONTEND_URL!,"https://arfanrubel3000.ilmifygroup.com","http://localhost:3000", ],
+    origin: [process.env.FRONTEND_URL!,"https://arfanrubel3000.ilmifygroup.com", "http://localhost:3000", ],
     credentials: true,
   })
 );

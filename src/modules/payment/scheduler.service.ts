@@ -66,8 +66,8 @@ export async function checkAndSendRenewalReminders() {
 
       const clientUser = sub.client.user;
       const clientName = `${clientUser.firstName || ""} ${clientUser.lastName || ""}`.trim() || "Valued Client";
-      const planName = sub.planVersion?.name || sub.plan?.name || "Guardian Plus";
-      const contractedPrice = sub.contractedPrice ?? sub.planVersion?.price ?? sub.plan?.price ?? 1892;
+      const planName = sub.planVersion?.name || sub.plan?.name || "Service Plan";
+      const contractedPrice = sub.contractedPrice ?? sub.planVersion?.price ?? sub.plan?.price ?? 0;
 
       // Determine recipients: Primary client and designated authorized contact
       const recipients: { email: string; role: string; name?: string }[] = [];

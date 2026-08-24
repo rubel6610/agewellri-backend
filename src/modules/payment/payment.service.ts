@@ -121,383 +121,139 @@ export async function getOrCreateStripeCustomer(userId: string) {
 }
 
 /**
+/**
  * Server-side source of truth for plan pricing and visit quotas.
- * Dynamically checks database ServicePlan and PlanVersion with fallback defaults.
+ * Dynamically resolves active ServicePlan, PlanVersion, PlanPrice, features,
+ * and associated PlanService allocations directly from the database.
+ * No hardcoded plans, prices, visits, or service names.
  */
 export async function resolvePlanPricingDynamic(
   planIdentifier?: string | null,
   hasCleaningAddon: boolean = false
 ) {
-  const identifier = planIdentifier || "GUARDIAN_PLUS";
+  const identifier = planIdentifier?.trim();
 
-  // Try finding by ID, code, or name in Database
-  const plan = await (prisma.servicePlan.findFirst as any)({
-    where: {
-      OR: [
-        { id: identifier.length === 24 ? identifier : undefined },
-        { code: identifier.toUpperCase() },
-        { name: { equals: identifier, mode: "insensitive" } },
-      ],
-    },
-    include: {
-      versions: {
-        where: { status: "ACTIVE" },
-        orderBy: { versionNumber: "desc" },
-        take: 1,
+  // 1. Try finding the exact requested plan by ID, code, or name in the Database
+  let plan = identifier
+    ? await (prisma.servicePlan.findFirst as any)({
+        where: {
+          OR: [
+            { id: identifier.length === 24 ? identifier : undefined },
+            { code: identifier.toUpperCase() },
+            { name: { equals: identifier, mode: "insensitive" } },
+          ],
+        },
         include: {
-          prices: { where: { isActive: true }, orderBy: { createdAt: "desc" }, take: 1 },
-          planServices: { include: { serviceType: true } },
+          planServices: {
+            include: { serviceType: true },
+          },
+          versions: {
+            where: { status: "ACTIVE" },
+            orderBy: { versionNumber: "desc" },
+            take: 1,
+            include: {
+              prices: { where: { isActive: true }, orderBy: { createdAt: "desc" }, take: 1 },
+              planServices: { include: { serviceType: true } },
+            },
+          },
+        },
+      })
+    : null;
+
+  // 2. If not found or not specified, dynamically load the default active plan configured in DB
+  if (!plan) {
+    plan = await (prisma.servicePlan.findFirst as any)({
+      where: { isActive: true, isArchived: false },
+      orderBy: { displayOrder: "asc" },
+      include: {
+        planServices: {
+          include: { serviceType: true },
+        },
+        versions: {
+          where: { status: "ACTIVE" },
+          orderBy: { versionNumber: "desc" },
+          take: 1,
+          include: {
+            prices: { where: { isActive: true }, orderBy: { createdAt: "desc" }, take: 1 },
+            planServices: { include: { serviceType: true } },
+          },
         },
       },
-    },
-  });
+    });
+  }
 
-  if (plan) {
-    const activeVersion = plan.versions?.[0];
-    const activePrice = activeVersion?.prices?.[0];
-    const basePrice = activePrice?.amount ?? activeVersion?.price ?? plan.price ?? 995;
-    const addonPrice = hasCleaningAddon ? 60 : 0;
-    const totalPrice = basePrice + addonPrice;
+  if (!plan) {
+    throw new Error(`No active service plans found in database. Please configure plans in the admin portal.`);
+  }
 
-    const services = (activeVersion?.planServices || []).map((ps: any) => ({
-      serviceTypeId: ps.serviceTypeId,
-      serviceName: ps.serviceType?.name || "Service",
-      category: ps.serviceType?.category,
-      allocatedVisits: ps.allocatedVisits + (hasCleaningAddon && ps.serviceType?.category === "CLEANING" ? 6 : 0),
-      unit: ps.unit || "visits",
-    }));
+  const activeVersion = plan.versions?.[0];
+  const activePrice = activeVersion?.prices?.[0];
+  const basePrice = activePrice?.amount ?? activeVersion?.price ?? plan.price ?? 0;
+  const addonPrice = hasCleaningAddon ? 60 : 0;
+  const totalPrice = basePrice + addonPrice;
 
-    // If cleaning addon selected but no cleaning service in plan, add cleaning allocation
-    if (hasCleaningAddon && !services.some((s: any) => s.category === "CLEANING")) {
-      const cleaningService = await prisma.serviceType.findFirst({
-        where: { category: "CLEANING" },
+  // Dynamically resolve services from planServices configured by admin on the plan or version
+  const servicesSource =
+    plan.planServices && plan.planServices.length > 0
+      ? plan.planServices
+      : activeVersion?.planServices || [];
+
+  const services = servicesSource.map((ps: any) => ({
+    serviceTypeId: ps.serviceTypeId,
+    serviceName: ps.serviceType?.name || "Service",
+    category: ps.serviceType?.category,
+    allocatedVisits:
+      (ps.allocatedVisits || 0) +
+      (hasCleaningAddon && ps.serviceType?.category === "CLEANING" ? 6 : 0),
+    unit: ps.unit || "visits",
+  }));
+
+  // If cleaning addon selected but no cleaning service in plan, dynamically fetch cleaning serviceType from DB
+  if (hasCleaningAddon && !services.some((s: any) => s.category === "CLEANING")) {
+    const cleaningService = await prisma.serviceType.findFirst({
+      where: { category: "CLEANING", isActive: true },
+    });
+    if (cleaningService) {
+      services.push({
+        serviceTypeId: cleaningService.id,
+        serviceName: cleaningService.name,
+        category: "CLEANING",
+        allocatedVisits: 6,
+        unit: "visits",
       });
-      if (cleaningService) {
-        services.push({
-          serviceTypeId: cleaningService.id,
-          serviceName: cleaningService.name,
-          category: "CLEANING",
-          allocatedVisits: 6,
-          unit: "visits",
-        });
-      }
     }
+  }
 
-    const totalVisits = services.reduce((sum: number, s: any) => sum + (s.allocatedVisits || 0), 0);
+  const totalVisits = services.reduce((sum: number, s: any) => sum + (s.allocatedVisits || 0), 0);
 
-    const planMeta: any = plan.metadata || {};
-    const features: string[] = activeVersion?.features && activeVersion.features.length > 0
+  const planMeta: any = plan.metadata || {};
+  const features: string[] =
+    activeVersion?.features && activeVersion.features.length > 0
       ? activeVersion.features
-      : planMeta.features || [
-          "Quarterly Home Safety Audits & Hazard Score",
-          "Digital Family Portal Access with Live Reports",
-          "Dedicated Local Rhode Island Care Concierge",
-        ];
-
-    return {
-      planId: plan.id,
-      versionId: activeVersion?.id || null,
-      code: plan.code,
-      planName: activeVersion?.name || plan.name,
-      planDescription: plan.shortDescription || plan.fullDescription || activeVersion?.description || "",
-      features,
-      basePrice,
-      addonPrice,
-      totalPrice,
-      billingInterval: (activePrice?.billingInterval || activeVersion?.billingInterval || plan.billingInterval || "QUARTERLY") as BillingInterval,
-      currency: activePrice?.currency || activeVersion?.currency || "USD",
-      stripePriceId: activePrice?.stripePriceId || activeVersion?.stripePriceId,
-      services,
-      totalVisits,
-      isOneTime: plan.billingInterval === "ONE_TIME",
-    };
-  }
-
-  // Fallback defaults if database has not been seeded
-  const code = identifier.toUpperCase();
-  let basePrice = 995;
-  let planName = "Essential Guard";
-  let planDescription = "Essential non-medical home safety oversight and hazard mitigation.";
-  let totalVisits = 6;
-  let isOneTime = false;
-  let fallbackServices: any[] = [];
-  let fallbackFeatures: string[] = [];
-
-  if (code === "GUARDIAN_PLUS") {
-    basePrice = 1892;
-    planName = "Guardian Plus";
-    planDescription = "Complete dual-protection safety oversight and specialized home cleaning.";
-    totalVisits = 12 + (hasCleaningAddon ? 6 : 0);
-    fallbackServices = [
-      { serviceName: "Safety Oversight", allocatedVisits: 6, unit: "visits", category: "SAFETY_OVERSIGHT" },
-      { serviceName: "Home Cleaning", allocatedVisits: 6 + (hasCleaningAddon ? 6 : 0), unit: "visits", category: "CLEANING" },
-    ];
-    fallbackFeatures = [
-      "6 Safety Oversight Visits / Quarter",
-      "6 Home Cleaning Visits / Quarter",
-      "HEPA Allergen Deep Vacuuming & Sanitization",
-      "Home Safety Hazard Mitigation",
-      "Direct Caregiver & Family Report Dispatch",
-    ];
-  } else if (code === "STANDALONE_CLEANING") {
-    basePrice = 179;
-    planName = "Standalone Cleaning";
-    planDescription = "Standalone Cleaning (1 single deep cleaning visit with HEPA allergen sanitization).";
-    totalVisits = 1 + (hasCleaningAddon ? 6 : 0);
-    isOneTime = true;
-    fallbackServices = [
-      { serviceName: "Home Cleaning", allocatedVisits: 1 + (hasCleaningAddon ? 6 : 0), unit: "visits", category: "CLEANING" },
-    ];
-    fallbackFeatures = [
-      "1 In-Depth Home Cleaning Visit",
-      "HEPA Allergen Vacuuming & Deep Sanitization",
-      "Pathway Clearance & Slip/Fall Hazard Removal",
-    ];
-  } else {
-    basePrice = 995;
-    planName = "Essential Guard";
-    planDescription = "Essential non-medical home safety oversight and hazard mitigation.";
-    totalVisits = 6 + (hasCleaningAddon ? 6 : 0);
-    fallbackServices = [
-      { serviceName: "Safety Oversight", allocatedVisits: 6, unit: "visits", category: "SAFETY_OVERSIGHT" },
-      ...(hasCleaningAddon ? [{ serviceName: "Home Cleaning", allocatedVisits: 6, unit: "visits", category: "CLEANING" }] : []),
-    ];
-    fallbackFeatures = [
-      "6 Safety Oversight Visits / Quarter",
-      "Home Safety Score & Hazard Assessment",
-      "Family Portal Access with Live Reports",
-      "Dedicated Local Care Concierge",
-    ];
-  }
-
-  const addonPrice = hasCleaningAddon ? 60 : 0;
-  const totalPrice = basePrice + addonPrice;
+      : Array.isArray(planMeta.features) && planMeta.features.length > 0
+      ? planMeta.features
+      : [];
 
   return {
-    planId: null,
-    versionId: null,
-    code,
-    planName,
-    planDescription,
-    features: fallbackFeatures,
+    planId: plan.id,
+    versionId: activeVersion?.id || null,
+    code: plan.code,
+    planName: activeVersion?.name || plan.name,
+    planDescription:
+      plan.shortDescription || plan.fullDescription || activeVersion?.description || "",
+    features,
     basePrice,
     addonPrice,
     totalPrice,
-    billingInterval: isOneTime ? BillingInterval.ONE_TIME : BillingInterval.QUARTERLY,
-    currency: "USD",
-    stripePriceId: null,
-    services: fallbackServices,
+    billingInterval: (activePrice?.billingInterval ||
+      activeVersion?.billingInterval ||
+      plan.billingInterval ||
+      "QUARTERLY") as BillingInterval,
+    currency: activePrice?.currency || activeVersion?.currency || "USD",
+    stripePriceId: activePrice?.stripePriceId || activeVersion?.stripePriceId || null,
+    services,
     totalVisits,
-    isOneTime,
-  };
-}
-
-/**
- * Sync helper
- */
-export function resolvePlanPricing(
-  planCode?: string | null,
-  hasCleaningAddon: boolean = false
-) {
-  const code = (planCode || "GUARDIAN_PLUS").toUpperCase();
-  let basePrice = 995;
-  let planName = "Essential Guard";
-  let safetyVisits = 6;
-  let cleaningVisits = 0;
-  let isOneTime = false;
-
-  if (code === "GUARDIAN_PLUS") {
-    basePrice = 1892;
-    planName = "Guardian Plus";
-    safetyVisits = 6;
-    cleaningVisits = 6 + (hasCleaningAddon ? 6 : 0);
-  } else if (code === "STANDALONE_CLEANING") {
-    basePrice = 179;
-    planName = "Standalone Cleaning";
-    safetyVisits = 0;
-    cleaningVisits = 1 + (hasCleaningAddon ? 6 : 0);
-    isOneTime = true;
-  } else {
-    basePrice = 995;
-    planName = "Essential Guard";
-    safetyVisits = 6;
-    cleaningVisits = hasCleaningAddon ? 6 : 0;
-  }
-
-  const addonPrice = hasCleaningAddon ? 60 : 0;
-  const totalPrice = basePrice + addonPrice;
-
-  return {
-    code,
-    planName,
-    basePrice,
-    addonPrice,
-    totalPrice,
-    safetyVisits,
-    cleaningVisits,
-    totalVisits: safetyVisits + cleaningVisits,
-    isOneTime,
-  };
-}
-
-/**
- * Helper to ensure ServicePlan and ServiceTypes exist in the database for subscription provisioning.
- */
-export async function ensurePlansAndServices() {
-  const safetyService = await (prisma.serviceType.upsert as any)({
-    where: { name: "Safety Oversight" },
-    update: {},
-    create: {
-      name: "Safety Oversight",
-      category: ServiceTypeCategory.SAFETY_OVERSIGHT,
-      description: "Quarterly or bi-weekly home safety audits, hazard checks and wellness reports.",
-      durationMinutes: 60,
-    },
-  });
-
-  const cleaningService = await (prisma.serviceType.upsert as any)({
-    where: { name: "Home Cleaning" },
-    update: {},
-    create: {
-      name: "Home Cleaning",
-      category: ServiceTypeCategory.CLEANING,
-      description: "HEPA allergen vacuuming, pathway clearing, kitchen & living area maintenance.",
-      durationMinutes: 90,
-    },
-  });
-
-  const essentialPlan = await (prisma.servicePlan.upsert as any)({
-    where: { code: "ESSENTIAL_GUARD" },
-    update: {
-      price: 995,
-      name: "Essential Guard",
-      shortDescription: "Essential non-medical home safety oversight and hazard mitigation.",
-      fullDescription: "Includes 6 comprehensive safety oversight visits per quarter with digitized wellness reports.",
-    },
-    create: {
-      name: "Essential Guard",
-      code: "ESSENTIAL_GUARD",
-      shortDescription: "Essential non-medical home safety oversight and hazard mitigation.",
-      fullDescription: "Includes 6 comprehensive safety oversight visits per quarter with digitized wellness reports.",
-      price: 995,
-      billingInterval: BillingInterval.QUARTERLY,
-      isActive: true,
-      metadata: {
-        features: [
-          "6 Safety Oversight Visits / Quarter",
-          "Home Safety Score & Hazard Assessment",
-          "Family Portal Access with Live Reports",
-          "Dedicated Local Care Concierge",
-        ],
-      },
-    },
-  });
-
-  const guardianPlan = await (prisma.servicePlan.upsert as any)({
-    where: { code: "GUARDIAN_PLUS" },
-    update: {
-      price: 1892,
-      name: "Guardian Plus",
-      shortDescription: "Complete dual-protection safety oversight and specialized home cleaning.",
-      fullDescription: "Includes 12 total visits per quarter (6 safety oversight and 6 home cleanings).",
-    },
-    create: {
-      name: "Guardian Plus",
-      code: "GUARDIAN_PLUS",
-      shortDescription: "Complete dual-protection safety oversight and specialized home cleaning.",
-      fullDescription: "Includes 12 total visits per quarter (6 safety oversight and 6 home cleanings).",
-      price: 1892,
-      billingInterval: BillingInterval.QUARTERLY,
-      isActive: true,
-      metadata: {
-        features: [
-          "6 Safety Oversight Visits / Quarter",
-          "6 Home Cleaning Visits / Quarter",
-          "HEPA Allergen Deep Vacuuming & Sanitization",
-          "Home Safety Hazard Mitigation",
-          "Direct Caregiver & Family Report Dispatch",
-        ],
-      },
-    },
-  });
-
-  const standaloneCleaningPlan = await (prisma.servicePlan.upsert as any)({
-    where: { code: "STANDALONE_CLEANING" },
-    update: {
-      price: 179,
-      name: "Standalone Cleaning",
-      shortDescription: "Standalone single deep cleaning visit.",
-      fullDescription: "Standalone Cleaning (1 single deep cleaning visit with HEPA allergen sanitization).",
-    },
-    create: {
-      name: "Standalone Cleaning",
-      code: "STANDALONE_CLEANING",
-      shortDescription: "Standalone single deep cleaning visit.",
-      fullDescription: "Standalone Cleaning (1 single deep cleaning visit with HEPA allergen sanitization).",
-      price: 179,
-      billingInterval: BillingInterval.ONE_TIME,
-      isActive: true,
-      metadata: {
-        features: [
-          "1 In-Depth Home Cleaning Visit",
-          "HEPA Allergen Vacuuming & Deep Sanitization",
-          "Pathway Clearance & Slip/Fall Hazard Removal",
-        ],
-      },
-    },
-  });
-
-  // Ensure PlanServices exist for plans so visit allocation is accurate
-  const epServices = await (prisma.planService.count as any)({ where: { planId: essentialPlan.id } });
-  if (epServices === 0) {
-    await (prisma.planService.create as any)({
-      data: {
-        planId: essentialPlan.id,
-        serviceTypeId: safetyService.id,
-        allocatedVisits: 6,
-        unit: "visits",
-      },
-    });
-  }
-
-  const gpServices = await (prisma.planService.count as any)({ where: { planId: guardianPlan.id } });
-  if (gpServices === 0) {
-    await (prisma.planService.create as any)({
-      data: {
-        planId: guardianPlan.id,
-        serviceTypeId: safetyService.id,
-        allocatedVisits: 6,
-        unit: "visits",
-      },
-    });
-    await (prisma.planService.create as any)({
-      data: {
-        planId: guardianPlan.id,
-        serviceTypeId: cleaningService.id,
-        allocatedVisits: 6,
-        unit: "visits",
-      },
-    });
-  }
-
-  const scServices = await (prisma.planService.count as any)({ where: { planId: standaloneCleaningPlan.id } });
-  if (scServices === 0) {
-    await (prisma.planService.create as any)({
-      data: {
-        planId: standaloneCleaningPlan.id,
-        serviceTypeId: cleaningService.id,
-        allocatedVisits: 1,
-        unit: "visits",
-      },
-    });
-  }
-
-  return {
-    safetyService,
-    cleaningService,
-    essentialPlan,
-    guardianPlan,
-    standaloneCleaningPlan,
+    isOneTime: plan.billingInterval === "ONE_TIME",
   };
 }
 
@@ -686,7 +442,6 @@ export async function processAgreementPayment(
 
   const client: any = user.client;
   const pricing = await resolvePlanPricingDynamic(input.selectedPlan, input.hasCleaningAddon);
-  const { safetyService, cleaningService } = await ensurePlansAndServices();
 
   const billingMethod = input.billingMethod === "INVOICE" ? BillingMethod.INVOICE : BillingMethod.AUTOMATIC;
   const isInvoiceBilling = billingMethod === BillingMethod.INVOICE;
@@ -807,7 +562,7 @@ export async function processAgreementPayment(
       },
     });
 
-    // Create visit allocations dynamically from pricing.services
+    // Create visit allocations dynamically from plan services configured in DB
     if (pricing.services && pricing.services.length > 0) {
       for (const service of pricing.services) {
         if (service.allocatedVisits > 0 && service.serviceTypeId) {
@@ -826,15 +581,20 @@ export async function processAgreementPayment(
         }
       }
     } else {
-      // Fallback default allocations
-      await prisma.visitAllocation.create({
-        data: {
-          subscriptionPeriodId: period.id,
-          serviceTypeId: safetyService.id,
-          allocatedCount: 6,
-          usedCount: 0,
-        },
+      // If plan has no specific services attached, dynamically link active service types from DB
+      const defaultServiceType = await prisma.serviceType.findFirst({
+        where: { isActive: true },
       });
+      if (defaultServiceType) {
+        await prisma.visitAllocation.create({
+          data: {
+            subscriptionPeriodId: period.id,
+            serviceTypeId: defaultServiceType.id,
+            allocatedCount: pricing.totalVisits || 6,
+            usedCount: 0,
+          },
+        });
+      }
     }
   }
 
