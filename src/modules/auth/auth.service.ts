@@ -36,7 +36,7 @@ export type HomeAccessTypeType =
 /**
  * Helper to compute agreement status flags.
  */
-function computeAgreementFlags(user: { role: UserRole; client?: any }) {
+export function computeAgreementFlags(user: { role: UserRole; client?: any }) {
   if (user.role !== UserRole.CLIENT) {
     return {
       hasCompletedAgreement: true,
@@ -282,230 +282,13 @@ export async function verifySmsOtp(input: VerifySmsOtpInput) {
   };
 }
 
+import { submitServiceAgreement } from "../agreement/agreement.service";
+
 /**
  * Submit Client Service Agreement with dynamic plan resolution and state cancellation deadline.
  */
 export async function submitAgreement(userId: string, input: SubmitAgreementInput) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: {
-      client: {
-        include: {
-          agreements: true,
-        },
-      },
-    },
-  });
-
-  if (!user) {
-    throw new Error("User account not found.");
-  }
-
-  if (user.role !== UserRole.CLIENT) {
-    throw new Error("Only clients are required to sign the client service agreement.");
-  }
-
-  // 1. Resolve Dynamic Plan & PlanVersion from Database
-  let targetPlan: any = null;
-  let targetVersion: any = null;
-
-  if (input.planId) {
-    targetPlan = await (prisma.servicePlan.findUnique as any)({
-      where: { id: input.planId },
-      include: {
-        versions: {
-          where: { status: "ACTIVE" },
-          orderBy: { versionNumber: "desc" },
-          take: 1,
-          include: { planServices: { include: { serviceType: true } } },
-        },
-      },
-    });
-    targetVersion = targetPlan?.versions?.[0];
-  } else if (input.planVersionId) {
-    targetVersion = await ((prisma as any).planVersion.findUnique as any)({
-      where: { id: input.planVersionId },
-      include: {
-        plan: true,
-        planServices: { include: { serviceType: true } },
-      },
-    });
-    targetPlan = targetVersion?.plan;
-  } else {
-    targetPlan = await (prisma.servicePlan.findFirst as any)({
-      where: {
-        OR: [
-          { code: input.selectedPlan.toUpperCase() },
-          { name: { equals: input.selectedPlan, mode: "insensitive" } },
-        ],
-      },
-      include: {
-        versions: {
-          where: { status: "ACTIVE" },
-          orderBy: { versionNumber: "desc" },
-          take: 1,
-          include: { planServices: { include: { serviceType: true } } },
-        },
-      },
-    });
-    targetVersion = targetPlan?.versions?.[0];
-  }
-
-  const basePrice = targetVersion?.price ?? targetPlan?.price ?? 995;
-  const finalPrice = input.hasCleaningAddon ? basePrice + 60 : basePrice;
-
-  // 2. Compute 3-Business-Day Cancellation Deadline
-  const deadlineResult = CancellationDeadlineService.calculateDeadline(
-    input.state,
-    input.agreementDate
-  );
-
-  // 3. Update or create Client profile
-  let clientId = user.client?.id;
-  const signerRole = input.signerRole || "RESIDENT";
-  const homeAccessType = input.homeAccessType || "RESIDENT_ANSWERS";
-
-  if (!clientId) {
-    const clientCount = await prisma.client.count();
-    const clientNumber = `AW-${1001 + clientCount}`;
-    const newClient = await (prisma.client.create as any)({
-      data: {
-        userId: user.id,
-        clientNumber,
-        address: input.address,
-        city: input.city,
-        state: input.state,
-        postalCode: input.postalCode,
-        country: "USA",
-        dateOfBirth: input.dob,
-        signerRole,
-        legalAuthority: input.legalAuthority || null,
-        primaryContactName: input.primaryContactName,
-        primaryContactPhone: input.primaryContactPhone,
-        primaryContactEmail: input.primaryContactEmail || input.email || user.email,
-        primaryContactRelation: input.primaryContactRelation,
-        emergencyContactName: input.emergencyContactName,
-        emergencyContactPhone: input.emergencyContactPhone,
-        emergencyContactRelation: input.emergencyContactRelation,
-        homeAccessType,
-        homeAccessInstructions: input.homeAccessInstructions || null,
-        homeAccessCode: input.homeAccessCode || null,
-        selectedPlan: targetPlan?.code || input.selectedPlan,
-        hasCleaningAddon: input.hasCleaningAddon,
-        hasCompletedAgreement: true,
-        onboardingStatus: OnboardingStatus.AGREEMENT_SIGNED,
-      },
-    });
-    clientId = newClient.id;
-  } else {
-    await (prisma.client.update as any)({
-      where: { id: clientId },
-      data: {
-        address: input.address,
-        city: input.city,
-        state: input.state,
-        postalCode: input.postalCode,
-        dateOfBirth: input.dob,
-        signerRole,
-        legalAuthority: input.legalAuthority || null,
-        primaryContactName: input.primaryContactName,
-        primaryContactPhone: input.primaryContactPhone,
-        primaryContactEmail: input.primaryContactEmail || input.email || user.email,
-        primaryContactRelation: input.primaryContactRelation,
-        emergencyContactName: input.emergencyContactName,
-        emergencyContactPhone: input.emergencyContactPhone,
-        emergencyContactRelation: input.emergencyContactRelation,
-        homeAccessType,
-        homeAccessInstructions: input.homeAccessInstructions || null,
-        homeAccessCode: input.homeAccessCode || null,
-        selectedPlan: targetPlan?.code || input.selectedPlan,
-        hasCleaningAddon: input.hasCleaningAddon,
-        hasCompletedAgreement: true,
-        onboardingStatus: OnboardingStatus.AGREEMENT_SIGNED,
-      },
-    });
-  }
-
-  // 4. Create ServiceAgreement snapshot record
-  const planSnapshot = {
-    planId: targetPlan?.id,
-    planVersionId: targetVersion?.id,
-    planName: targetVersion?.name || targetPlan?.name || input.selectedPlan,
-    planCode: targetPlan?.code || input.selectedPlan,
-    basePrice,
-    addonPrice: input.hasCleaningAddon ? 60 : 0,
-    totalPrice: finalPrice,
-    billingInterval: targetVersion?.billingInterval || targetPlan?.billingInterval || "QUARTERLY",
-    features: targetVersion?.features || [],
-    services: (targetVersion?.planServices || []).map((ps: any) => ({
-      serviceName: ps.serviceType?.name,
-      allocatedVisits: ps.allocatedVisits,
-    })),
-  };
-
-  const agreement = await (prisma.serviceAgreement.create as any)({
-    data: {
-      clientId,
-      planId: targetPlan?.id || null,
-      planVersionId: targetVersion?.id || null,
-      templateVersion: "v2.0",
-      state: input.state || "RI",
-      signerRole,
-      signerName: input.signerName || input.clientPrintedName,
-      legalAuthority: input.legalAuthority || null,
-      primaryBillingContact: input.primaryBillingContact || input.primaryContactEmail || input.email || user.email,
-      cancellationDeadline: deadlineResult.deadlineDate,
-      cancellationDeadlineRule: deadlineResult.ruleExplanation,
-      planSnapshot,
-      status: "SIGNED",
-      selectedPlan: targetPlan?.code || input.selectedPlan,
-      planPrice: finalPrice,
-      hasCleaningAddon: input.hasCleaningAddon,
-      clientPrintedName: input.clientPrintedName,
-      authorizedRepName: input.authorizedRepName,
-      relationshipToClient: input.relationshipToClient,
-      emergencyContactName: input.emergencyContactName,
-      emergencyContactPhone: input.emergencyContactPhone,
-      emergencyContactRelation: input.emergencyContactRelation,
-      clientSignature: input.clientSignature,
-      agreementDate: new Date(input.agreementDate),
-      signedAt: new Date(),
-      executedAt: new Date(),
-      stripePaymentMethodId: input.paymentMethodId || null,
-      stripeSetupIntentId: input.setupIntentId || null,
-    },
-  });
-
-  if (input.phone) {
-    await prisma.user.update({
-      where: { id: userId },
-      data: { phone: input.phone },
-    });
-  }
-
-  // 5. Provision subscription & billing if payment details supplied
-  if (input.paymentMethodId || input.setupIntentId || input.billingMethod === "INVOICE") {
-    try {
-      await processAgreementPayment(userId, {
-        agreementId: agreement.id,
-        paymentMethodId: input.paymentMethodId || undefined,
-        setupIntentId: input.setupIntentId || undefined,
-        billingMethod: input.billingMethod || "AUTOMATIC",
-        selectedPlan: (targetPlan?.code as any) || "GUARDIAN_PLUS",
-        hasCleaningAddon: input.hasCleaningAddon,
-      });
-    } catch (paymentErr) {
-      console.warn("⚠️ Agreement payment provisioning notice:", paymentErr);
-    }
-  }
-
-  const updatedProfile = await getUserProfile(userId);
-
-  return {
-    agreement,
-    user: updatedProfile,
-    cancellationDeadline: deadlineResult,
-  };
+  return submitServiceAgreement(userId, input);
 }
 
 /**
@@ -574,6 +357,8 @@ export async function getMyAgreement(userId: string) {
     cardLast4: client?.cardLast4 || null,
   };
 }
+
+
 
 /**
  * Get full user profile including client, flags, and permissions.

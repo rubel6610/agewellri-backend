@@ -1,5 +1,5 @@
 import "dotenv/config";
-import express, { Application, Request, Response } from "express";
+import express, { Application, Request, Response, NextFunction } from "express";
 import cors from "cors";
 import routes from "./routes";
 import { setupSwagger } from "./config/swagger";
@@ -10,7 +10,7 @@ const app: Application = express();
 // Middlewares
 app.use(
   cors({
-    origin: [process.env.FRONTEND_URL!,"https://arfanrubel3000.ilmifygroup.com", "http://localhost:3000", ],
+    origin: [process.env.FRONTEND_URL!, "https://arfanrubel3000.ilmifygroup.com", "http://localhost:3000"],
     credentials: true,
   })
 );
@@ -43,5 +43,17 @@ app.use("/api/v1", routes);
 
 // Global Error Logger
 app.use(errorLogger);
+
+// Global JSON Error Responder
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  const statusCode = err.statusCode || err.status || 500;
+  const message = err.message || "Internal Server Error";
+  res.status(statusCode).json({
+    success: false,
+    message,
+    statusCode,
+    ...(process.env.NODE_ENV === "development" ? { stack: err.stack } : {}),
+  });
+});
 
 export default app;

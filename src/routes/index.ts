@@ -3,6 +3,9 @@ import authRoutes from "../modules/auth/auth.routes";
 import paymentRoutes from "../modules/payment/payment.routes";
 import planRoutes from "../modules/plan/plan.routes";
 import specialistRoutes from "../modules/specialist/specialist.routes";
+import invitationRoutes from "../modules/invitation/invitation.routes";
+import agreementRoutes from "../modules/agreement/agreement.routes";
+import clientRoutes from "../modules/client/client.routes";
 
 const router = Router();
 
@@ -15,6 +18,18 @@ const moduleRoutes: ModuleRoute[] = [
   {
     path: "/auth",
     route: authRoutes,
+  },
+  {
+    path: "/invitations",
+    route: invitationRoutes,
+  },
+  {
+    path: "/agreements",
+    route: agreementRoutes,
+  },
+  {
+    path: "/clients",
+    route: clientRoutes,
   },
   {
     path: "/payments",

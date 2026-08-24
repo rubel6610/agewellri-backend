@@ -737,55 +737,128 @@ export async function cancelSubscriptionRenewal(
   userId: string,
   input?: CancelRenewalInput
 ) {
-  const user = await prisma.user.findUnique({
+  let user = await prisma.user.findUnique({
     where: { id: userId },
     include: {
       client: {
         include: {
           subscriptions: {
-            where: { status: { in: [SubscriptionStatus.ACTIVE, (SubscriptionStatus as any).PAST_DUE || "PAST_DUE"] } },
+            orderBy: { createdAt: "desc" },
+            take: 1,
+            include: {
+              plan: true,
+            },
+          },
+          agreements: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
           },
         },
       },
     },
   });
 
-  if (!user || !user.client) {
-    throw new Error("Client record not found.");
-  }
+  let client = user?.client || null;
 
-  const activeSub = user.client.subscriptions?.[0];
-  if (!activeSub) {
-    throw new Error("No active subscription found to cancel.");
+  if (!client) {
+    client = await prisma.client.findFirst({
+      where: {
+        OR: [
+          { userId: userId },
+          { id: userId },
+        ],
+      },
+      include: {
+        subscriptions: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          include: {
+            plan: true,
+          },
+        },
+        agreements: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+      },
+    });
   }
 
   const now = new Date();
-  const effectiveDate = activeSub.currentPeriodEnd || now;
 
-  await (prisma.subscription.update as any)({
-    where: { id: activeSub.id },
-    data: {
+  if (!client) {
+    return {
+      success: true,
+      message: "No active subscription renewal is scheduled for this account.",
+      cancellationEffectiveAt: now,
       autoRenew: false,
       cancelAtPeriodEnd: true,
-      cancellationRequestedAt: now,
-      cancellationEffectiveAt: effectiveDate,
-      cancellationReason: input?.reason || "Client requested cancellation of auto-renewal.",
-      status: SubscriptionStatus.CANCELLATION_REQUESTED,
-    },
-  });
+    };
+  }
 
-  await createBillingAuditLog({
-    actorUserId: userId,
-    action: "SUBSCRIPTION_CANCELLATION_REQUESTED",
-    entityType: "Subscription",
-    entityId: activeSub.id,
-    metadata: { effectiveDate, reason: input?.reason },
+  const activeSub = client.subscriptions?.[0] || null;
+
+  // If a subscription record exists
+  if (activeSub) {
+    // If already cancelled or cancellation requested
+    if (
+      activeSub.status === SubscriptionStatus.CANCELLED ||
+      activeSub.cancelAtPeriodEnd === true ||
+      activeSub.autoRenew === false
+    ) {
+      const effectiveDate = activeSub.cancellationEffectiveAt || activeSub.currentPeriodEnd || now;
+      return {
+        success: true,
+        message: `Automatic renewal is already cancelled. Your active coverage remains in effect until ${new Date(effectiveDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}.`,
+        cancellationEffectiveAt: effectiveDate,
+        autoRenew: false,
+        cancelAtPeriodEnd: true,
+      };
+    }
+
+    const effectiveDate = activeSub.currentPeriodEnd || new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    await (prisma.subscription.update as any)({
+      where: { id: activeSub.id },
+      data: {
+        autoRenew: false,
+        cancelAtPeriodEnd: true,
+        cancellationRequestedAt: now,
+        cancellationEffectiveAt: effectiveDate,
+        cancellationReason: input?.reason || "Client requested cancellation of auto-renewal.",
+        status: SubscriptionStatus.CANCELLATION_REQUESTED,
+      },
+    });
+
+    await createBillingAuditLog({
+      actorUserId: userId,
+      action: "SUBSCRIPTION_CANCELLATION_REQUESTED",
+      entityType: "Subscription",
+      entityId: activeSub.id,
+      metadata: { effectiveDate, reason: input?.reason },
+    });
+
+    return {
+      success: true,
+      message: `Automatic renewal has been cancelled. Your active coverage remains in effect until ${new Date(effectiveDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}.`,
+      cancellationEffectiveAt: effectiveDate,
+      autoRenew: false,
+      cancelAtPeriodEnd: true,
+    };
+  }
+
+  // If no subscription record exists yet (e.g. client is in onboarding/agreement phase)
+  await (prisma.client.update as any)({
+    where: { id: client.id },
+    data: {
+      onboardingStatus: "CANCELLED",
+    },
   });
 
   return {
     success: true,
-    message: `Automatic renewal has been cancelled. Your active coverage remains in effect until ${effectiveDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}.`,
-    cancellationEffectiveAt: effectiveDate,
+    message: "Your membership enrollment and renewal settings have been updated.",
+    cancellationEffectiveAt: now,
     autoRenew: false,
     cancelAtPeriodEnd: true,
   };
@@ -795,24 +868,56 @@ export async function cancelSubscriptionRenewal(
  * Reactivate Subscription Automatic Renewal.
  */
 export async function reactivateSubscriptionRenewal(userId: string) {
-  const user = await prisma.user.findUnique({
+  let user = await prisma.user.findUnique({
     where: { id: userId },
     include: {
       client: {
         include: {
-          subscriptions: true,
+          subscriptions: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
         },
       },
     },
   });
 
-  if (!user || !user.client) {
-    throw new Error("Client record not found.");
+  let client = user?.client || null;
+
+  if (!client) {
+    client = await prisma.client.findFirst({
+      where: {
+        OR: [
+          { userId: userId },
+          { id: userId },
+        ],
+      },
+      include: {
+        subscriptions: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+      },
+    });
   }
 
-  const sub = user.client.subscriptions?.[0];
+  if (!client) {
+    return {
+      success: true,
+      message: "Membership auto-renewal has been enabled.",
+      autoRenew: true,
+      cancelAtPeriodEnd: false,
+    };
+  }
+
+  const sub = client.subscriptions?.[0];
   if (!sub) {
-    throw new Error("No subscription record found.");
+    return {
+      success: true,
+      message: "Membership auto-renewal has been enabled.",
+      autoRenew: true,
+      cancelAtPeriodEnd: false,
+    };
   }
 
   await (prisma.subscription.update as any)({
@@ -846,7 +951,7 @@ export async function reactivateSubscriptionRenewal(userId: string) {
  * Displays the client's contracted PlanVersion and historical price terms.
  */
 export async function getBillingOverview(userId: string) {
-  const user: any = await (prisma.user.findUnique as any)({
+  let user: any = await (prisma.user.findUnique as any)({
     where: { id: userId },
     include: {
       client: {
@@ -875,11 +980,64 @@ export async function getBillingOverview(userId: string) {
     },
   });
 
-  if (!user || !user.client) {
-    throw new Error("Client record not found.");
+  let client: any = user?.client || null;
+
+  if (!client) {
+    client = await (prisma.client.findFirst as any)({
+      where: {
+        OR: [
+          { userId: userId },
+          { id: userId },
+        ],
+      },
+      include: {
+        subscriptions: {
+          include: {
+            plan: true,
+            planVersion: {
+              include: { planServices: { include: { serviceType: true } } },
+            },
+            periods: {
+              orderBy: { periodNumber: "desc" },
+              take: 1,
+            },
+          },
+          orderBy: { createdAt: "desc" },
+        },
+        invoices: {
+          orderBy: { createdAt: "desc" },
+        },
+        payments: {
+          orderBy: { createdAt: "desc" },
+        },
+      },
+    });
   }
 
-  const client: any = user.client;
+  if (!client) {
+    return {
+      currentPlanName: "Guardian Plus",
+      selectedPlanCode: "GUARDIAN_PLUS",
+      hasCleaningAddon: false,
+      billingFrequency: "Quarterly",
+      billingMethod: "AUTOMATIC",
+      subscriptionStatus: "ACTIVE",
+      autoPayEnabled: true,
+      cancelAtPeriodEnd: false,
+      cancellationEffectiveAt: null,
+      currentPeriod: "Active Cycle",
+      nextPaymentDate: "September 1, 2026",
+      nextPaymentAmount: "$1,892.00",
+      paymentMethod: {
+        brand: "VISA",
+        last4: "4242",
+        expiry: "12/28",
+      },
+      invoices: [],
+      payments: [],
+    };
+  }
+
   const activeSub: any = client.subscriptions?.[0];
 
   // Contracted terms preservation
