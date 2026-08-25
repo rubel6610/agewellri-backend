@@ -62,20 +62,26 @@ export async function sendWelcomeInvitation(
   });
 
   const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
-  const invitationLink = `${frontendUrl}/welcome?token=${rawToken}`;
+  const invitationLink = `${frontendUrl}/register?token=${rawToken}&email=${encodeURIComponent(email)}`;
   const clientName = input.firstName
     ? `${input.firstName} ${input.lastName || ""}`.trim()
     : "Valued Member";
 
-  // Dispatch welcome invitation email
-  await sendWelcomeInvitationEmail({
-    to: email,
-    clientName,
-    invitationLink,
-    expiresAt,
-    state: input.state,
-    planName: input.planName,
-  });
+  // Dispatch welcome invitation email unless skipped
+  if (!input.skipEmail) {
+    try {
+      await sendWelcomeInvitationEmail({
+        to: email,
+        clientName,
+        invitationLink,
+        expiresAt,
+        state: input.state,
+        planName: input.planName,
+      });
+    } catch (emailErr) {
+      console.warn("[WARN] Invitation email delivery failed (link still generated):", emailErr);
+    }
+  }
 
   // Audit Log
   try {

@@ -10,6 +10,7 @@ export const createInvitationSchema = z.object({
   planName: z.string().optional().default("Guardian Plus"),
   clientId: z.string().optional().nullable(),
   expiresInDays: z.number().min(1).max(90).optional().default(7),
+  skipEmail: z.boolean().optional(),
 });
 
 export const verifyInvitationTokenSchema = z.object({
