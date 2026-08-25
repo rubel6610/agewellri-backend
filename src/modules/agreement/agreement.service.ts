@@ -371,19 +371,19 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
     });
   }
 
-  // 7. Payment Provisioning
-  if (input.paymentMethodId || input.setupIntentId || input.billingMethod === "INVOICE") {
+  // 7. Payment Provisioning via Stripe
+  if (input.paymentMethodId || input.setupIntentId) {
     try {
       await processAgreementPayment(userId, {
         agreementId: agreement.id,
         paymentMethodId: input.paymentMethodId || undefined,
         setupIntentId: input.setupIntentId || undefined,
-        billingMethod: input.billingMethod || "AUTOMATIC",
+        billingMethod: "AUTOMATIC",
         selectedPlan: (targetPlan?.code as any) || "GUARDIAN_PLUS",
         hasCleaningAddon: input.hasCleaningAddon,
       });
     } catch (paymentErr) {
-      console.warn("⚠️ Agreement payment provisioning notice:", paymentErr);
+      console.warn("⚠️ Agreement Stripe payment provisioning notice:", paymentErr);
     }
   }
 

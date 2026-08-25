@@ -764,6 +764,18 @@ export async function changePlanStatus(
  * Admin: Dynamic Service Catalog Operations
  */
 export async function getAllServices() {
+  const existing = await (prisma.serviceType.findMany as any)({
+    where: { isActive: true },
+    orderBy: { displayOrder: "asc" },
+  });
+
+  if (existing && existing.length > 0) {
+    return existing;
+  }
+
+  // Auto seed default services if catalog is empty
+  await seedInitialPlansAndServices();
+
   return (prisma.serviceType.findMany as any)({
     where: { isActive: true },
     orderBy: { displayOrder: "asc" },
