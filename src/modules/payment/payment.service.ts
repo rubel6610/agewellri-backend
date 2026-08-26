@@ -18,6 +18,11 @@ import {
   AdminBillingFilterInput,
   AdminRetryChargeInput,
 } from "./payment.validation";
+import {
+  ensureVisitAllocationsForPeriod,
+  getClientVisitEntitlements,
+  formatPeriodEntitlements,
+} from "./visit-entitlement.service";
 
 export type WebhookEventStatusType = "RECEIVED" | "PROCESSED" | "FAILED" | "IGNORED";
 
@@ -562,40 +567,13 @@ export async function processAgreementPayment(
       },
     });
 
-    // Create visit allocations dynamically from plan services configured in DB
-    if (pricing.services && pricing.services.length > 0) {
-      for (const service of pricing.services) {
-        if (service.allocatedVisits > 0 && service.serviceTypeId) {
-          try {
-            await (prisma.visitAllocation.create as any)({
-              data: {
-                subscriptionPeriodId: period.id,
-                serviceTypeId: service.serviceTypeId,
-                allocatedCount: service.allocatedVisits,
-                usedCount: 0,
-              },
-            });
-          } catch {
-            // Index collision safeguard
-          }
-        }
-      }
-    } else {
-      // If plan has no specific services attached, dynamically link active service types from DB
-      const defaultServiceType = await prisma.serviceType.findFirst({
-        where: { isActive: true },
-      });
-      if (defaultServiceType) {
-        await prisma.visitAllocation.create({
-          data: {
-            subscriptionPeriodId: period.id,
-            serviceTypeId: defaultServiceType.id,
-            allocatedCount: pricing.totalVisits || 6,
-            usedCount: 0,
-          },
-        });
-      }
-    }
+    // Create visit allocations dynamically from plan services configured in DB (idempotent)
+    await ensureVisitAllocationsForPeriod(
+      period.id,
+      pricing.versionId,
+      pricing.planId,
+      input.hasCleaningAddon
+    );
   }
 
   // 5. Update Client status
@@ -960,11 +938,14 @@ export async function getBillingOverview(userId: string) {
             include: {
               plan: true,
               planVersion: {
-                include: { planServices: { include: { serviceType: true } } },
+                include: { planServices: true },
               },
               periods: {
                 orderBy: { periodNumber: "desc" },
                 take: 1,
+                include: {
+                  allocations: true,
+                },
               },
             },
             orderBy: { createdAt: "desc" },
@@ -974,6 +955,9 @@ export async function getBillingOverview(userId: string) {
           },
           payments: {
             orderBy: { createdAt: "desc" },
+          },
+          appointments: {
+            where: { status: { not: "CANCELLED" } },
           },
         },
       },
@@ -995,11 +979,14 @@ export async function getBillingOverview(userId: string) {
           include: {
             plan: true,
             planVersion: {
-              include: { planServices: { include: { serviceType: true } } },
+              include: { planServices: true },
             },
             periods: {
               orderBy: { periodNumber: "desc" },
               take: 1,
+              include: {
+                allocations: true,
+              },
             },
           },
           orderBy: { createdAt: "desc" },
@@ -1009,6 +996,9 @@ export async function getBillingOverview(userId: string) {
         },
         payments: {
           orderBy: { createdAt: "desc" },
+        },
+        appointments: {
+          where: { status: { not: "CANCELLED" } },
         },
       },
     });
@@ -1035,6 +1025,7 @@ export async function getBillingOverview(userId: string) {
       },
       invoices: [],
       payments: [],
+      visitEntitlements: [],
     };
   }
 
@@ -1088,6 +1079,11 @@ export async function getBillingOverview(userId: string) {
     paymentMethod: pm.paymentMethod,
   }));
 
+  const visitEntitlements = formatPeriodEntitlements(
+    currentPeriod,
+    client.appointments || []
+  );
+
   return {
     currentPlanName: contractedPlanName,
     selectedPlanCode: activeSub?.plan?.code || client.selectedPlan || "GUARDIAN_PLUS",
@@ -1111,6 +1107,7 @@ export async function getBillingOverview(userId: string) {
     },
     invoices: formattedInvoices,
     payments: formattedPayments,
+    visitEntitlements,
   };
 }
 
@@ -1265,7 +1262,7 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
                 include: {
                   periods: { orderBy: { periodNumber: "desc" }, take: 1 },
                   plan: true,
-                  planVersion: { include: { planServices: { include: { serviceType: true } } } },
+                  planVersion: { include: { planServices: true } },
                 },
               },
             },
@@ -1301,39 +1298,13 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
               });
             }
 
-            // Provision fresh visit allocations from active version or fallback
-            const versionServices = activeSub.planVersion?.planServices || [];
-            if (versionServices.length > 0) {
-              for (const vs of versionServices) {
-                if (vs.serviceTypeId && vs.allocatedVisits > 0) {
-                  try {
-                    await (prisma.visitAllocation.create as any)({
-                      data: {
-                        subscriptionPeriodId: newPeriod.id,
-                        serviceTypeId: vs.serviceTypeId,
-                        allocatedCount: vs.allocatedVisits,
-                        usedCount: 0,
-                      },
-                    });
-                  } catch {}
-                }
-              }
-            } else {
-              // Safety oversight default quota
-              const safetyType = await prisma.serviceType.findFirst({
-                where: { category: ServiceTypeCategory.SAFETY_OVERSIGHT },
-              });
-              if (safetyType) {
-                await (prisma.visitAllocation.create as any)({
-                  data: {
-                    subscriptionPeriodId: newPeriod.id,
-                    serviceTypeId: safetyType.id,
-                    allocatedCount: 6,
-                    usedCount: 0,
-                  },
-                });
-              }
-            }
+            // Provision fresh visit allocations idempotently from active plan version / services
+            await ensureVisitAllocationsForPeriod(
+              newPeriod.id,
+              activeSub.planVersionId,
+              activeSub.planId,
+              activeSub.client?.hasCleaningAddon
+            );
 
             // Update Subscription timestamps
             await (prisma.subscription.update as any)({

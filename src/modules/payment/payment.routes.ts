@@ -18,6 +18,8 @@ import {
   handleAdminTriggerReminders,
   handleAdminRetryCharge,
   handleWebhook,
+  handleGetClientVisitEntitlements,
+  handleGetAdminClientVisitEntitlements,
 } from "./payment.controller";
 
 const router = Router();
@@ -32,6 +34,7 @@ router.post("/create-payment-intent", authenticate, handleCreatePaymentIntent);
 router.post("/save-payment-method", authenticate, handleSavePaymentMethod);
 router.get("/payment-methods", authenticate, handleGetPaymentMethods);
 router.get("/billing-info", authenticate, handleGetBillingOverview);
+router.get("/visit-entitlements", authenticate, handleGetClientVisitEntitlements);
 router.post("/process-agreement-payment", authenticate, handleProcessAgreementPayment);
 router.post("/create-invoice-payment", authenticate, handleCreateInvoicePayment);
 router.post("/subscription/cancel-renewal", authenticate, handleCancelRenewal);
@@ -42,6 +45,7 @@ router.get("/admin/overview", authenticate, handleGetAdminOverview);
 router.get("/admin/invoices", authenticate, handleGetAdminInvoices);
 router.get("/admin/subscriptions", authenticate, handleGetAdminSubscriptions);
 router.get("/admin/renewals", authenticate, handleGetAdminUpcomingRenewals);
+router.get("/admin/client/:id/visit-entitlements", authenticate, handleGetAdminClientVisitEntitlements);
 router.post("/admin/trigger-reminders", authenticate, handleAdminTriggerReminders);
 router.post("/admin/retry-charge", authenticate, handleAdminRetryCharge);
 

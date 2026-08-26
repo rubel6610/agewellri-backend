@@ -1,4 +1,5 @@
 import prisma from "../../lib/prisma";
+import { formatPeriodEntitlements } from "../payment/visit-entitlement.service";
 
 export interface AdminClientsQuery {
   search?: string;
@@ -246,7 +247,12 @@ export async function getAdminClientById(clientIdOrNumber: string) {
       subscriptions: {
         orderBy: { createdAt: "desc" },
         include: {
-          periods: { orderBy: { startDate: "desc" } },
+          periods: {
+            orderBy: { startDate: "desc" },
+            include: {
+              allocations: true,
+            },
+          },
         },
       },
       invoices: {
@@ -363,9 +369,34 @@ export async function getAdminClientById(clientIdOrNumber: string) {
     subscriptionStatus: latestSub?.status || (isSubActive ? "ACTIVE" : "PENDING"),
     cardBrand: client.cardBrand,
     cardLast4: client.cardLast4,
-    totalVisitsAllowed: client.hasCleaningAddon ? 18 : 12,
-    completedVisitsCount: client.appointments?.filter((a: any) => a.status === "COMPLETED").length || 0,
-    remainingVisitsCount: (client.hasCleaningAddon ? 18 : 12) - (client.appointments?.filter((a: any) => a.status === "COMPLETED").length || 0),
+    totalVisitsAllowed: (() => {
+      const currentPeriod = latestSub?.periods?.[0];
+      const entitlements = formatPeriodEntitlements(currentPeriod, client.appointments || []);
+      if (entitlements.length > 0) {
+        return entitlements.reduce((sum, item) => sum + item.allocated, 0);
+      }
+      return client.hasCleaningAddon ? 18 : 12;
+    })(),
+    completedVisitsCount: (() => {
+      const currentPeriod = latestSub?.periods?.[0];
+      const entitlements = formatPeriodEntitlements(currentPeriod, client.appointments || []);
+      if (entitlements.length > 0) {
+        return entitlements.reduce((sum, item) => sum + item.completed, 0);
+      }
+      return client.appointments?.filter((a: any) => a.status === "COMPLETED").length || 0;
+    })(),
+    remainingVisitsCount: (() => {
+      const currentPeriod = latestSub?.periods?.[0];
+      const entitlements = formatPeriodEntitlements(currentPeriod, client.appointments || []);
+      if (entitlements.length > 0) {
+        return entitlements.reduce((sum, item) => sum + item.remaining, 0);
+      }
+      return (client.hasCleaningAddon ? 18 : 12) - (client.appointments?.filter((a: any) => a.status === "COMPLETED").length || 0);
+    })(),
+    visitEntitlements: (() => {
+      const currentPeriod = latestSub?.periods?.[0];
+      return formatPeriodEntitlements(currentPeriod, client.appointments || []);
+    })(),
     nextVisitDate: safeFormatDate(nextAppt?.startAt),
     renewalDate: safeFormatDate(latestSub?.currentPeriodEnd),
     status: isSubActive ? "active" : isExecutedAgreement ? "active" : "pending_onboarding",
