@@ -22,14 +22,14 @@ app.use(
   })
 );
 app.use(express.urlencoded({ extended: true }));
-app.use((req:Request,res:Response,next:NextFunction)=>{
-  console.log("Request URL:", req.url);
-  console.log("Request Headers:", req.headers);
-  console.log("Request ip:", req.ip);
-  console.log("Request user agent:", req.headers['user-agent']);
-  // console.log("Request Body:", req.);
-  next();
-})
+// app.use((req:Request,res:Response,next:NextFunction)=>{
+//   console.log("Request URL:", req.url);
+//   console.log("Request Headers:", req.headers);
+//   console.log("Request ip:", req.ip);
+//   console.log("Request user agent:", req.headers['user-agent']);
+//   // console.log("Request Body:", req.);
+//   next();
+// })
 // Terminal Request Logger
 app.use(requestLogger);
 
