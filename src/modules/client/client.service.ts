@@ -107,6 +107,11 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
 
     const subscriptionStatus = latestSub?.status || (isSubActive ? "ACTIVE" : "PENDING");
 
+    const isEnrolledAndPaid = isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
+    const totalVisitsAllowed = isEnrolledAndPaid ? (c.hasCleaningAddon ? 18 : 12) : 0;
+    const completedVisitsCount = 0;
+    const remainingVisitsCount = isEnrolledAndPaid ? (c.hasCleaningAddon ? 18 : 12) : 0;
+
     return {
       id: c.clientNumber || c.id,
       internalId: c.id,
@@ -145,12 +150,12 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
       subscriptionStatus,
       cardBrand: c.cardBrand,
       cardLast4: c.cardLast4,
-      totalVisitsAllowed: c.hasCleaningAddon ? 18 : 12,
-      completedVisitsCount: 0,
-      remainingVisitsCount: c.hasCleaningAddon ? 18 : 12,
+      totalVisitsAllowed,
+      completedVisitsCount,
+      remainingVisitsCount,
       nextVisitDate: safeFormatDate(nextAppt?.startAt),
       renewalDate: safeFormatDate(latestSub?.currentPeriodEnd),
-      status: isSubActive ? "active" : isExecutedAgreement ? "active" : "pending_onboarding",
+      status: isEnrolledAndPaid ? "active" : isExecutedAgreement ? "pending_payment" : "pending_onboarding",
       createdAt: safeFormatDate(c.createdAt) || "Recently",
       // Onboarding Timeline Flags
       timeline: {
@@ -370,6 +375,8 @@ export async function getAdminClientById(clientIdOrNumber: string) {
     cardBrand: client.cardBrand,
     cardLast4: client.cardLast4,
     totalVisitsAllowed: (() => {
+      const isEnrolledAndPaid = isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
+      if (!isEnrolledAndPaid) return 0;
       const currentPeriod = latestSub?.periods?.[0];
       const entitlements = formatPeriodEntitlements(currentPeriod, client.appointments || []);
       if (entitlements.length > 0) {
@@ -378,6 +385,8 @@ export async function getAdminClientById(clientIdOrNumber: string) {
       return client.hasCleaningAddon ? 18 : 12;
     })(),
     completedVisitsCount: (() => {
+      const isEnrolledAndPaid = isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
+      if (!isEnrolledAndPaid) return 0;
       const currentPeriod = latestSub?.periods?.[0];
       const entitlements = formatPeriodEntitlements(currentPeriod, client.appointments || []);
       if (entitlements.length > 0) {
@@ -386,6 +395,8 @@ export async function getAdminClientById(clientIdOrNumber: string) {
       return client.appointments?.filter((a: any) => a.status === "COMPLETED").length || 0;
     })(),
     remainingVisitsCount: (() => {
+      const isEnrolledAndPaid = isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
+      if (!isEnrolledAndPaid) return 0;
       const currentPeriod = latestSub?.periods?.[0];
       const entitlements = formatPeriodEntitlements(currentPeriod, client.appointments || []);
       if (entitlements.length > 0) {
@@ -394,12 +405,14 @@ export async function getAdminClientById(clientIdOrNumber: string) {
       return (client.hasCleaningAddon ? 18 : 12) - (client.appointments?.filter((a: any) => a.status === "COMPLETED").length || 0);
     })(),
     visitEntitlements: (() => {
+      const isEnrolledAndPaid = isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
+      if (!isEnrolledAndPaid) return [];
       const currentPeriod = latestSub?.periods?.[0];
       return formatPeriodEntitlements(currentPeriod, client.appointments || []);
     })(),
     nextVisitDate: safeFormatDate(nextAppt?.startAt),
     renewalDate: safeFormatDate(latestSub?.currentPeriodEnd),
-    status: isSubActive ? "active" : isExecutedAgreement ? "active" : "pending_onboarding",
+    status: isExecutedAgreement && (isSubActive || paymentStatus === "PAID") ? "active" : isExecutedAgreement ? "pending_payment" : "pending_onboarding",
     createdAt: safeFormatDate(client.createdAt) || "Recently",
     timeline: {
       welcomeSent: Boolean(client.invitations?.length || client.createdAt),

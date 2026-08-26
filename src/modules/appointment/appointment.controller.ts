@@ -40,6 +40,13 @@ export async function handleScheduleClientAppointment(
       });
       return;
     }
+    if (error instanceof Error) {
+      res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+      return;
+    }
     next(error);
   }
 }
@@ -76,6 +83,13 @@ export async function handleScheduleAdminAppointment(
       });
       return;
     }
+    if (error instanceof Error) {
+      res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+      return;
+    }
     next(error);
   }
 }
@@ -102,7 +116,11 @@ export async function handleGetClientAppointments(
       message: "Appointments retrieved successfully.",
       data: appointments,
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof Error) {
+      res.status(400).json({ success: false, message: error.message });
+      return;
+    }
     next(error);
   }
 }
@@ -140,7 +158,11 @@ export async function handleGetAdminAppointments(
       message: "Appointments retrieved successfully.",
       data: appointments,
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof Error) {
+      res.status(400).json({ success: false, message: error.message });
+      return;
+    }
     next(error);
   }
 }
@@ -168,7 +190,11 @@ export async function handleGetAppointmentById(
       message: "Appointment retrieved successfully.",
       data: appointment,
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof Error) {
+      res.status(400).json({ success: false, message: error.message });
+      return;
+    }
     next(error);
   }
 }
@@ -213,6 +239,13 @@ export async function handleRescheduleAppointment(
       });
       return;
     }
+    if (error instanceof Error) {
+      res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+      return;
+    }
     next(error);
   }
 }
@@ -248,7 +281,11 @@ export async function handleCancelAppointment(
       message: "Appointment cancelled successfully.",
       data: appointment,
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof Error) {
+      res.status(400).json({ success: false, message: error.message });
+      return;
+    }
     next(error);
   }
 }
@@ -288,6 +325,13 @@ export async function handleUpdateAppointmentStatus(
         success: false,
         message: "Invalid status update data.",
         errors: error.flatten().fieldErrors,
+      });
+      return;
+    }
+    if (error instanceof Error) {
+      res.status(400).json({
+        success: false,
+        message: error.message,
       });
       return;
     }

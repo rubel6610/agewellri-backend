@@ -329,7 +329,7 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
   const activeSubscription = await (prisma.subscription.findFirst as any)({
     where: {
       clientId: client.id,
-      status: { in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.PENDING, SubscriptionStatus.CANCELLATION_REQUESTED] },
+      status: { in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELLATION_REQUESTED] },
       isArchived: false,
     },
     orderBy: { createdAt: "desc" },
@@ -351,8 +351,18 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
   });
 
   if (!activeSubscription) {
+    const anySub = await (prisma.subscription.findFirst as any)({
+      where: { clientId: client.id },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (anySub?.status === SubscriptionStatus.PENDING) {
+      throw new Error(
+        "Client payment is pending. Payment must be submitted and processed before visits can be scheduled."
+      );
+    }
     throw new Error(
-      "No active subscription found for client. An active plan membership is required to schedule visits."
+      "No active subscription found for client. An active paid membership plan is required before scheduling visits."
     );
   }
 
@@ -360,7 +370,7 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
   const activePeriod = activeSubscription.periods?.[0];
   if (!activePeriod || activePeriod.status === "EXPIRED" || activePeriod.status === "CANCELLED") {
     throw new Error(
-      "No active billing period found for the client's subscription."
+      "No active billing period found for the client's subscription. Payment and enrollment must be completed first."
     );
   }
 
