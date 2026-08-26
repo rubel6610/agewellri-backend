@@ -14,6 +14,8 @@ import {
   handleGetAdminOverview,
   handleGetAdminInvoices,
   handleGetAdminSubscriptions,
+  handleGetAdminUpcomingRenewals,
+  handleAdminTriggerReminders,
   handleAdminRetryCharge,
   handleWebhook,
 } from "./payment.controller";
@@ -39,6 +41,9 @@ router.post("/subscription/reactivate-renewal", authenticate, handleReactivateRe
 router.get("/admin/overview", authenticate, handleGetAdminOverview);
 router.get("/admin/invoices", authenticate, handleGetAdminInvoices);
 router.get("/admin/subscriptions", authenticate, handleGetAdminSubscriptions);
+router.get("/admin/renewals", authenticate, handleGetAdminUpcomingRenewals);
+router.post("/admin/trigger-reminders", authenticate, handleAdminTriggerReminders);
 router.post("/admin/retry-charge", authenticate, handleAdminRetryCharge);
 
 export default router;
+

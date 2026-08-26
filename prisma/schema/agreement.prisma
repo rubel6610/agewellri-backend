@@ -1,35 +1,76 @@
+model AgreementTemplate {
+  id          String             @id @default(auto()) @map("_id") @db.ObjectId
+  state       String             @unique // RI, CT, MA
+  title       String             // e.g. "Rhode Island Client Service Agreement"
+  description String?
+  isActive    Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  versions    AgreementVersion[]
+}
+
+model AgreementVersion {
+  id                  String             @id @default(auto()) @map("_id") @db.ObjectId
+  templateId          String             @db.ObjectId
+  template            AgreementTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  versionNumber       String             // e.g. "v2.0"
+  state               String             // RI, CT, MA
+  title               String
+  content             String?            // Template legal clauses / content text or JSON string
+  statutoryReference  String?            // e.g. "Rhode Island General Laws § 6-28-3"
+  effectiveFrom       DateTime           @default(now())
+  effectiveTo         DateTime?
+  status              PlanStatus         @default(ACTIVE)
+  isDefault           Boolean            @default(true)
+  metadata            Json?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  agreements          ServiceAgreement[]
+
+  @@unique([templateId, versionNumber])
+  @@index([state, status])
+}
+
 model ServiceAgreement {
-  id                       String          @id @default(auto()) @map("_id") @db.ObjectId
-  clientId                 String          @db.ObjectId
-  client                   Client          @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  subscriptionId           String?         @db.ObjectId
-  subscription             Subscription?   @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
-  planId                   String?         @db.ObjectId
-  plan                     ServicePlan?    @relation(fields: [planId], references: [id], onDelete: SetNull)
-  planVersionId            String?         @db.ObjectId
-  planVersion              PlanVersion?    @relation(fields: [planVersionId], references: [id], onDelete: SetNull)
-  templateVersion          String          @default("v2.0")
-  state                    String          @default("RI")
-  signerRole               SignerRole      @default(RESIDENT)
+  id                       String            @id @default(auto()) @map("_id") @db.ObjectId
+  clientId                 String            @db.ObjectId
+  client                   Client            @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  subscriptionId           String?           @db.ObjectId
+  subscription             Subscription?     @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  planId                   String?           @db.ObjectId
+  plan                     ServicePlan?      @relation(fields: [planId], references: [id], onDelete: SetNull)
+  planVersionId            String?           @db.ObjectId
+  planVersion              PlanVersion?      @relation(fields: [planVersionId], references: [id], onDelete: SetNull)
+  agreementVersionId       String?           @db.ObjectId
+  agreementVersion         AgreementVersion? @relation(fields: [agreementVersionId], references: [id], onDelete: SetNull)
+  templateVersion          String            @default("v2.0")
+  state                    String            @default("RI")
+  signerRole               SignerRole        @default(RESIDENT)
   signerName               String?
+  signerEmail              String?
+  signerPhone              String?
   legalAuthority           String?
+  legalAuthorityOther      String?
   primaryBillingContact    String?
   cancellationDeadline     DateTime?
   cancellationDeadlineRule String?
   planSnapshot             Json?
-  status                   AgreementStatus @default(DRAFT)
+  status                   AgreementStatus   @default(DRAFT)
   provider                 String?
   externalDocumentId       String?
   documentUrl              String?
   selectedPlan             String?
   planPrice                Float?
-  hasCleaningAddon         Boolean         @default(false)
+  hasCleaningAddon         Boolean           @default(false)
   clientSignature          String?
   clientPrintedName        String?
   authorizedRepName        String?
   relationshipToClient     String?
   emergencyContactName     String?
   emergencyContactPhone    String?
+  emergencyContactEmail    String?
   emergencyContactRelation String?
   agreementDate            DateTime?
   sentAt                   DateTime?
@@ -39,9 +80,9 @@ model ServiceAgreement {
   stripePaymentMethodId    String?
   stripeSetupIntentId      String?
   stripeSubscriptionId     String?
-  isArchived               Boolean         @default(false)
-  createdAt                DateTime        @default(now())
-  updatedAt                DateTime        @updatedAt
+  isArchived               Boolean           @default(false)
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
 
   @@index([clientId])
   @@index([subscriptionId])

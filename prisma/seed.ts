@@ -3,11 +3,12 @@ import bcrypt from "bcryptjs";
 import { PrismaClient, UserRole, UserStatus } from "@prisma/client";
 import { seedInitialPlansAndServices } from "../src/modules/plan/plan.service";
 import { seedDefaultSpecialists } from "../src/modules/specialist/specialist.service";
+import { seedDefaultAgreementTemplates } from "../src/modules/agreement/agreement.service";
 
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log("🌱 Starting Admin, Plans and Specialists Seeding...");
+  console.log("🌱 Starting Admin, Plans, Specialists and State Agreements Seeding...");
 
   const adminEmail = (process.env.ADMIN_EMAIL || "admin@yopmail.com").toLowerCase().trim();
   const adminPassword = process.env.ADMIN_PASSWORD || "Admin123!";
@@ -57,7 +58,11 @@ async function main() {
 
   console.log("👷 Seeding default Rhode Island safety specialists...");
   await seedDefaultSpecialists();
-  console.log("✅ Default specialists created successfully!\n");
+  console.log("✅ Default specialists created successfully!");
+
+  console.log("📜 Seeding State-Specific Agreement Templates (RI, CT, MA)...");
+  await seedDefaultAgreementTemplates();
+  console.log("✅ State agreements seeded successfully!\n");
 }
 
 main()

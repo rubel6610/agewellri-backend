@@ -11,12 +11,14 @@ model Client {
   dateOfBirth              String?
   signerRole               SignerRole       @default(RESIDENT)
   legalAuthority           String?
+  legalAuthorityOther      String?
   primaryContactName       String?
   primaryContactPhone      String?
   primaryContactEmail      String?
   primaryContactRelation   String?
   emergencyContactName     String?
   emergencyContactPhone    String?
+  emergencyContactEmail    String?
   emergencyContactRelation String?
   homeAccessType           HomeAccessType   @default(RESIDENT_ANSWERS)
   homeAccessInstructions   String?
@@ -25,6 +27,8 @@ model Client {
   hasCleaningAddon         Boolean          @default(false)
   hasCompletedAgreement    Boolean          @default(false)
   onboardingStatus         OnboardingStatus @default(INVITED)
+  onboardingStep           Int              @default(1)
+  onboardingData           Json?
   stripeCustomerId         String?
   stripePaymentMethodId    String?
   cardBrand                String?

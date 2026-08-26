@@ -109,8 +109,9 @@ export class CancellationDeadlineService {
       year: "numeric",
     });
 
-    let stateSpecificNotice = "Rhode Island General Laws § 6-28-3";
-    if (state === "CT") stateSpecificNotice = "Connecticut General Statutes § 42-134a";
+    let stateSpecificNotice = "State & Federal Consumer Protection 3-Day Rule (16 CFR Part 429)";
+    if (state === "RI") stateSpecificNotice = "Rhode Island General Laws § 6-28-3";
+    else if (state === "CT") stateSpecificNotice = "Connecticut General Statutes § 42-134a";
     else if (state === "MA") stateSpecificNotice = "Massachusetts General Laws ch. 93 § 48";
 
     return {

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { authenticate } from "../../middlewares/auth.middleware";
+import { cacheResponse, invalidateCacheTags } from "../../middlewares/cache.middleware";
 import {
   handleGetAllSpecialists,
   handleGetSpecialistById,
@@ -12,13 +13,47 @@ import {
 const router = Router();
 
 // Public / Authenticated read
-router.get("/", authenticate, handleGetAllSpecialists);
-router.get("/:id", authenticate, handleGetSpecialistById);
+router.get(
+  "/",
+  authenticate,
+  cacheResponse({ ttlSeconds: 1800, tags: ["specialists"], isPrivate: true }),
+  handleGetAllSpecialists
+);
+
+router.get(
+  "/:id",
+  authenticate,
+  cacheResponse({ ttlSeconds: 1800, tags: ["specialists"], isPrivate: true }),
+  handleGetSpecialistById
+);
 
 // Admin-only management
-router.post("/", authenticate, handleCreateSpecialist);
-router.put("/:id", authenticate, handleUpdateSpecialist);
-router.delete("/:id", authenticate, handleDeleteSpecialist);
-router.post("/assign", authenticate, handleAssignSpecialist);
+router.post(
+  "/",
+  authenticate,
+  invalidateCacheTags("specialists"),
+  handleCreateSpecialist
+);
+
+router.put(
+  "/:id",
+  authenticate,
+  invalidateCacheTags("specialists"),
+  handleUpdateSpecialist
+);
+
+router.delete(
+  "/:id",
+  authenticate,
+  invalidateCacheTags("specialists"),
+  handleDeleteSpecialist
+);
+
+router.post(
+  "/assign",
+  authenticate,
+  invalidateCacheTags("specialists", "clients"),
+  handleAssignSpecialist
+);
 
 export default router;
