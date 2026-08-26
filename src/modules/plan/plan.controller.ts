@@ -203,13 +203,39 @@ export async function handleChangePlanStatus(
 /**
  * Service Catalog Handlers
  */
-export async function handleGetAllServices(
+export async function handleGetServiceStats(
   _req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const services = await planService.getAllServices();
+    const stats = await planService.getServiceCatalogStats();
+    res.status(200).json({
+      success: true,
+      message: "Service catalog statistics retrieved.",
+      data: stats,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function handleGetAllServices(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const includeInactive = req.query.includeInactive === "true";
+    const category = req.query.category as string | undefined;
+    const search = req.query.search as string | undefined;
+
+    const services = await planService.getAllServices({
+      includeInactive,
+      category,
+      search,
+    });
+
     res.status(200).json({
       success: true,
       message: "Services catalog retrieved.",
@@ -283,6 +309,68 @@ export async function handleUpdateService(
       success: true,
       message: "Service updated successfully.",
       data: service,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function handleChangeServiceStatus(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      res.status(403).json({ success: false, message: "Admin authorization required." });
+      return;
+    }
+
+    const { isActive } = req.body;
+    if (typeof isActive !== "boolean") {
+      res.status(400).json({
+        success: false,
+        message: "Boolean 'isActive' field is required.",
+      });
+      return;
+    }
+
+    const service = await planService.changeServiceStatus(
+      req.params.id as string,
+      isActive,
+      req.user.id
+    );
+
+    res.status(200).json({
+      success: true,
+      message: `Service successfully ${isActive ? "activated" : "deactivated"}.`,
+      data: service,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function handleDeleteService(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      res.status(403).json({ success: false, message: "Admin authorization required." });
+      return;
+    }
+
+    const result = await planService.deleteService(
+      req.params.id as string,
+      req.user.id
+    );
+
+    res.status(200).json({
+      success: true,
+      message: result.message,
+      data: result,
     });
   } catch (error) {
     next(error);

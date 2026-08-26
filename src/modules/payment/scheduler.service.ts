@@ -34,8 +34,6 @@ export async function checkAndSendRenewalReminders() {
             user: true,
           },
         },
-        plan: true,
-        planVersion: true,
       },
     });
 
@@ -66,8 +64,8 @@ export async function checkAndSendRenewalReminders() {
 
       const clientUser = sub.client.user;
       const clientName = `${clientUser.firstName || ""} ${clientUser.lastName || ""}`.trim() || "Valued Client";
-      const planName = sub.planVersion?.name || sub.plan?.name || "Service Plan";
-      const contractedPrice = sub.contractedPrice ?? sub.planVersion?.price ?? sub.plan?.price ?? 0;
+      const planName = sub.client?.selectedPlan || "Guardian Plus";
+      const contractedPrice = sub.contractedPrice ?? (planName.includes("Essential") ? 995 : 1892);
 
       // Determine recipients: Primary client and designated authorized contact
       const recipients: { email: string; role: string; name?: string }[] = [];

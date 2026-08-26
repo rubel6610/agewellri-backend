@@ -2,8 +2,8 @@ model Appointment {
   id                   String              @id @default(auto()) @map("_id") @db.ObjectId
   clientId             String              @db.ObjectId
   client               Client              @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  serviceTypeId        String              @db.ObjectId
-  serviceType          ServiceType         @relation(fields: [serviceTypeId], references: [id], onDelete: Restrict)
+  serviceTypeId        String?             @db.ObjectId
+  serviceType          ServiceType?        @relation(fields: [serviceTypeId], references: [id], onDelete: SetNull)
   subscriptionPeriodId String?             @db.ObjectId
   subscriptionPeriod   SubscriptionPeriod? @relation(fields: [subscriptionPeriodId], references: [id], onDelete: SetNull)
   technicianId         String?             @db.ObjectId

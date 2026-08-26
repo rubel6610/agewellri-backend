@@ -47,7 +47,7 @@ export const updatePlanSchema = z.object({
 });
 
 export const changePlanStatusSchema = z.object({
-  status: z.enum(["DRAFT", "ACTIVE", "INACTIVE", "ARCHIVED"]),
+  status: z.enum(["DRAFT", "ACTIVE", "INACTIVE", "ARCHIVED", "UNARCHIVED"]),
 });
 
 export const createServiceSchema = z.object({
@@ -72,8 +72,13 @@ export const updateServiceSchema = z.object({
   isActive: z.boolean().optional(),
 });
 
+export const changeServiceStatusSchema = z.object({
+  isActive: z.boolean(),
+});
+
 export type CreatePlanInput = z.infer<typeof createPlanSchema>;
 export type UpdatePlanInput = z.infer<typeof updatePlanSchema>;
 export type ChangePlanStatusInput = z.infer<typeof changePlanStatusSchema>;
 export type CreateServiceInput = z.infer<typeof createServiceSchema>;
 export type UpdateServiceInput = z.infer<typeof updateServiceSchema>;
+export type ChangeServiceStatusInput = z.infer<typeof changeServiceStatusSchema>;

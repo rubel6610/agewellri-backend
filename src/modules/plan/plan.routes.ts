@@ -8,30 +8,23 @@ import {
   handleCreatePlan,
   handleUpdatePlan,
   handleChangePlanStatus,
+  handleGetServiceStats,
   handleGetAllServices,
   handleCreateService,
   handleUpdateService,
+  handleChangeServiceStatus,
+  handleDeleteService,
 } from "./plan.controller";
 
 const router = Router();
 
-// Public / Client routes (Cached 1 hour)
-router.get("/active", cacheResponse({ ttlSeconds: 3600, tags: ["plans"] }), handleGetActivePlans);
+// Public / Client routes (Real-time live plans)
+router.get("/active", handleGetActivePlans);
 
-// Admin Plan Management
-router.get(
-  "/admin/all",
-  authenticate,
-  cacheResponse({ ttlSeconds: 600, tags: ["plans", "admin_plans"], isPrivate: true }),
-  handleGetAllAdminPlans
-);
+// Admin Plan Management (Real-time live data, no browser caching)
+router.get("/admin/all", authenticate, handleGetAllAdminPlans);
 
-router.get(
-  "/admin/:id",
-  authenticate,
-  cacheResponse({ ttlSeconds: 600, tags: ["plans"], isPrivate: true }),
-  handleGetAdminPlanById
-);
+router.get("/admin/:id", authenticate, handleGetAdminPlanById);
 
 router.post(
   "/admin",
@@ -54,13 +47,10 @@ router.patch(
   handleChangePlanStatus
 );
 
-// Admin Service Catalog
-router.get(
-  "/services/all",
-  authenticate,
-  cacheResponse({ ttlSeconds: 1800, tags: ["services", "plans"], isPrivate: true }),
-  handleGetAllServices
-);
+// Admin Service Catalog (Real-time live data, no browser caching)
+router.get("/services/stats", authenticate, handleGetServiceStats);
+
+router.get("/services/all", authenticate, handleGetAllServices);
 
 router.post(
   "/services",
@@ -74,6 +64,20 @@ router.put(
   authenticate,
   invalidateCacheTags("services", "plans"),
   handleUpdateService
+);
+
+router.patch(
+  "/services/:id/status",
+  authenticate,
+  invalidateCacheTags("services", "plans"),
+  handleChangeServiceStatus
+);
+
+router.delete(
+  "/services/:id",
+  authenticate,
+  invalidateCacheTags("services", "plans"),
+  handleDeleteService
 );
 
 export default router;

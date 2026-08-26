@@ -9,13 +9,26 @@ export interface AdminClientsQuery {
   limit?: number;
 }
 
+function safeFormatDate(dateVal?: any): string | null {
+  if (!dateVal) return null;
+  try {
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return null;
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Get All Admin Clients from Database
  */
 export async function getAllAdminClients(query?: AdminClientsQuery) {
-  const where: any = {
-    isArchived: false,
-  };
+  const where: any = {};
 
   if (query?.state && query.state !== "ALL") {
     where.state = query.state.toUpperCase();
@@ -47,9 +60,6 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
       subscriptions: {
         orderBy: { createdAt: "desc" },
         take: 1,
-        include: {
-          plan: true,
-        },
       },
       invoices: {
         orderBy: { createdAt: "desc" },
@@ -67,7 +77,9 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
     },
   });
 
-  return clients.map((c: any) => {
+  const unarchivedClients = (clients || []).filter((c: any) => c.isArchived !== true);
+
+  const mapped = unarchivedClients.map((c: any) => {
     const latestAgreement = c.agreements?.[0] || null;
     const latestSub = c.subscriptions?.[0] || null;
     const latestInvoice = c.invoices?.[0] || null;
@@ -98,7 +110,7 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
       id: c.clientNumber || c.id,
       internalId: c.id,
       userId: c.userId,
-      clientNumber: c.clientNumber,
+      clientNumber: c.clientNumber || `AW-${c.id.slice(-4).toUpperCase()}`,
       firstName: c.user?.firstName || "Unknown",
       lastName: c.user?.lastName || "Member",
       email: c.user?.email || c.primaryContactEmail || "",
@@ -109,7 +121,7 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
         state: c.state || "RI",
         zip: c.postalCode || "",
       },
-      dateOfBirth: c.dateOfBirth,
+      dateOfBirth: c.dateOfBirth || null,
       state: c.state || "RI",
       signerRole: c.signerRole || "RESIDENT",
       legalAuthority: c.legalAuthority,
@@ -122,18 +134,12 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
       homeAccessInstructions: c.homeAccessInstructions,
       planName: latestSub?.plan?.name || c.selectedPlan || "Guardian Plus",
       planCode: latestSub?.plan?.code || c.selectedPlan || "GUARDIAN_PLUS",
-      hasCleaningAddon: c.hasCleaningAddon,
-      onboardingStatus: c.onboardingStatus,
+      hasCleaningAddon: Boolean(c.hasCleaningAddon),
+      onboardingStatus: c.onboardingStatus || "INVITED",
       onboardingStep: c.onboardingStep || 1,
       agreementStatus,
-      agreementSignedDate: latestAgreement?.signedAt
-        ? new Date(latestAgreement.signedAt).toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          })
-        : null,
-      agreementDeadline: latestAgreement?.cancellationDeadline,
+      agreementSignedDate: safeFormatDate(latestAgreement?.signedAt),
+      agreementDeadline: safeFormatDate(latestAgreement?.cancellationDeadline),
       paymentStatus,
       subscriptionStatus,
       cardBrand: c.cardBrand,
@@ -141,26 +147,10 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
       totalVisitsAllowed: c.hasCleaningAddon ? 18 : 12,
       completedVisitsCount: 0,
       remainingVisitsCount: c.hasCleaningAddon ? 18 : 12,
-      nextVisitDate: nextAppt
-        ? new Date(nextAppt.startAt).toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          })
-        : null,
-      renewalDate: latestSub?.currentPeriodEnd
-        ? new Date(latestSub.currentPeriodEnd).toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          })
-        : null,
+      nextVisitDate: safeFormatDate(nextAppt?.startAt),
+      renewalDate: safeFormatDate(latestSub?.currentPeriodEnd),
       status: isSubActive ? "active" : isExecutedAgreement ? "active" : "pending_onboarding",
-      createdAt: new Date(c.createdAt).toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      }),
+      createdAt: safeFormatDate(c.createdAt) || "Recently",
       // Onboarding Timeline Flags
       timeline: {
         welcomeSent: Boolean(latestInvitation || c.createdAt),
@@ -175,6 +165,34 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
       },
     };
   });
+
+  let result = mapped;
+
+  if (query?.search && query.search.trim()) {
+    const term = query.search.trim().toLowerCase();
+    result = result.filter((c: any) =>
+      c.firstName.toLowerCase().includes(term) ||
+      c.lastName.toLowerCase().includes(term) ||
+      c.email.toLowerCase().includes(term) ||
+      c.phone.toLowerCase().includes(term) ||
+      c.clientNumber.toLowerCase().includes(term) ||
+      c.address.street.toLowerCase().includes(term) ||
+      c.address.city.toLowerCase().includes(term)
+    );
+  }
+
+  if (query?.agreementStatus && query.agreementStatus !== "ALL") {
+    result = result.filter((c: any) => c.agreementStatus === query.agreementStatus);
+  }
+
+  if (query?.page && query?.limit) {
+    const page = Math.max(1, Number(query.page));
+    const limit = Math.max(1, Number(query.limit));
+    const startIndex = (page - 1) * limit;
+    return result.slice(startIndex, startIndex + limit);
+  }
+
+  return result;
 }
 
 function isValidObjectId(id: string): boolean {
@@ -221,7 +239,6 @@ export async function getAdminClientById(clientIdOrNumber: string) {
       agreements: {
         orderBy: { createdAt: "desc" },
         include: {
-          plan: true,
           planVersion: true,
           agreementVersion: true,
         },
@@ -229,7 +246,6 @@ export async function getAdminClientById(clientIdOrNumber: string) {
       subscriptions: {
         orderBy: { createdAt: "desc" },
         include: {
-          plan: true,
           periods: { orderBy: { startDate: "desc" } },
         },
       },
@@ -341,14 +357,8 @@ export async function getAdminClientById(clientIdOrNumber: string) {
     onboardingStep: client.onboardingStep || 1,
     onboardingData: client.onboardingData,
     agreementStatus,
-    agreementSignedDate: latestAgreement?.signedAt
-      ? new Date(latestAgreement.signedAt).toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-        })
-      : null,
-    agreementDeadline: latestAgreement?.cancellationDeadline,
+    agreementSignedDate: safeFormatDate(latestAgreement?.signedAt),
+    agreementDeadline: safeFormatDate(latestAgreement?.cancellationDeadline),
     paymentStatus,
     subscriptionStatus: latestSub?.status || (isSubActive ? "ACTIVE" : "PENDING"),
     cardBrand: client.cardBrand,
@@ -356,26 +366,10 @@ export async function getAdminClientById(clientIdOrNumber: string) {
     totalVisitsAllowed: client.hasCleaningAddon ? 18 : 12,
     completedVisitsCount: client.appointments?.filter((a: any) => a.status === "COMPLETED").length || 0,
     remainingVisitsCount: (client.hasCleaningAddon ? 18 : 12) - (client.appointments?.filter((a: any) => a.status === "COMPLETED").length || 0),
-    nextVisitDate: nextAppt
-      ? new Date(nextAppt.startAt).toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-        })
-      : null,
-    renewalDate: latestSub?.currentPeriodEnd
-      ? new Date(latestSub.currentPeriodEnd).toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-        })
-      : null,
+    nextVisitDate: safeFormatDate(nextAppt?.startAt),
+    renewalDate: safeFormatDate(latestSub?.currentPeriodEnd),
     status: isSubActive ? "active" : isExecutedAgreement ? "active" : "pending_onboarding",
-    createdAt: new Date(client.createdAt).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    }),
+    createdAt: safeFormatDate(client.createdAt) || "Recently",
     timeline: {
       welcomeSent: Boolean(client.invitations?.length || client.createdAt),
       accountCreated: true,
@@ -394,20 +388,22 @@ export async function getAdminClientById(clientIdOrNumber: string) {
     appointments: client.appointments,
     reports: client.reports,
     invitations: client.invitations,
-    auditLogs: auditLogs.map((log: any) => ({
+    auditLogs: (auditLogs || []).map((log: any) => ({
       id: log.id,
-      action: log.action.replace(/_/g, " "),
+      action: (log.action || "").replace(/_/g, " "),
       details: log.metadata ? JSON.stringify(log.metadata) : log.action,
       performedBy: log.actorUser
         ? `${log.actorUser.firstName} ${log.actorUser.lastName} (${log.actorUser.role})`
         : "System / Member",
-      timestamp: new Date(log.createdAt).toLocaleString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      timestamp: log.createdAt
+        ? new Date(log.createdAt).toLocaleString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : "Recently",
     })),
   };
 }

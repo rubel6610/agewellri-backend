@@ -8,18 +8,16 @@ import {
 
 const router = Router();
 
-// Admin Client Routes with in-memory response caching
+// Admin Client Routes (Real-time live data)
 router.get(
   "/admin/all",
   authenticate,
-  cacheResponse({ ttlSeconds: 300, tags: ["clients"], isPrivate: true }),
   handleGetAllAdminClients
 );
 
 router.get(
   "/admin/:id",
   authenticate,
-  cacheResponse({ ttlSeconds: 300, tags: ["clients"], isPrivate: true }),
   handleGetAdminClientById
 );
 

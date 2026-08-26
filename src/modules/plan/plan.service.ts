@@ -52,33 +52,45 @@ async function createPlanAuditLog(params: {
  * Dynamically resolves current active PlanVersion, PlanPrice, features, and visit quotas.
  */
 export async function getActivePlans() {
-  const allPlans = await (prisma.servicePlan.findMany as any)({
-    where: {
-      isActive: true,
-    },
+  let allPlans = await (prisma.servicePlan.findMany as any)({
     include: {
-      planServices: {
-        include: {
-          serviceType: true,
-        },
-      },
+      planServices: { include: { serviceType: true } },
       versions: {
-        where: { status: "ACTIVE" },
         orderBy: { versionNumber: "desc" },
-        include: {
-          planServices: {
-            include: { serviceType: true },
-          },
-        },
+        include: { planServices: { include: { serviceType: true } } },
       },
     },
   });
 
-  const unarchivedPlans = allPlans
-    .filter((p: any) => !p.isArchived)
-    .sort((a: any, b: any) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+  let activePlans = (allPlans || []).filter(
+    (p: any) => p.isActive === true && p.isArchived !== true
+  );
 
-  return unarchivedPlans.map((plan: any) => {
+  if (!activePlans || activePlans.length === 0) {
+    await seedInitialPlansAndServices();
+    allPlans = await (prisma.servicePlan.findMany as any)({
+      include: {
+        planServices: { include: { serviceType: true } },
+        versions: {
+          orderBy: { versionNumber: "desc" },
+          include: { planServices: { include: { serviceType: true } } },
+        },
+      },
+    });
+    activePlans = (allPlans || []).filter(
+      (p: any) => p.isActive === true && p.isArchived !== true
+    );
+
+    if (activePlans.length === 0 && allPlans && allPlans.length > 0) {
+      activePlans = allPlans.filter((p: any) => p.isArchived !== true);
+    }
+  }
+
+  const sortedPlans = activePlans.sort(
+    (a: any, b: any) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0)
+  );
+
+  return sortedPlans.map((plan: any) => {
     const latestVersion = plan.versions?.[0];
 
     const servicesSource =
@@ -411,6 +423,63 @@ export async function getAdminPlanById(planId: string) {
 }
 
 /**
+ * Safely resolves a ServiceType MongoDB ObjectId by ID, code, name, or category.
+ */
+async function resolveServiceTypeId(rawIdOrCode: string): Promise<string | null> {
+  if (!rawIdOrCode || typeof rawIdOrCode !== "string") return null;
+
+  // 1. Check if it's already a valid 24-character hexadecimal ObjectId in DB
+  const isMongoId = /^[0-9a-fA-F]{24}$/.test(rawIdOrCode);
+  if (isMongoId) {
+    const exists = await (prisma.serviceType.findUnique as any)({
+      where: { id: rawIdOrCode },
+      select: { id: true },
+    });
+    if (exists) return exists.id;
+  }
+
+  // 2. Try to match by code or name
+  let matched = await (prisma.serviceType.findFirst as any)({
+    where: {
+      OR: [
+        { code: { equals: rawIdOrCode, mode: "insensitive" } },
+        { name: { equals: rawIdOrCode, mode: "insensitive" } },
+        { name: { contains: rawIdOrCode.replace(/srv_|_/g, " ").trim(), mode: "insensitive" } },
+      ],
+    },
+    select: { id: true },
+  });
+
+  if (matched) return matched.id;
+
+  // 3. Match by category keywords
+  const normalized = rawIdOrCode.toLowerCase();
+  if (normalized.includes("safe")) {
+    matched = await (prisma.serviceType.findFirst as any)({
+      where: { category: "SAFETY_OVERSIGHT" },
+      select: { id: true },
+    });
+    if (matched) return matched.id;
+  }
+
+  if (normalized.includes("clean")) {
+    matched = await (prisma.serviceType.findFirst as any)({
+      where: { category: "CLEANING" },
+      select: { id: true },
+    });
+    if (matched) return matched.id;
+  }
+
+  // 4. Fallback to first available active service
+  const fallback = await (prisma.serviceType.findFirst as any)({
+    where: { isActive: true },
+    select: { id: true },
+  });
+
+  return fallback?.id || null;
+}
+
+/**
  * Admin: Create a new service plan.
  */
 export async function createPlan(input: CreatePlanInput, actorUserId?: string) {
@@ -451,12 +520,13 @@ export async function createPlan(input: CreatePlanInput, actorUserId?: string) {
   // 3. Attach PlanServices (Service Allocations)
   if (input.services && input.services.length > 0) {
     for (const serviceItem of input.services) {
-      if (serviceItem.serviceTypeId) {
+      const resolvedId = await resolveServiceTypeId(serviceItem.serviceTypeId);
+      if (resolvedId) {
         try {
           await (prisma.planService.create as any)({
             data: {
               planId: plan.id,
-              serviceTypeId: serviceItem.serviceTypeId,
+              serviceTypeId: resolvedId,
               allocatedVisits: serviceItem.allocatedVisits,
               unit: serviceItem.unit || "visits",
             },
@@ -487,11 +557,12 @@ export async function createPlan(input: CreatePlanInput, actorUserId?: string) {
 
     if (input.services && input.services.length > 0) {
       for (const serviceItem of input.services) {
-        if (serviceItem.serviceTypeId) {
+        const resolvedId = await resolveServiceTypeId(serviceItem.serviceTypeId);
+        if (resolvedId) {
           await (prisma.planService.create as any)({
             data: {
               planVersionId: planVersion.id,
-              serviceTypeId: serviceItem.serviceTypeId,
+              serviceTypeId: resolvedId,
               allocatedVisits: serviceItem.allocatedVisits,
               unit: serviceItem.unit || "visits",
             },
@@ -627,11 +698,12 @@ export async function updatePlan(
 
     const servicesToAttach = input.services !== undefined ? input.services : existingPlan.planServices || [];
     for (const s of servicesToAttach) {
-      if (s.serviceTypeId) {
+      const resolvedId = await resolveServiceTypeId(s.serviceTypeId);
+      if (resolvedId) {
         await (prisma.planService.create as any)({
           data: {
             planVersionId: newVersion.id,
-            serviceTypeId: s.serviceTypeId,
+            serviceTypeId: resolvedId,
             allocatedVisits: s.allocatedVisits,
             unit: s.unit || "visits",
           },
@@ -656,11 +728,12 @@ export async function updatePlan(
         where: { planVersionId: latestVer.id },
       });
       for (const serviceItem of input.services) {
-        if (serviceItem.serviceTypeId) {
+        const resolvedId = await resolveServiceTypeId(serviceItem.serviceTypeId);
+        if (resolvedId) {
           await (prisma.planService.create as any)({
             data: {
               planVersionId: latestVer.id,
-              serviceTypeId: serviceItem.serviceTypeId,
+              serviceTypeId: resolvedId,
               allocatedVisits: serviceItem.allocatedVisits,
               unit: serviceItem.unit || "visits",
             },
@@ -688,11 +761,12 @@ export async function updatePlan(
 
       if (input.services !== undefined) {
         for (const s of input.services) {
-          if (s.serviceTypeId) {
+          const resolvedId = await resolveServiceTypeId(s.serviceTypeId);
+          if (resolvedId) {
             await (prisma.planService.create as any)({
               data: {
                 planVersionId: newVersion.id,
-                serviceTypeId: s.serviceTypeId,
+                serviceTypeId: resolvedId,
                 allocatedVisits: s.allocatedVisits,
                 unit: s.unit || "visits",
               },
@@ -763,9 +837,31 @@ export async function changePlanStatus(
 /**
  * Admin: Dynamic Service Catalog Operations
  */
-export async function getAllServices() {
-  const existing = await (prisma.serviceType.findMany as any)({
-    where: { isActive: true },
+export async function getAllServices(query?: {
+  includeInactive?: boolean;
+  category?: string;
+  search?: string;
+}) {
+  const where: any = {};
+
+  if (!query?.includeInactive) {
+    where.isActive = true;
+  }
+
+  if (query?.category && query.category !== "ALL") {
+    where.category = query.category as ServiceTypeCategory;
+  }
+
+  if (query?.search && query.search.trim()) {
+    where.OR = [
+      { name: { contains: query.search.trim(), mode: "insensitive" } },
+      { description: { contains: query.search.trim(), mode: "insensitive" } },
+      { code: { contains: query.search.trim(), mode: "insensitive" } },
+    ];
+  }
+
+  let existing = await (prisma.serviceType.findMany as any)({
+    where,
     orderBy: { displayOrder: "asc" },
   });
 
@@ -774,18 +870,31 @@ export async function getAllServices() {
   }
 
   // Auto seed default services if catalog is empty
-  await seedInitialPlansAndServices();
+  const totalCount = await (prisma.serviceType.count as any)();
+  if (totalCount === 0) {
+    await seedInitialPlansAndServices();
+    existing = await (prisma.serviceType.findMany as any)({
+      where,
+      orderBy: { displayOrder: "asc" },
+    });
+  }
 
-  return (prisma.serviceType.findMany as any)({
-    where: { isActive: true },
-    orderBy: { displayOrder: "asc" },
-  });
+  return existing || [];
 }
 
 export async function createService(input: CreateServiceInput, actorUserId?: string) {
+  const code =
+    input.code ||
+    input.name
+      .toUpperCase()
+      .trim()
+      .replace(/[^A-Z0-9\s_-]/g, "")
+      .replace(/[\s-]+/g, "_");
+
   const service = await (prisma.serviceType.create as any)({
     data: {
       name: input.name,
+      code,
       category: input.category as ServiceTypeCategory,
       description: input.description || "",
       durationMinutes: input.durationMinutes || 60,
@@ -813,6 +922,7 @@ export async function updateService(
 ) {
   const updateData: any = {};
   if (input.name !== undefined) updateData.name = input.name;
+  if (input.code !== undefined) updateData.code = input.code;
   if (input.category !== undefined) updateData.category = input.category as ServiceTypeCategory;
   if (input.description !== undefined) updateData.description = input.description;
   if (input.durationMinutes !== undefined) updateData.durationMinutes = input.durationMinutes;
@@ -836,47 +946,203 @@ export async function updateService(
   return service;
 }
 
+export async function changeServiceStatus(
+  serviceId: string,
+  isActive: boolean,
+  actorUserId?: string
+) {
+  const service = await (prisma.serviceType.update as any)({
+    where: { id: serviceId },
+    data: { isActive },
+  });
+
+  await createPlanAuditLog({
+    actorUserId,
+    action: isActive ? "SERVICE_ACTIVATED" : "SERVICE_DEACTIVATED",
+    entityType: "ServiceType",
+    entityId: serviceId,
+    newValues: { isActive },
+  });
+
+  return service;
+}
+
+export async function deleteService(serviceId: string, actorUserId?: string) {
+  const planServiceCount = await (prisma.planService.count as any)({
+    where: { serviceTypeId: serviceId },
+  });
+
+  const appointmentCount = await (prisma.appointment.count as any)({
+    where: { serviceTypeId: serviceId },
+  });
+
+  if (planServiceCount > 0 || appointmentCount > 0) {
+    const deactivated = await (prisma.serviceType.update as any)({
+      where: { id: serviceId },
+      data: { isActive: false },
+    });
+
+    await createPlanAuditLog({
+      actorUserId,
+      action: "SERVICE_DEACTIVATED",
+      entityType: "ServiceType",
+      entityId: serviceId,
+      newValues: { isActive: false, reason: "Deactivated due to existing references" },
+    });
+
+    return {
+      deleted: false,
+      deactivated: true,
+      message: `Service deactivated. It is currently linked to ${planServiceCount} plan allocations and ${appointmentCount} appointments.`,
+      service: deactivated,
+    };
+  }
+
+  const deleted = await (prisma.serviceType.delete as any)({
+    where: { id: serviceId },
+  });
+
+  await createPlanAuditLog({
+    actorUserId,
+    action: "SERVICE_DELETED",
+    entityType: "ServiceType",
+    entityId: serviceId,
+    newValues: deleted,
+  });
+
+  return {
+    deleted: true,
+    deactivated: false,
+    message: "Service permanently deleted from catalog.",
+    service: deleted,
+  };
+}
+
+export async function getServiceCatalogStats() {
+  let allServices = await (prisma.serviceType.findMany as any)({
+    include: {
+      planServices: true,
+    },
+  });
+
+  if (!allServices || allServices.length === 0) {
+    await seedInitialPlansAndServices();
+    allServices = await (prisma.serviceType.findMany as any)({
+      include: {
+        planServices: true,
+      },
+    });
+  }
+
+  const totalServices = allServices?.length || 0;
+  const activeServices = (allServices || []).filter((s: any) => s.isActive !== false).length;
+  const inactiveServices = totalServices - activeServices;
+
+  const categoryCounts: Record<string, { total: number; active: number }> = {
+    SAFETY_OVERSIGHT: { total: 0, active: 0 },
+    CLEANING: { total: 0, active: 0 },
+    ASSESSMENT: { total: 0, active: 0 },
+    WELLNESS: { total: 0, active: 0 },
+    OTHER: { total: 0, active: 0 },
+  };
+
+  (allServices || []).forEach((s: any) => {
+    const cat = s.category || "OTHER";
+    if (!categoryCounts[cat]) {
+      categoryCounts[cat] = { total: 0, active: 0 };
+    }
+    categoryCounts[cat].total += 1;
+    if (s.isActive !== false) categoryCounts[cat].active += 1;
+  });
+
+  const categoriesWithServices = Object.keys(categoryCounts).filter(
+    (k) => categoryCounts[k].total > 0
+  ).length;
+
+  const totalPlanLinks = (allServices || []).reduce(
+    (acc: number, s: any) => acc + (s.planServices?.length || 0),
+    0
+  );
+
+  const totalAppointments = await (prisma.appointment.count as any)().catch(() => 0);
+
+  return {
+    totalServices,
+    activeServices,
+    inactiveServices,
+    totalCategories: categoriesWithServices,
+    activeCategoriesCount: categoriesWithServices,
+    categoryBreakdown: categoryCounts,
+    totalPlanAllocations: totalPlanLinks,
+    totalScheduledAppointments: totalAppointments || 0,
+  };
+}
+
 /**
  * Seed approved dynamic service plans and services if database catalog is empty.
  */
 export async function seedInitialPlansAndServices() {
   let safetyService = await (prisma.serviceType.findFirst as any)({
-    where: { name: "Safety Oversight" },
+    where: {
+      OR: [
+        { code: "SAFETY_OVERSIGHT" },
+        { name: "Safety Oversight" },
+        { category: "SAFETY_OVERSIGHT" },
+      ],
+    },
   });
 
   if (!safetyService) {
     safetyService = await (prisma.serviceType.create as any)({
       data: {
         name: "Safety Oversight",
+        code: "SAFETY_OVERSIGHT",
         category: "SAFETY_OVERSIGHT",
         description: "Quarterly or bi-weekly home safety audits, hazard checks and wellness reports.",
+        durationMinutes: 60,
+        defaultPrice: 150,
+        displayOrder: 1,
         isActive: true,
       },
     });
   }
 
   let cleaningService = await (prisma.serviceType.findFirst as any)({
-    where: { name: "Home Cleaning" },
+    where: {
+      OR: [
+        { code: "HOME_CLEANING" },
+        { name: "Home Cleaning" },
+        { category: "CLEANING" },
+      ],
+    },
   });
 
   if (!cleaningService) {
     cleaningService = await (prisma.serviceType.create as any)({
       data: {
         name: "Home Cleaning",
+        code: "HOME_CLEANING",
         category: "CLEANING",
         description: "HEPA allergen vacuuming, pathway clearing, kitchen & living area maintenance.",
+        durationMinutes: 90,
+        defaultPrice: 150,
+        displayOrder: 2,
         isActive: true,
       },
     });
   }
 
-  const existingPlans = await prisma.servicePlan.count();
-  if (existingPlans === 0) {
-    await createPlan({
+  // 1. Seed / Sync "Essential Guard" Plan ($995/Quarterly - 6 Safety Oversight Visits)
+  let essentialPlan = await (prisma.servicePlan.findFirst as any)({
+    where: { code: "ESSENTIAL_GUARD" },
+  });
+
+  if (!essentialPlan) {
+    essentialPlan = await createPlan({
       name: "Essential Guard",
       code: "ESSENTIAL_GUARD",
       shortDescription: "Essential non-medical home safety oversight and hazard mitigation.",
-      fullDescription: "Includes 6 comprehensive safety oversight visits per quarter with digitized wellness reports.",
+      fullDescription: "Comprehensive quarterly non-medical home safety oversight and hazard mitigation designed to protect and support independent senior living.",
       price: 995,
       billingInterval: "QUARTERLY",
       displayOrder: 1,
@@ -884,7 +1150,6 @@ export async function seedInitialPlansAndServices() {
         "6 Safety Oversight Visits / Quarter",
         "Home Safety Score & Hazard Assessment",
         "Family Portal Access with Live Reports",
-        "Dedicated Local Care Concierge",
       ],
       services: [
         {
@@ -895,12 +1160,24 @@ export async function seedInitialPlansAndServices() {
       ],
       isActive: true,
     });
+  } else if (!essentialPlan.isActive || essentialPlan.isArchived) {
+    essentialPlan = await (prisma.servicePlan.update as any)({
+      where: { id: essentialPlan.id },
+      data: { isActive: true, isArchived: false },
+    });
+  }
 
-    await createPlan({
+  // 2. Seed / Sync "Guardian Plus" Plan ($1892/Quarterly - 6 Safety + 6 Cleaning Visits)
+  let guardianPlan = await (prisma.servicePlan.findFirst as any)({
+    where: { code: "GUARDIAN_PLUS" },
+  });
+
+  if (!guardianPlan) {
+    guardianPlan = await createPlan({
       name: "Guardian Plus",
       code: "GUARDIAN_PLUS",
       shortDescription: "Complete dual-protection safety oversight and specialized home cleaning.",
-      fullDescription: "Includes 12 total visits per quarter (6 safety oversight and 6 home cleanings).",
+      fullDescription: "Complete dual-protection safety oversight and specialized environmental home cleaning. Includes 12 total visits per quarter.",
       price: 1892,
       billingInterval: "QUARTERLY",
       displayOrder: 2,
@@ -925,7 +1202,12 @@ export async function seedInitialPlansAndServices() {
       ],
       isActive: true,
     });
+  } else if (!guardianPlan.isActive || guardianPlan.isArchived) {
+    guardianPlan = await (prisma.servicePlan.update as any)({
+      where: { id: guardianPlan.id },
+      data: { isActive: true, isArchived: false },
+    });
   }
 
-  return { safetyService, cleaningService };
+  return { safetyService, cleaningService, essentialPlan, guardianPlan };
 }

@@ -2,8 +2,8 @@ model Subscription {
   id                      String             @id @default(auto()) @map("_id") @db.ObjectId
   clientId                String             @db.ObjectId
   client                  Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  planId                  String             @db.ObjectId
-  plan                    ServicePlan        @relation(fields: [planId], references: [id], onDelete: Restrict)
+  planId                  String?            @db.ObjectId
+  plan                    ServicePlan?       @relation(fields: [planId], references: [id], onDelete: SetNull)
   planVersionId           String?            @db.ObjectId
   planVersion             PlanVersion?       @relation(fields: [planVersionId], references: [id], onDelete: SetNull)
   planPriceId             String?            @db.ObjectId
