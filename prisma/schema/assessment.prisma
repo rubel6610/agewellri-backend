@@ -25,17 +25,24 @@ model AssessmentQuestion {
 }
 
 model Assessment {
-  id          String             @id @default(auto()) @map("_id") @db.ObjectId
-  visitId     String             @unique @db.ObjectId
-  visit       Visit              @relation(fields: [visitId], references: [id], onDelete: Cascade)
-  templateId  String             @db.ObjectId
-  template    AssessmentTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
-  score       Float?
-  isCompleted Boolean            @default(false)
-  startedAt   DateTime?
-  completedAt DateTime?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
+  id              String             @id @default(auto()) @map("_id") @db.ObjectId
+  visitId         String             @unique @db.ObjectId
+  visit           Visit              @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  templateId      String             @db.ObjectId
+  template        AssessmentTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  score           Float?
+  maxScore        Float?             @default(50.0)
+  percentage      Float?
+  ratingTier      String?
+  summary         String?
+  findings        String?
+  recommendations String?
+  categoryScores  Json?
+  isCompleted     Boolean            @default(false)
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
   responses AssessmentResponse[]
 }

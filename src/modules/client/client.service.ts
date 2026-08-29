@@ -427,6 +427,225 @@ export async function getAdminClientById(clientIdOrNumber: string) {
     },
     agreements: client.agreements,
     latestAgreement,
+  };
+}
+
+export function formatAuditLogDescription(action: string, metadata: any): string {
+  if (!metadata) {
+    return (action || "")
+      .replace(/_/g, " ")
+      .toLowerCase()
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  let data = metadata;
+  if (typeof metadata === "string") {
+    try {
+      data = JSON.parse(metadata);
+    } catch {
+      return metadata;
+    }
+  }
+
+  if (typeof data !== "object" || data === null) {
+    return String(data);
+  }
+
+  const act = (action || "").toUpperCase().replace(/[\s_-]+/g, "_");
+
+  const formatDate = (val: any) => {
+    if (!val) return "";
+    try {
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return String(val);
+      return d.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    } catch {
+      return String(val);
+    }
+  };
+
+  const formatPlanName = (p?: string) => {
+    if (!p) return "Membership";
+    return p.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+  };
+
+  const formatRole = (r?: string) => {
+    if (!r) return "";
+    return r.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+  };
+
+  const stateNames: Record<string, string> = {
+    RI: "Rhode Island",
+    MA: "Massachusetts",
+    CT: "Connecticut",
+  };
+
+  if (act.includes("AGREEMENT_EXECUTED")) {
+    const signer = data.signerName || "Member";
+    const role = formatRole(data.signerRole);
+    const state = stateNames[data.state] || data.state || "Rhode Island";
+    const deadline = data.cancellationDeadline ? formatDate(data.cancellationDeadline) : null;
+    let text = `Service agreement executed for ${state} by ${signer}${role ? ` (${role})` : ""}.`;
+    if (deadline) {
+      text += ` Statutory cancellation deadline: ${deadline}.`;
+    }
+    return text;
+  }
+
+  if (act.includes("AGREEMENT_CREATED") || act.includes("AGREEMENT_SENT")) {
+    const state = stateNames[data.state] || data.state || "Rhode Island";
+    const version = data.templateVersion || "v2.0";
+    return `Client service agreement initiated (${version} for ${state}).`;
+  }
+
+  if (act.includes("SUBSCRIPTION_ACTIVATED")) {
+    const plan = formatPlanName(data.plan);
+    const price = data.totalPrice ? `$${Number(data.totalPrice).toFixed(2)}` : null;
+    const method = data.billingMethod
+      ? data.billingMethod === "AUTOMATIC"
+        ? "billed automatically"
+        : data.billingMethod.replace(/_/g, " ").toLowerCase()
+      : "billed automatically";
+    const invoice = data.invoiceNumber ? `Invoice #${data.invoiceNumber}` : null;
+    const parts = [
+      `${plan} plan subscription activated`,
+      price ? `(${price} / ${method})` : null,
+      invoice ? `• ${invoice}` : null,
+    ].filter(Boolean);
+    return parts.join(" ");
+  }
+
+  if (act.includes("PAYMENT_STARTED")) {
+    const plan = formatPlanName(data.plan);
+    const addon = data.hasCleaningAddon ? " with House Cleaning add-on" : "";
+    return `Payment checkout initiated for ${plan} plan${addon}.`;
+  }
+
+  if (act.includes("PAYMENT_PROCESSED") || act.includes("PAYMENT_SUCCEEDED")) {
+    const amount = data.amount || data.totalPrice ? `$${Number(data.amount || data.totalPrice).toFixed(2)}` : "Payment";
+    const plan = data.plan ? ` for ${formatPlanName(data.plan)} plan` : "";
+    const invoice = data.invoiceNumber ? ` (Invoice #${data.invoiceNumber})` : "";
+    return `${amount} processed successfully${plan}${invoice}.`;
+  }
+
+  if (act.includes("REPORT_UPLOADED")) {
+    const title = data.title || "Visit Report";
+    const specialist = data.specialistName ? ` from ${data.specialistName}` : "";
+    return `Official PDF report "${title}"${specialist} uploaded and published to member portal.`;
+  }
+
+  if (act.includes("APPOINTMENT_SCHEDULED") || act.includes("VISIT_SCHEDULED")) {
+    const service = data.serviceType || "Visit";
+    const date = data.date ? formatDate(data.date) : "scheduled date";
+    const time = data.timeSlot ? ` (${data.timeSlot})` : "";
+    const specialist = data.technicianName ? ` with specialist ${data.technicianName}` : "";
+    return `${service} booked for ${date}${time}${specialist}.`;
+  }
+
+  if (act.includes("APPOINTMENT_COMPLETED") || act.includes("VISIT_COMPLETED")) {
+    const service = data.serviceType || "Visit";
+    return `${service} marked as completed.`;
+  }
+
+  if (act.includes("APPOINTMENT_CANCELLED") || act.includes("VISIT_CANCELLED")) {
+    const reason = data.reason ? ` Reason: ${data.reason}` : "";
+    return `Visit appointment was cancelled.${reason}`;
+  }
+
+  if (act.includes("INVITATION_SENT")) {
+    const email = data.email ? ` to ${data.email}` : "";
+    return `Onboarding welcome invitation sent${email}.`;
+  }
+
+  if (act.includes("ACCOUNT_CREATED") || act.includes("USER_REGISTERED")) {
+    return `Member user account registration completed.`;
+  }
+
+  // Generic fallback: strip IDs and format dates nicely
+  const cleanParts: string[] = [];
+  for (const [key, val] of Object.entries(data)) {
+    if (
+      key.toLowerCase().endsWith("id") ||
+      key.toLowerCase() === "id" ||
+      key.toLowerCase().includes("token") ||
+      key.toLowerCase().includes("hash")
+    ) {
+      continue;
+    }
+
+    if (val === null || val === undefined || val === "") continue;
+
+    const label = key
+      .replace(/([A-Z])/g, " $1")
+      .replace(/_/g, " ")
+      .toLowerCase()
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+
+    if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}/.test(val)) {
+      cleanParts.push(`${label}: ${formatDate(val)}`);
+    } else if (typeof val === "boolean") {
+      cleanParts.push(val ? label : `No ${label}`);
+    } else if (
+      typeof val === "number" &&
+      (key.toLowerCase().includes("price") ||
+        key.toLowerCase().includes("amount") ||
+        key.toLowerCase().includes("cost"))
+    ) {
+      cleanParts.push(`${label}: $${val.toFixed(2)}`);
+    } else if (typeof val === "object") {
+      continue;
+    } else {
+      const formattedVal = String(val).replace(/_/g, " ");
+      cleanParts.push(`${label}: ${formattedVal}`);
+    }
+  }
+
+  if (cleanParts.length > 0) {
+    return cleanParts.join(" • ");
+  }
+
+  return (action || "")
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * Format Admin Client Detailed View
+ */
+export function formatClientDetail(client: any, auditLogs: any[] = []): any {
+  const latestAgreement = client.agreements?.[0] || null;
+  const isExecutedAgreement = latestAgreement?.status === "EXECUTED";
+
+  const isSubActive =
+    client.subscriptionStatus === "ACTIVE" ||
+    client.subscriptions?.some((s: any) => s.status === "ACTIVE");
+
+  const paymentStatus =
+    client.invoices?.some((i: any) => i.status === "PAID") ||
+    client.paymentStatus === "PAID"
+      ? "PAID"
+      : client.paymentStatus || "PENDING";
+
+  return {
+    ...client,
+    timeline: {
+      welcomeSent: true,
+      accountCreated: Boolean(client.user?.id),
+      signerSelected: Boolean(client.signerRole),
+      emergencyContactAdded: Boolean(client.emergencyContactName && client.emergencyContactPhone),
+      stateSelected: Boolean(client.state),
+      agreementSent: Boolean(latestAgreement || isExecutedAgreement),
+      agreementSigned: isExecutedAgreement,
+      paymentProcessed: paymentStatus === "PAID",
+      subscriptionActive: isSubActive,
+    },
+    agreements: client.agreements,
+    latestAgreement,
     subscriptions: client.subscriptions,
     invoices: client.invoices,
     appointments: client.appointments,
@@ -435,7 +654,7 @@ export async function getAdminClientById(clientIdOrNumber: string) {
     auditLogs: (auditLogs || []).map((log: any) => ({
       id: log.id,
       action: (log.action || "").replace(/_/g, " "),
-      details: log.metadata ? JSON.stringify(log.metadata) : log.action,
+      details: formatAuditLogDescription(log.action, log.metadata),
       performedBy: log.actorUser
         ? `${log.actorUser.firstName} ${log.actorUser.lastName} (${log.actorUser.role})`
         : "System / Member",

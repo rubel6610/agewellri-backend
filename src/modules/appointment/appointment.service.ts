@@ -236,8 +236,16 @@ export function formatAppointmentRecord(appt: any, specialistsList: any[] = []) 
 
   const clientName = `${user.firstName || client.primaryContactName || "Valued"} ${user.lastName || "Member"}`.trim();
 
+  // Report resolution from linked visit
+  const visit = appt.visit;
+  const activeReport = visit?.reports?.find((r: any) => !r.isArchived) || visit?.reports?.[0];
+  const hasReport = Boolean(activeReport && (activeReport.fileUrl || activeReport.status === "UPLOADED" || activeReport.status === "GENERATED"));
+  const reportStatus = hasReport ? "uploaded" : "not_uploaded";
+
   return {
     id: appt.id,
+    appointmentId: appt.id,
+    visitId: visit?.id || null,
     clientId: appt.clientId,
     clientNumber: client.clientNumber || "AW-CLIENT",
     clientName,
@@ -259,6 +267,12 @@ export function formatAppointmentRecord(appt: any, specialistsList: any[] = []) 
     date: dateFormatted,
     timeSlot: timeSlotFormatted,
     status: appt.status?.toLowerCase() || "scheduled",
+    reportStatus,
+    hasReport,
+    reportId: activeReport?.id || null,
+    reportTitle: activeReport?.title || null,
+    reportFileUrl: activeReport?.id ? `/api/v1/reports/${activeReport.id}/download` : null,
+    reportUploadedAt: activeReport?.uploadedAt ? new Date(activeReport.uploadedAt).toISOString() : null,
     location: appt.location || client.address || "Client Residence",
     notes: appt.notes || "",
     bookedBy: appt.createdByUser ? `${appt.createdByUser.firstName} ${appt.createdByUser.lastName}`.trim() : "AgeWellRI Team",
@@ -667,6 +681,15 @@ export async function getClientAppointments(userId: string) {
       serviceType: true,
       client: { include: { user: true } },
       createdByUser: true,
+      visit: {
+        include: {
+          technician: true,
+          reports: {
+            where: { isArchived: false },
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      },
     },
   });
 
@@ -724,6 +747,15 @@ export async function getAdminAppointments(query: AdminAppointmentsQuery = {}) {
       serviceType: true,
       client: { include: { user: true } },
       createdByUser: true,
+      visit: {
+        include: {
+          technician: true,
+          reports: {
+            where: { isArchived: false },
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      },
     },
   });
 
@@ -747,7 +779,15 @@ export async function getAppointmentById(
       serviceType: true,
       client: { include: { user: true } },
       createdByUser: true,
-      visit: true,
+      visit: {
+        include: {
+          technician: true,
+          reports: {
+            where: { isArchived: false },
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      },
     },
   });
 
@@ -918,6 +958,15 @@ export async function updateAppointmentStatus(
       serviceType: true,
       client: { include: { user: true } },
       createdByUser: true,
+      visit: {
+        include: {
+          technician: true,
+          reports: {
+            where: { isArchived: false },
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      },
     },
   });
 
