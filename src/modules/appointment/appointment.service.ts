@@ -669,29 +669,30 @@ export async function getClientAppointments(userId: string) {
     return [];
   }
 
-  const allSpecialists = await getAllSpecialists();
-
-  const appts = await (prisma.appointment.findMany as any)({
-    where: {
-      clientId: client.id,
-      isArchived: false,
-    },
-    orderBy: { startAt: "desc" },
-    include: {
-      serviceType: true,
-      client: { include: { user: true } },
-      createdByUser: true,
-      visit: {
-        include: {
-          technician: true,
-          reports: {
-            where: { isArchived: false },
-            orderBy: { createdAt: "desc" },
+  const [allSpecialists, appts] = await Promise.all([
+    getAllSpecialists(),
+    (prisma.appointment.findMany as any)({
+      where: {
+        clientId: client.id,
+        isArchived: false,
+      },
+      orderBy: { startAt: "desc" },
+      include: {
+        serviceType: true,
+        client: { include: { user: true } },
+        createdByUser: true,
+        visit: {
+          include: {
+            technician: true,
+            reports: {
+              where: { isArchived: false },
+              orderBy: { createdAt: "desc" },
+            },
           },
         },
       },
-    },
-  });
+    }),
+  ]);
 
   return appts.map((a: any) => formatAppointmentRecord(a, allSpecialists));
 }
@@ -736,28 +737,29 @@ export async function getAdminAppointments(query: AdminAppointmentsQuery = {}) {
     ];
   }
 
-  const allSpecialists = await getAllSpecialists();
-
-  const appts = await (prisma.appointment.findMany as any)({
-    where,
-    orderBy: { startAt: "desc" },
-    take: query.limit || 50,
-    skip: query.page && query.limit ? (query.page - 1) * query.limit : 0,
-    include: {
-      serviceType: true,
-      client: { include: { user: true } },
-      createdByUser: true,
-      visit: {
-        include: {
-          technician: true,
-          reports: {
-            where: { isArchived: false },
-            orderBy: { createdAt: "desc" },
+  const [allSpecialists, appts] = await Promise.all([
+    getAllSpecialists(),
+    (prisma.appointment.findMany as any)({
+      where,
+      orderBy: { startAt: "desc" },
+      take: query.limit || 50,
+      skip: query.page && query.limit ? (query.page - 1) * query.limit : 0,
+      include: {
+        serviceType: true,
+        client: { include: { user: true } },
+        createdByUser: true,
+        visit: {
+          include: {
+            technician: true,
+            reports: {
+              where: { isArchived: false },
+              orderBy: { createdAt: "desc" },
+            },
           },
         },
       },
-    },
-  });
+    }),
+  ]);
 
   return appts.map((a: any) => formatAppointmentRecord(a, allSpecialists));
 }

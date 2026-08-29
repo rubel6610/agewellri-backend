@@ -800,6 +800,76 @@ export async function getReportByAppointmentId(
 }
 
 /**
+ * Hydrates raw reports by safely joining visits, appointments, and assessments without throwing on missing relations
+ */
+async function hydrateReports(rawReports: any[]) {
+  if (!rawReports || rawReports.length === 0) return [];
+
+  const visitIds = Array.from(new Set(rawReports.map((r) => r.visitId).filter(Boolean)));
+
+  // Parallel fetch specialists, visits, and assessments
+  const [allSpecialists, visits, assessments] = await Promise.all([
+    getAllSpecialists(),
+    visitIds.length > 0
+      ? (prisma.visit.findMany as any)({
+          where: { id: { in: visitIds } },
+        })
+      : Promise.resolve([]),
+    visitIds.length > 0
+      ? (prisma.assessment.findMany as any)({
+          where: { visitId: { in: visitIds } },
+          include: {
+            responses: {
+              include: { question: true },
+              orderBy: { question: { order: "asc" } },
+            },
+          },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  const visitMap = new Map<string, any>(visits.map((v: any) => [v.id, v]));
+  const assessmentMap = new Map<string, any>(assessments.map((a: any) => [a.visitId, a]));
+
+  // Fetch appointments for these visits
+  const apptIds = Array.from(new Set(visits.map((v: any) => v.appointmentId).filter(Boolean)));
+  const appointments =
+    apptIds.length > 0
+      ? await (prisma.appointment.findMany as any)({
+          where: { id: { in: apptIds } },
+          include: { serviceType: true, technician: true },
+        })
+      : [];
+
+  const apptMap = new Map<string, any>(appointments.map((a: any) => [a.id, a]));
+
+  return rawReports.map((report) => {
+    const visit = report.visitId ? visitMap.get(report.visitId) : null;
+    const populatedVisit = visit ? { ...visit } : null;
+
+    if (populatedVisit) {
+      if (populatedVisit.appointmentId) {
+        populatedVisit.appointment = apptMap.get(populatedVisit.appointmentId) || null;
+      }
+      populatedVisit.assessment = assessmentMap.get(populatedVisit.id) || null;
+    }
+
+    const hydratedReport = {
+      ...report,
+      visit: populatedVisit,
+    };
+
+    return formatReportDetail(hydratedReport, allSpecialists);
+  });
+}
+
+async function hydrateSingleReport(rawReport: any) {
+  if (!rawReport) return null;
+  const list = await hydrateReports([rawReport]);
+  return list[0] || null;
+}
+
+/**
  * Get Single Report by ID
  */
 export async function getReportById(reportId: string, user: { id: string; role: string }) {
@@ -807,20 +877,6 @@ export async function getReportById(reportId: string, user: { id: string; role: 
     where: { id: reportId },
     include: {
       client: { include: { user: true } },
-      visit: {
-        include: {
-          appointment: { include: { serviceType: true } },
-          technician: true,
-          assessment: {
-            include: {
-              responses: {
-                include: { question: true },
-                orderBy: { question: { order: "asc" } },
-              },
-            },
-          },
-        },
-      },
     },
   });
 
@@ -832,8 +888,7 @@ export async function getReportById(reportId: string, user: { id: string; role: 
     throw new Error("You are not authorized to view this report.");
   }
 
-  const allSpecialists = await getAllSpecialists();
-  return formatReportDetail(report, allSpecialists);
+  return hydrateSingleReport(report);
 }
 
 /**
@@ -858,25 +913,10 @@ export async function getMyReports(userId: string) {
     orderBy: { createdAt: "desc" },
     include: {
       client: { include: { user: true } },
-      visit: {
-        include: {
-          appointment: { include: { serviceType: true } },
-          technician: true,
-          assessment: {
-            include: {
-              responses: {
-                include: { question: true },
-                orderBy: { question: { order: "asc" } },
-              },
-            },
-          },
-        },
-      },
     },
   });
 
-  const allSpecialists = await getAllSpecialists();
-  return reports.map((r: any) => formatReportDetail(r, allSpecialists));
+  return hydrateReports(reports);
 }
 
 /**
@@ -916,23 +956,8 @@ export async function getAdminReports(query: {
     skip: query.page && query.limit ? (query.page - 1) * query.limit : 0,
     include: {
       client: { include: { user: true } },
-      visit: {
-        include: {
-          appointment: { include: { serviceType: true } },
-          technician: true,
-          assessment: {
-            include: {
-              responses: {
-                include: { question: true },
-                orderBy: { question: { order: "asc" } },
-              },
-            },
-          },
-        },
-      },
     },
   });
 
-  const allSpecialists = await getAllSpecialists();
-  return reports.map((r: any) => formatReportDetail(r, allSpecialists));
+  return hydrateReports(reports);
 }

@@ -6,6 +6,7 @@ import {
   BillingInterval,
   BillingMethod,
   ServiceTypeCategory,
+  RenewalStatus,
 } from "@prisma/client";
 import prisma from "../../lib/prisma";
 import { stripe, STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET } from "../../config/stripe";
@@ -1322,8 +1323,7 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
               where: { stripeInvoiceId },
             });
 
-
-            await (prisma.payment.create as any)({
+            const paymentRecord = await (prisma.payment.create as any)({
               data: {
                 clientId: client.id,
                 subscriptionId: activeSub.id,
@@ -1338,11 +1338,30 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
               },
             });
 
-            // Send Payment Confirmation Receipt Email
+            // Create Renewal lifecycle tracking record
+            try {
+              await (prisma.renewal.create as any)({
+                data: {
+                  subscriptionId: activeSub.id,
+                  previousPeriodId: latestPeriod?.id || null,
+                  newPeriodId: newPeriod.id,
+                  invoiceId: invoiceRecord?.id || null,
+                  paymentId: paymentRecord.id,
+                  status: RenewalStatus.COMPLETED,
+                  scheduledRenewalDate: newPeriodStart,
+                  processedAt: new Date(),
+                },
+              });
+            } catch (renewalErr: any) {
+              console.warn("⚠️ Failed to record Renewal lifecycle entry:", renewalErr.message);
+            }
+
+            // Send Payment Confirmation Receipt Email & Next Quarter Active Notification
             if (client.user?.email) {
               const planName = activeSub.planVersion?.name || activeSub.plan?.name || "Guardian Plus";
               try {
-                const { sendPaymentSuccessEmail } = await import("../../utils/email");
+                const { sendPaymentSuccessEmail, sendQuarterlyRenewalActiveEmail } = await import("../../utils/email");
+                
                 await sendPaymentSuccessEmail({
                   to: client.user.email,
                   clientName: `${client.user.firstName || ""} ${client.user.lastName || ""}`.trim() || "Valued Client",
@@ -1355,8 +1374,37 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
                   invoiceNumber: invoiceRecord?.invoiceNumber,
                   receiptUrl: stripeInvoice.hosted_invoice_url,
                 });
+
+                // Fetch new allocations for email breakdown
+                const periodWithAlloc = await (prisma.subscriptionPeriod.findUnique as any)({
+                  where: { id: newPeriod.id },
+                  include: {
+                    allocations: {
+                      include: { serviceType: true },
+                    },
+                  },
+                });
+
+                const allocatedVisits = (periodWithAlloc?.allocations || []).map((a: any) => ({
+                  serviceName: a.serviceType?.name || "Care Visit",
+                  count: a.allocatedCount || 6,
+                  durationMinutes: a.serviceType?.durationMinutes || 60,
+                }));
+
+                const totalAllocVisits = allocatedVisits.reduce((sum: number, v: any) => sum + v.count, 0);
+
+                await sendQuarterlyRenewalActiveEmail({
+                  to: client.user.email,
+                  clientName: `${client.user.firstName || ""} ${client.user.lastName || ""}`.trim() || "Valued Client",
+                  planName,
+                  periodStartDate: newPeriodStart,
+                  periodEndDate: newPeriodEnd,
+                  periodNumber: nextPeriodNumber,
+                  allocatedVisits,
+                  totalVisits: totalAllocVisits > 0 ? totalAllocVisits : 12,
+                });
               } catch (mailErr) {
-                console.warn("⚠️ Failed to dispatch payment success email:", mailErr);
+                console.warn("⚠️ Failed to dispatch renewal emails:", mailErr);
               }
             }
 

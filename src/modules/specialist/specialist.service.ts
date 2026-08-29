@@ -34,10 +34,22 @@ async function createSpecialistAuditLog(params: {
   }
 }
 
+let specialistsCache: { data: any[]; timestamp: number } | null = null;
+const SPECIALISTS_CACHE_TTL_MS = 30000; // 30 seconds
+
+export function invalidateSpecialistsCache() {
+  specialistsCache = null;
+}
+
 /**
- * List all specialists.
+ * List all specialists with in-memory caching.
  */
-export async function getAllSpecialists() {
+export async function getAllSpecialists(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && specialistsCache && now - specialistsCache.timestamp < SPECIALISTS_CACHE_TTL_MS) {
+    return specialistsCache.data;
+  }
+
   const result: any = await (prisma as any).$runCommandRaw({
     find: "Technician",
     filter: { isArchived: { $ne: true } },
@@ -45,7 +57,7 @@ export async function getAllSpecialists() {
 
   const docs = result?.cursor?.firstBatch || [];
 
-  return docs
+  const mapped = docs
     .map((doc: any) => ({
       id: doc._id?.$oid || String(doc._id),
       name: doc.name || "Specialist",
@@ -62,6 +74,9 @@ export async function getAllSpecialists() {
       updatedAt: doc.updatedAt?.$date || doc.updatedAt || new Date(),
     }))
     .sort((a: any, b: any) => a.displayOrder - b.displayOrder);
+
+  specialistsCache = { data: mapped, timestamp: now };
+  return mapped;
 }
 
 /**
@@ -108,6 +123,7 @@ export async function createSpecialist(input: CreateSpecialistInput, actorUserId
     newValues: doc,
   });
 
+  invalidateSpecialistsCache();
   return doc;
 }
 
@@ -149,6 +165,7 @@ export async function updateSpecialist(
     newValues: updateFields,
   });
 
+  invalidateSpecialistsCache();
   return getSpecialistById(specialistId);
 }
 
@@ -173,6 +190,7 @@ export async function deleteSpecialist(specialistId: string, actorUserId?: strin
     entityId: specialistId,
   });
 
+  invalidateSpecialistsCache();
   return { success: true, message: "Specialist archived." };
 }
 

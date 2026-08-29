@@ -33,6 +33,8 @@ export interface ClientVisitEntitlementsResponse {
   totalScheduled: number;
   totalCompleted: number;
   totalRemaining: number;
+  unscheduledCount: number;
+  isNewQuarterReadyToSchedule: boolean;
   entitlements: VisitEntitlementItem[];
 }
 
@@ -219,7 +221,7 @@ export function formatPeriodEntitlements(
     const scheduledCount = periodAppts.filter(
       (a: any) =>
         a.serviceTypeId === serviceTypeId &&
-        ["SCHEDULED", "CONFIRMED"].includes(a.status?.toUpperCase())
+        ["SCHEDULED", "CONFIRMED", "RESCHEDULED"].includes(a.status?.toUpperCase())
     ).length;
 
     const completedCount =
@@ -350,6 +352,8 @@ export async function getClientVisitEntitlements(
     totalScheduled,
     totalCompleted,
     totalRemaining,
+    unscheduledCount: totalRemaining,
+    isNewQuarterReadyToSchedule: Boolean(currentPeriod && totalRemaining > 0),
     entitlements,
   };
 }
@@ -442,6 +446,8 @@ export async function getAdminClientVisitEntitlements(
     totalScheduled,
     totalCompleted,
     totalRemaining,
+    unscheduledCount: totalRemaining,
+    isNewQuarterReadyToSchedule: Boolean(currentPeriod && totalRemaining > 0),
     entitlements,
   };
 }
