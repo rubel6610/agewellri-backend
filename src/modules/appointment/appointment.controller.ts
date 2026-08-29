@@ -338,3 +338,94 @@ export async function handleUpdateAppointmentStatus(
     next(error);
   }
 }
+
+/**
+ * PUT /api/v1/appointments/:id/accept-request
+ * Admin accepts a visit request and assigns a certified specialist
+ */
+export async function handleAcceptVisitRequest(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      res.status(403).json({ success: false, message: "Admin authorization required." });
+      return;
+    }
+
+    const appointmentId = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id as string);
+    const { technicianId, technicianName, date, timeSlot, startAt, endAt, notes } = req.body || {};
+
+    if (!technicianId && !technicianName) {
+      res.status(400).json({
+        success: false,
+        message: "Please select a certified specialist to assign to this visit request.",
+      });
+      return;
+    }
+
+    const appointment = await appointmentService.acceptVisitRequest(
+      appointmentId,
+      req.user.id,
+      { technicianId, technicianName, date, timeSlot, startAt, endAt, notes }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: `Visit request accepted! Specialist ${appointment.technicianName} assigned successfully.`,
+      data: appointment,
+    });
+  } catch (error: any) {
+    if (error instanceof Error) {
+      res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+      return;
+    }
+    next(error);
+  }
+}
+
+/**
+ * PUT /api/v1/appointments/:id/decline-request
+ * Admin declines a visit request
+ */
+export async function handleDeclineVisitRequest(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      res.status(403).json({ success: false, message: "Admin authorization required." });
+      return;
+    }
+
+    const appointmentId = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id as string);
+    const { reason } = req.body || {};
+
+    const appointment = await appointmentService.declineVisitRequest(
+      appointmentId,
+      req.user.id,
+      reason
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Visit request has been declined.",
+      data: appointment,
+    });
+  } catch (error: any) {
+    if (error instanceof Error) {
+      res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+      return;
+    }
+    next(error);
+  }
+}
+

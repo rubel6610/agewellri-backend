@@ -9,6 +9,8 @@ import {
   handleRescheduleAppointment,
   handleCancelAppointment,
   handleUpdateAppointmentStatus,
+  handleAcceptVisitRequest,
+  handleDeclineVisitRequest,
 } from "./appointment.controller";
 
 const router = Router();
@@ -21,6 +23,8 @@ router.post("/schedule", authenticate, handleScheduleClientAppointment);
 router.get("/admin", authenticate, handleGetAdminAppointments);
 router.post("/admin/schedule", authenticate, handleScheduleAdminAppointment);
 router.put("/:id/status", authenticate, handleUpdateAppointmentStatus);
+router.put("/:id/accept-request", authenticate, handleAcceptVisitRequest);
+router.put("/:id/decline-request", authenticate, handleDeclineVisitRequest);
 
 // Shared Protected Routes (Client/Admin with ownership check)
 router.get("/:id", authenticate, handleGetAppointmentById);

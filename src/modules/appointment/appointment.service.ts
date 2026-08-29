@@ -242,6 +242,9 @@ export function formatAppointmentRecord(appt: any, specialistsList: any[] = []) 
   const hasReport = Boolean(activeReport && (activeReport.fileUrl || activeReport.status === "UPLOADED" || activeReport.status === "GENERATED"));
   const reportStatus = hasReport ? "uploaded" : "not_uploaded";
 
+  const rawStatus = (appt.status || "SCHEDULED").toUpperCase();
+  const isRequested = rawStatus === "REQUESTED" || (!appt.technicianId && rawStatus !== "CANCELLED");
+
   return {
     id: appt.id,
     appointmentId: appt.id,
@@ -257,16 +260,17 @@ export function formatAppointmentRecord(appt: any, specialistsList: any[] = []) 
     serviceCategory: st.category || "OTHER",
     durationMinutes: st.durationMinutes || 60,
     subscriptionPeriodId: appt.subscriptionPeriodId,
-    technicianId: appt.technicianId,
-    technicianName: tech.name || "Assigned Caregiver",
-    technicianTitle: tech.title || (st.category === "CLEANING" ? "Senior Home Support Caregiver" : "Certified Home Safety Specialist"),
+    technicianId: appt.technicianId || null,
+    technicianName: appt.technicianId ? (tech.name || "Assigned Specialist") : "Unassigned Specialist",
+    technicianTitle: appt.technicianId ? (tech.title || (st.category === "CLEANING" ? "Senior Home Support Caregiver" : "Certified Home Safety Specialist")) : "Pending Admin Assignment",
     technicianPhone: tech.phone || null,
     technicianColor: tech.color || "#294B68",
     startAt: appt.startAt?.toISOString?.() || new Date(appt.startAt).toISOString(),
     endAt: appt.endAt?.toISOString?.() || new Date(appt.endAt).toISOString(),
     date: dateFormatted,
     timeSlot: timeSlotFormatted,
-    status: appt.status?.toLowerCase() || "scheduled",
+    status: isRequested ? "requested" : appt.status?.toLowerCase() || "scheduled",
+    isRequested,
     reportStatus,
     hasReport,
     reportId: activeReport?.id || null,
@@ -500,15 +504,18 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
       );
     }
 
+    const initialStatus = isAdmin ? AppointmentStatus.SCHEDULED : ("REQUESTED" as any);
+    const assignedTechId = isAdmin ? technician?.id || null : null;
+
     const createdAppt = await tx.appointment.create({
       data: {
         clientId: client.id,
         serviceTypeId: serviceType.id,
         subscriptionPeriodId: activePeriod.id,
-        technicianId: technician?.id || null,
+        technicianId: assignedTechId,
         startAt,
         endAt,
-        status: AppointmentStatus.SCHEDULED,
+        status: initialStatus,
         location: params.location || clientAddress,
         notes: params.notes || null,
         createdByUserId: actorUserId,
@@ -520,12 +527,12 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
       },
     });
 
-    if (technician?.id) {
+    if (assignedTechId) {
       try {
         await tx.visit.create({
           data: {
             appointmentId: createdAppt.id,
-            technicianId: technician.id,
+            technicianId: assignedTechId,
             status: VisitStatus.SCHEDULED,
             notes: params.notes || null,
           },
@@ -541,7 +548,7 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
   // 11. Audit Log
   await createAppointmentAuditLog({
     actorUserId,
-    action: isAdmin ? "ADMIN_DISPATCHED_VISIT" : "CLIENT_SCHEDULED_VISIT",
+    action: isAdmin ? "ADMIN_DISPATCHED_VISIT" : "CLIENT_SUBMITTED_VISIT_REQUEST",
     entityType: "Appointment",
     entityId: appointment.id,
     metadata: {
@@ -550,7 +557,7 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
       subscriptionId: activeSubscription.id,
       subscriptionPeriodId: activePeriod.id,
       serviceType: serviceType.name,
-      technicianName: technician?.name,
+      technicianName: isAdmin ? technician?.name : "Unassigned (Pending Admin Review)",
       startAt,
       endAt,
     },
@@ -1000,3 +1007,140 @@ export async function updateAppointmentStatus(
   const allSpecialists = await getAllSpecialists();
   return formatAppointmentRecord(updated, allSpecialists);
 }
+
+/**
+ * ADMIN: Accept Visit Request and Assign Specialist
+ */
+export async function acceptVisitRequest(
+  appointmentId: string,
+  adminUserId: string,
+  input: {
+    technicianId: string;
+    technicianName?: string;
+    date?: string;
+    timeSlot?: string;
+    startAt?: string;
+    endAt?: string;
+    notes?: string;
+  }
+) {
+  if (!isValidObjectId(appointmentId)) {
+    throw new Error(`Appointment with ID ${appointmentId} not found.`);
+  }
+
+  const appt = await (prisma.appointment.findUnique as any)({
+    where: { id: appointmentId },
+    include: {
+      serviceType: true,
+      client: { include: { user: true } },
+    },
+  });
+
+  if (!appt) {
+    throw new Error(`Appointment with ID ${appointmentId} not found.`);
+  }
+
+  if (appt.status === AppointmentStatus.CANCELLED) {
+    throw new Error("Cannot accept a cancelled appointment request.");
+  }
+
+  // Resolve technician
+  const technician = await resolveTechnician(
+    input.technicianId,
+    input.technicianName,
+    appt.serviceType?.category
+  );
+
+  if (!technician) {
+    throw new Error("Please select a valid certified specialist to assign to this visit.");
+  }
+
+  // Handle optional date/time adjustments
+  let startAt = appt.startAt;
+  let endAt = appt.endAt;
+  if (input.startAt && input.endAt) {
+    startAt = new Date(input.startAt);
+    endAt = new Date(input.endAt);
+  } else if (input.date && input.timeSlot) {
+    const parsed = parseDateAndTimeSlot(input.date, input.timeSlot);
+    startAt = parsed.startAt;
+    endAt = parsed.endAt;
+  }
+
+  const updated = await (prisma.appointment.update as any)({
+    where: { id: appointmentId },
+    data: {
+      technicianId: technician.id,
+      startAt,
+      endAt,
+      status: AppointmentStatus.SCHEDULED,
+      notes: input.notes
+        ? `${appt.notes || ""}\nSpecialist Assigned: ${technician.name}. ${input.notes}`.trim()
+        : appt.notes,
+    },
+    include: {
+      serviceType: true,
+      client: { include: { user: true } },
+      createdByUser: true,
+      visit: {
+        include: {
+          technician: true,
+          reports: true,
+        },
+      },
+    },
+  });
+
+  // Ensure linked visit exists with assigned technician
+  const existingVisit = await (prisma.visit.findUnique as any)({
+    where: { appointmentId },
+  });
+
+  if (existingVisit) {
+    await (prisma.visit.update as any)({
+      where: { id: existingVisit.id },
+      data: {
+        technicianId: technician.id,
+        status: VisitStatus.SCHEDULED,
+      },
+    });
+  } else {
+    try {
+      await (prisma.visit.create as any)({
+        data: {
+          appointmentId,
+          technicianId: technician.id,
+          status: VisitStatus.SCHEDULED,
+          notes: updated.notes || null,
+        },
+      });
+    } catch (visitErr) {
+      console.warn("⚠️ Linked Visit creation warning:", visitErr);
+    }
+  }
+
+  await createAppointmentAuditLog({
+    actorUserId: adminUserId,
+    action: "ADMIN_ACCEPTED_VISIT_REQUEST",
+    entityType: "Appointment",
+    entityId: appointmentId,
+    previousValues: { status: appt.status, technicianId: appt.technicianId },
+    newValues: { status: AppointmentStatus.SCHEDULED, technicianId: technician.id, technicianName: technician.name },
+    metadata: { technicianName: technician.name, notes: input.notes },
+  });
+
+  const allSpecialists = await getAllSpecialists();
+  return formatAppointmentRecord(updated, allSpecialists);
+}
+
+/**
+ * ADMIN: Decline Visit Request
+ */
+export async function declineVisitRequest(
+  appointmentId: string,
+  adminUserId: string,
+  reason?: string
+) {
+  return cancelAppointment(appointmentId, adminUserId, false, reason || "Visit request declined by administrator");
+}
+
