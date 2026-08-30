@@ -18,6 +18,8 @@ import {
   CancelRenewalInput,
   AdminBillingFilterInput,
   AdminRetryChargeInput,
+  AdminCancelSubscriptionInput,
+  AdminUpdateSubscriptionStatusInput,
 } from "./payment.validation";
 import {
   ensureVisitAllocationsForPeriod,
@@ -1938,3 +1940,217 @@ export async function adminRetryCharge(input: AdminRetryChargeInput) {
   };
 }
 
+/**
+ * Admin: Cancel a Client's Subscription
+ * Supports both Immediate Cancellation and Cancel-at-Period-End.
+ */
+export async function adminCancelSubscription(
+  subscriptionId: string,
+  input: AdminCancelSubscriptionInput,
+  actorUserId?: string
+) {
+  const subscription = await (prisma.subscription.findUnique as any)({
+    where: { id: subscriptionId },
+    include: {
+      client: { include: { user: true } },
+      periods: {
+        where: { isCurrent: true },
+      },
+    },
+  });
+
+  if (!subscription) {
+    throw new Error("Subscription not found.");
+  }
+
+  const now = new Date();
+
+  if (input.immediate) {
+    // 1. Immediate Cancellation: Invalidate subscription right now
+    const updated = await (prisma.subscription.update as any)({
+      where: { id: subscriptionId },
+      data: {
+        status: SubscriptionStatus.CANCELLED,
+        autoRenew: false,
+        cancelAtPeriodEnd: false,
+        cancelledAt: now,
+        cancellationRequestedAt: now,
+        cancellationEffectiveAt: now,
+        cancellationReason: input.reason || "Immediate cancellation executed by Administrator.",
+      },
+    });
+
+    // Mark current period inactive
+    try {
+      await (prisma.subscriptionPeriod.updateMany as any)({
+        where: { subscriptionId },
+        data: {
+          status: "CANCELLED",
+          isCurrent: false,
+        },
+      });
+    } catch {}
+
+    // Cancel Stripe subscription if active
+    if (subscription.stripeSubscriptionId) {
+      try {
+        await stripe.subscriptions.cancel(subscription.stripeSubscriptionId);
+      } catch (stripeErr: any) {
+        console.warn("⚠️ Notice: Stripe subscription cancellation:", stripeErr.message);
+      }
+    }
+
+    // Cancel future pending appointments for this client
+    try {
+      await (prisma.appointment.updateMany as any)({
+        where: {
+          clientId: subscription.clientId,
+          status: { in: ["SCHEDULED", "CONFIRMED", "REQUESTED"] },
+        },
+        data: {
+          status: "CANCELLED",
+          notes: "Cancelled due to subscription cancellation by Administrator.",
+        },
+      });
+    } catch {}
+
+    await createBillingAuditLog({
+      actorUserId,
+      action: "ADMIN_SUBSCRIPTION_CANCELLED_IMMEDIATELY",
+      entityType: "Subscription",
+      entityId: subscriptionId,
+      metadata: { reason: input.reason, clientId: subscription.clientId },
+    });
+
+    return {
+      success: true,
+      message: `Subscription for ${subscription.client?.user?.firstName || "Client"} has been cancelled immediately.`,
+      subscription: updated,
+    };
+  } else {
+    // 2. Scheduled Cancellation: Cancel at period end
+    const effectiveDate = subscription.currentPeriodEnd || subscription.nextRenewalDate || now;
+    const updated = await (prisma.subscription.update as any)({
+      where: { id: subscriptionId },
+      data: {
+        status: SubscriptionStatus.CANCELLATION_REQUESTED,
+        autoRenew: false,
+        cancelAtPeriodEnd: true,
+        cancellationRequestedAt: now,
+        cancellationEffectiveAt: effectiveDate,
+        cancellationReason: input.reason || "Cancellation scheduled at period end by Administrator.",
+      },
+    });
+
+    await createBillingAuditLog({
+      actorUserId,
+      action: "ADMIN_SUBSCRIPTION_CANCEL_SCHEDULED",
+      entityType: "Subscription",
+      entityId: subscriptionId,
+      metadata: { reason: input.reason, effectiveDate, clientId: subscription.clientId },
+    });
+
+    return {
+      success: true,
+      message: `Subscription for ${subscription.client?.user?.firstName || "Client"} is scheduled to end on ${effectiveDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}.`,
+      subscription: updated,
+    };
+  }
+}
+
+/**
+ * Admin: Reactivate / Resume Auto-Renew on a Subscription
+ */
+export async function adminReactivateSubscription(
+  subscriptionId: string,
+  actorUserId?: string
+) {
+  const subscription = await (prisma.subscription.findUnique as any)({
+    where: { id: subscriptionId },
+    include: { client: { include: { user: true } } },
+  });
+
+  if (!subscription) {
+    throw new Error("Subscription not found.");
+  }
+
+  const updated = await (prisma.subscription.update as any)({
+    where: { id: subscriptionId },
+    data: {
+      status: SubscriptionStatus.ACTIVE,
+      autoRenew: true,
+      cancelAtPeriodEnd: false,
+      cancellationRequestedAt: null,
+      cancellationEffectiveAt: null,
+      cancellationReason: null,
+      cancelledAt: null,
+    },
+  });
+
+  // Restore current period status if needed
+  try {
+    const latestPeriod = await (prisma.subscriptionPeriod.findFirst as any)({
+      where: { subscriptionId },
+      orderBy: { periodNumber: "desc" },
+    });
+    if (latestPeriod && latestPeriod.endDate > new Date()) {
+      await (prisma.subscriptionPeriod.update as any)({
+        where: { id: latestPeriod.id },
+        data: { status: "ACTIVE", isCurrent: true },
+      });
+    }
+  } catch {}
+
+  await createBillingAuditLog({
+    actorUserId,
+    action: "ADMIN_SUBSCRIPTION_REACTIVATED",
+    entityType: "Subscription",
+    entityId: subscriptionId,
+    metadata: { clientId: subscription.clientId },
+  });
+
+  return {
+    success: true,
+    message: `Subscription for ${subscription.client?.user?.firstName || "Client"} has been reactivated with auto-renewal enabled.`,
+    subscription: updated,
+  };
+}
+
+/**
+ * Admin: Change Subscription Status (e.g. PAUSED, ACTIVE, PENDING)
+ */
+export async function adminUpdateSubscriptionStatus(
+  subscriptionId: string,
+  input: AdminUpdateSubscriptionStatusInput,
+  actorUserId?: string
+) {
+  const subscription = await (prisma.subscription.findUnique as any)({
+    where: { id: subscriptionId },
+  });
+
+  if (!subscription) {
+    throw new Error("Subscription not found.");
+  }
+
+  const updated = await (prisma.subscription.update as any)({
+    where: { id: subscriptionId },
+    data: {
+      status: input.status,
+      cancellationReason: input.reason || subscription.cancellationReason,
+    },
+  });
+
+  await createBillingAuditLog({
+    actorUserId,
+    action: `ADMIN_SUBSCRIPTION_STATUS_${input.status}`,
+    entityType: "Subscription",
+    entityId: subscriptionId,
+    metadata: { status: input.status, reason: input.reason },
+  });
+
+  return {
+    success: true,
+    message: `Subscription status updated to ${input.status}.`,
+    subscription: updated,
+  };
+}

@@ -17,6 +17,9 @@ import {
   handleGetAdminUpcomingRenewals,
   handleAdminTriggerReminders,
   handleAdminRetryCharge,
+  handleAdminCancelSubscription,
+  handleAdminReactivateSubscription,
+  handleAdminUpdateSubscriptionStatus,
   handleWebhook,
   handleGetClientVisitEntitlements,
   handleGetAdminClientVisitEntitlements,
@@ -44,6 +47,9 @@ router.post("/subscription/reactivate-renewal", authenticate, handleReactivateRe
 router.get("/admin/overview", authenticate, handleGetAdminOverview);
 router.get("/admin/invoices", authenticate, handleGetAdminInvoices);
 router.get("/admin/subscriptions", authenticate, handleGetAdminSubscriptions);
+router.post("/admin/subscription/:id/cancel", authenticate, handleAdminCancelSubscription);
+router.post("/admin/subscription/:id/reactivate", authenticate, handleAdminReactivateSubscription);
+router.post("/admin/subscription/:id/status", authenticate, handleAdminUpdateSubscriptionStatus);
 router.get("/admin/renewals", authenticate, handleGetAdminUpcomingRenewals);
 router.get("/admin/client/:id/visit-entitlements", authenticate, handleGetAdminClientVisitEntitlements);
 router.post("/admin/trigger-reminders", authenticate, handleAdminTriggerReminders);

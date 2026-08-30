@@ -53,6 +53,16 @@ export const adminRetryChargeSchema = z.object({
   paymentId: z.string().optional(),
 });
 
+export const adminCancelSubscriptionSchema = z.object({
+  immediate: z.boolean().default(false).optional(),
+  reason: z.string().optional(),
+});
+
+export const adminUpdateSubscriptionStatusSchema = z.object({
+  status: z.enum(["ACTIVE", "PENDING", "PAUSED", "CANCELLED", "PAYMENT_FAILED", "CANCELLATION_REQUESTED"]),
+  reason: z.string().optional(),
+});
+
 export type CreateSetupIntentInput = z.infer<typeof createSetupIntentSchema>;
 export type CreatePaymentIntentInput = z.infer<typeof createPaymentIntentSchema>;
 export type SavePaymentMethodInput = z.infer<typeof savePaymentMethodSchema>;
@@ -61,3 +71,5 @@ export type CreateInvoicePaymentInput = z.infer<typeof createInvoicePaymentSchem
 export type CancelRenewalInput = z.infer<typeof cancelRenewalSchema>;
 export type AdminBillingFilterInput = z.infer<typeof adminBillingFilterSchema>;
 export type AdminRetryChargeInput = z.infer<typeof adminRetryChargeSchema>;
+export type AdminCancelSubscriptionInput = z.infer<typeof adminCancelSubscriptionSchema>;
+export type AdminUpdateSubscriptionStatusInput = z.infer<typeof adminUpdateSubscriptionStatusSchema>;
