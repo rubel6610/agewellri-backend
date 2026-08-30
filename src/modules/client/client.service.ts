@@ -870,8 +870,8 @@ export async function getAdminDashboardStats() {
       type: "REPORT",
       title: `${reportsPendingCount} Completed Visit${reportsPendingCount > 1 ? "s" : ""} Missing Reports`,
       description: "Care specialists have finished home visits requiring official PDF report uploads.",
-      actionLabel: "Upload Reports",
-      actionHref: "/admin/reports",
+      actionLabel: "View Completed Visits",
+      actionHref: "/admin/appointments?tab=COMPLETED",
       urgency: "HIGH",
     });
   }
