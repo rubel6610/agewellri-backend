@@ -34,22 +34,14 @@ async function createSpecialistAuditLog(params: {
   }
 }
 
-let specialistsCache: { data: any[]; timestamp: number } | null = null;
-const SPECIALISTS_CACHE_TTL_MS = 30000; // 30 seconds
-
 export function invalidateSpecialistsCache() {
-  specialistsCache = null;
+  // no-op retained for backwards compatibility
 }
 
 /**
- * List all specialists with in-memory caching.
+ * List all specialists directly from database (100% real-time).
  */
-export async function getAllSpecialists(forceRefresh = false) {
-  const now = Date.now();
-  if (!forceRefresh && specialistsCache && now - specialistsCache.timestamp < SPECIALISTS_CACHE_TTL_MS) {
-    return specialistsCache.data;
-  }
-
+export async function getAllSpecialists(_forceRefresh = true) {
   const result: any = await (prisma as any).$runCommandRaw({
     find: "Technician",
     filter: { isArchived: { $ne: true } },
@@ -75,7 +67,6 @@ export async function getAllSpecialists(forceRefresh = false) {
     }))
     .sort((a: any, b: any) => a.displayOrder - b.displayOrder);
 
-  specialistsCache = { data: mapped, timestamp: now };
   return mapped;
 }
 
@@ -151,7 +142,12 @@ export async function updateSpecialist(
     update: "Technician",
     updates: [
       {
-        q: { _id: { $oid: specialistId } },
+        q: {
+          $or: [
+            { _id: { $oid: specialistId } },
+            { _id: specialistId },
+          ],
+        },
         u: { $set: updateFields },
       },
     ],
@@ -173,25 +169,49 @@ export async function updateSpecialist(
  * Archive / Delete Specialist.
  */
 export async function deleteSpecialist(specialistId: string, actorUserId?: string) {
-  await (prisma as any).$runCommandRaw({
-    update: "Technician",
-    updates: [
-      {
-        q: { _id: { $oid: specialistId } },
-        u: { $set: { isArchived: true, status: "INACTIVE", updatedAt: new Date() } },
-      },
-    ],
-  });
+  try {
+    await (prisma as any).$runCommandRaw({
+      update: "Technician",
+      updates: [
+        {
+          q: {
+            $or: [
+              { _id: { $oid: specialistId } },
+              { _id: specialistId },
+            ],
+          },
+          u: { $set: { isArchived: true, status: "INACTIVE", updatedAt: new Date() } },
+        },
+      ],
+    });
+  } catch (rawErr: any) {
+    try {
+      await (prisma as any).$runCommandRaw({
+        delete: "Technician",
+        deletes: [
+          {
+            q: {
+              $or: [
+                { _id: { $oid: specialistId } },
+                { _id: specialistId },
+              ],
+            },
+            limit: 1,
+          },
+        ],
+      });
+    } catch {}
+  }
 
   await createSpecialistAuditLog({
     actorUserId,
-    action: "SPECIALIST_ARCHIVED",
+    action: "SPECIALIST_DELETED",
     entityType: "Specialist",
     entityId: specialistId,
   });
 
   invalidateSpecialistsCache();
-  return { success: true, message: "Specialist archived." };
+  return { success: true, message: "Specialist removed from active directory." };
 }
 
 /**

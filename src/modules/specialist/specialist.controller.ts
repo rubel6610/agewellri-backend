@@ -18,6 +18,7 @@ export async function handleGetAllSpecialists(
   next: NextFunction
 ): Promise<void> {
   try {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     const specialists = await specialistService.getAllSpecialists();
     sendResponse(res, {
       statusCode: 200,
@@ -40,6 +41,7 @@ export async function handleGetSpecialistById(
   next: NextFunction
 ): Promise<void> {
   try {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     const specialist = await specialistService.getSpecialistById(req.params.id as string);
     sendResponse(res, {
       statusCode: 200,

@@ -12,20 +12,10 @@ import {
 
 const router = Router();
 
-// Public / Authenticated read
-router.get(
-  "/",
-  authenticate,
-  cacheResponse({ ttlSeconds: 1800, tags: ["specialists"], isPrivate: true }),
-  handleGetAllSpecialists
-);
+// Public / Authenticated read (Real-time live data)
+router.get("/", authenticate, handleGetAllSpecialists);
 
-router.get(
-  "/:id",
-  authenticate,
-  cacheResponse({ ttlSeconds: 1800, tags: ["specialists"], isPrivate: true }),
-  handleGetSpecialistById
-);
+router.get("/:id", authenticate, handleGetSpecialistById);
 
 // Admin-only management
 router.post(
