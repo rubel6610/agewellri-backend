@@ -832,12 +832,8 @@ export async function getAdminDashboardStats() {
     planDistribution[planName] = (planDistribution[planName] || 0) + 1;
   });
 
-  // State Jurisdiction Breakdown
-  const stateDistribution: Record<string, number> = { RI: 0, MA: 0, CT: 0 };
-  allClients.forEach((c: any) => {
-    const st = (c.state || "RI").toUpperCase();
-    stateDistribution[st] = (stateDistribution[st] || 0) + 1;
-  });
+  // State Jurisdiction (Rhode Island)
+  const stateDistribution: Record<string, number> = { RI: allClients.length };
 
   // Format Attention Items dynamically
   const attentionItems: Array<{

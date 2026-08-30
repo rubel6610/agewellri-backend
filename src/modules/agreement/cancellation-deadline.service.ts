@@ -1,14 +1,12 @@
 /**
  * CancellationDeadlineService
  *
- * Computes official state-specific 3-business-day cancellation deadlines for AgeWellRI Service Agreements.
- * States supported: Rhode Island (RI), Connecticut (CT), Massachusetts (MA).
+ * Computes official Rhode Island 3-business-day cancellation deadlines for AgeWellRI Service Agreements.
+ * State: Rhode Island (RI - R.I. Gen. Laws § 6-28-3).
  *
  * Rules:
  * - RI: Saturdays count as business days; Sundays do NOT count; Federal/legal holidays do NOT count;
  *       Rhode Island Victory Day (2nd Monday of August) does NOT count.
- * - CT: Saturdays count as business days; Sundays do NOT count; Connecticut legal holidays do NOT count.
- * - MA: Saturdays count as business days; Sundays do NOT count; Massachusetts legal holidays do NOT count.
  */
 
 export interface CancellationDeadlineResult {
@@ -109,10 +107,7 @@ export class CancellationDeadlineService {
       year: "numeric",
     });
 
-    let stateSpecificNotice = "State & Federal Consumer Protection 3-Day Rule (16 CFR Part 429)";
-    if (state === "RI") stateSpecificNotice = "Rhode Island General Laws § 6-28-3";
-    else if (state === "CT") stateSpecificNotice = "Connecticut General Statutes § 42-134a";
-    else if (state === "MA") stateSpecificNotice = "Massachusetts General Laws ch. 93 § 48";
+    const stateSpecificNotice = "Rhode Island General Laws § 6-28-3";
 
     return {
       deadlineDate: currentDate,

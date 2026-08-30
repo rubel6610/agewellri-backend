@@ -6,7 +6,7 @@ import { processAgreementPayment } from "../payment/payment.service";
 import { SubmitAgreementInput, CreateAgreementTemplateInput } from "./agreement.validation";
 
 /**
- * Seed Default State Agreement Templates & Versions (RI, CT, MA)
+ * Seed Default State Agreement Template & Version (Rhode Island)
  */
 export async function seedDefaultAgreementTemplates() {
   const templates = [
@@ -17,22 +17,6 @@ export async function seedDefaultAgreementTemplates() {
       versionNumber: "v2.0",
       statutoryReference: "Rhode Island General Laws § 6-28-3",
       content: "Standard Rhode Island senior home safety & wellness coordination agreement with 3-business-day cancellation notice.",
-    },
-    {
-      state: "CT",
-      title: "Connecticut Client Service Agreement",
-      description: "Official AgeWellRI home safety & care coordination membership contract for Connecticut residents.",
-      versionNumber: "v1.0",
-      statutoryReference: "Connecticut General Statutes § 42-134a",
-      content: "Standard Connecticut senior home safety & wellness coordination agreement with 3-business-day cancellation notice.",
-    },
-    {
-      state: "MA",
-      title: "Massachusetts Client Service Agreement",
-      description: "Official AgeWellRI home safety & care coordination membership contract for Massachusetts residents.",
-      versionNumber: "v1.0",
-      statutoryReference: "Massachusetts General Laws ch. 93 § 48",
-      content: "Standard Massachusetts senior home safety & wellness coordination agreement with 3-business-day cancellation notice.",
     },
   ];
 
@@ -75,7 +59,7 @@ export async function seedDefaultAgreementTemplates() {
     }
   }
 
-  console.log("✅ Seeded State Agreement Templates for RI, CT, MA.");
+  console.log("✅ Seeded Rhode Island Agreement Template.");
 }
 
 /**
