@@ -201,6 +201,35 @@ export async function handleChangePlanStatus(
 }
 
 /**
+ * DELETE /api/v1/plans/admin/:id
+ * Admin endpoint to permanently delete a service plan.
+ */
+export async function handleDeletePlan(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      res.status(403).json({ success: false, message: "Admin authorization required." });
+      return;
+    }
+
+    const result = await planService.deletePlan(req.params.id as string, req.user.id);
+    res.status(200).json({
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (error: any) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Failed to delete service plan.",
+    });
+  }
+}
+
+/**
  * Service Catalog Handlers
  */
 export async function handleGetServiceStats(
