@@ -389,7 +389,49 @@ export async function getUserProfile(userId: string) {
     throw new Error("User not found.");
   }
 
-  const flags = computeAgreementFlags(user);
+  const db = prisma as any;
+  let familyMember: any = null;
+  let activeClient = user.client;
+
+  // If user does not have a primary client record, check if they are an authorized Family Member
+  if (!activeClient && user.role === UserRole.CLIENT) {
+    familyMember = await db.familyMember.findFirst({
+      where: {
+        userId,
+        portalAccess: true,
+      },
+      include: {
+        client: {
+          include: {
+            agreements: {
+              orderBy: { createdAt: "desc" },
+              take: 1,
+            },
+            subscriptions: {
+              include: {
+                plan: true,
+              },
+              orderBy: { createdAt: "desc" },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+
+    if (familyMember && familyMember.client) {
+      activeClient = familyMember.client;
+    }
+  }
+
+  let flags = computeAgreementFlags({ ...user, client: activeClient });
+  // Family members are authorized observers and never require agreement completion
+  if (familyMember) {
+    flags = {
+      hasCompletedAgreement: true,
+      requiresAgreement: false,
+    };
+  }
 
   return {
     id: user.id,
@@ -400,37 +442,50 @@ export async function getUserProfile(userId: string) {
     role: user.role,
     status: user.status,
     permissions: user.permissions || [],
+    isFamilyMember: Boolean(familyMember),
+    isPrimary: !familyMember,
     hasCompletedAgreement: flags.hasCompletedAgreement,
     requiresAgreement: flags.requiresAgreement,
-    client: user.client
+    familyMember: familyMember
       ? {
-          id: user.client.id,
-          clientNumber: user.client.clientNumber,
-          address: user.client.address,
-          city: user.client.city,
-          state: user.client.state,
-          postalCode: user.client.postalCode,
-          country: user.client.country,
-          dateOfBirth: user.client.dateOfBirth,
-          signerRole: user.client.signerRole,
-          legalAuthority: user.client.legalAuthority,
-          primaryContactName: user.client.primaryContactName,
-          primaryContactPhone: user.client.primaryContactPhone,
-          primaryContactEmail: user.client.primaryContactEmail,
-          primaryContactRelation: user.client.primaryContactRelation,
-          emergencyContactName: user.client.emergencyContactName,
-          emergencyContactPhone: user.client.emergencyContactPhone,
-          emergencyContactRelation: user.client.emergencyContactRelation,
-          homeAccessType: user.client.homeAccessType,
-          homeAccessInstructions: user.client.homeAccessInstructions,
-          selectedPlan: user.client.selectedPlan,
-          hasCleaningAddon: user.client.hasCleaningAddon,
-          onboardingStatus: user.client.onboardingStatus,
-          hasCompletedAgreement: user.client.hasCompletedAgreement,
-          cardBrand: user.client.cardBrand,
-          cardLast4: user.client.cardLast4,
-          cardExpMonth: user.client.cardExpMonth,
-          cardExpYear: user.client.cardExpYear,
+          id: familyMember.id,
+          name: familyMember.name,
+          relationship: familyMember.relationship,
+          email: familyMember.email,
+          reportAccess: familyMember.reportAccess,
+          portalAccess: familyMember.portalAccess,
+          billingAccess: familyMember.billingAccess,
+        }
+      : null,
+    client: activeClient
+      ? {
+          id: activeClient.id,
+          clientNumber: activeClient.clientNumber,
+          address: activeClient.address,
+          city: activeClient.city,
+          state: activeClient.state,
+          postalCode: activeClient.postalCode,
+          country: activeClient.country,
+          dateOfBirth: activeClient.dateOfBirth,
+          signerRole: activeClient.signerRole,
+          legalAuthority: activeClient.legalAuthority,
+          primaryContactName: activeClient.primaryContactName,
+          primaryContactPhone: activeClient.primaryContactPhone,
+          primaryContactEmail: activeClient.primaryContactEmail,
+          primaryContactRelation: activeClient.primaryContactRelation,
+          emergencyContactName: activeClient.emergencyContactName,
+          emergencyContactPhone: activeClient.emergencyContactPhone,
+          emergencyContactRelation: activeClient.emergencyContactRelation,
+          homeAccessType: activeClient.homeAccessType,
+          homeAccessInstructions: activeClient.homeAccessInstructions,
+          selectedPlan: activeClient.selectedPlan,
+          hasCleaningAddon: activeClient.hasCleaningAddon,
+          onboardingStatus: activeClient.onboardingStatus,
+          hasCompletedAgreement: activeClient.hasCompletedAgreement,
+          cardBrand: activeClient.cardBrand,
+          cardLast4: activeClient.cardLast4,
+          cardExpMonth: activeClient.cardExpMonth,
+          cardExpYear: activeClient.cardExpYear,
         }
       : null,
   };

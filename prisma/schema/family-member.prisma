@@ -1,0 +1,26 @@
+model FamilyMember {
+  id                  String           @id @default(auto()) @map("_id") @db.ObjectId
+  clientId            String           @db.ObjectId
+  client              Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  userId              String?          @db.ObjectId
+  user                User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  name                String
+  relationship        String
+  email               String
+  phone               String?
+  reportAccess        Boolean          @default(true)
+  portalAccess        Boolean          @default(false)
+  billingAccess       Boolean          @default(false)
+  isEmergencyContact  Boolean          @default(false)
+  invitationStatus    InvitationStatus @default(PENDING)
+  invitationTokenHash String?
+  invitationExpiresAt DateTime?
+  invitedAt           DateTime?
+  acceptedAt          DateTime?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  @@index([clientId])
+  @@index([email])
+  @@index([userId])
+}

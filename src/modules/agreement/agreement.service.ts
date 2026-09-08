@@ -4,6 +4,7 @@ import { CancellationDeadlineService } from "./cancellation-deadline.service";
 import { sendAgreementExecutedEmail, sendPlanPurchaseConfirmationEmail, sendWelcomeInvitationEmail } from "../../utils/email";
 import { processAgreementPayment } from "../payment/payment.service";
 import { SubmitAgreementInput, CreateAgreementTemplateInput } from "./agreement.validation";
+import { resolveClientForUser } from "../family/family.service";
 
 /**
  * Seed Default State Agreement Template & Version (Rhode Island)
@@ -321,6 +322,37 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
     });
   }
 
+  // 4b. Persist Authorized Recipients as FamilyMember records
+  if (Array.isArray(input.authorizedRecipients) && input.authorizedRecipients.length > 0) {
+    for (const rec of input.authorizedRecipients) {
+      if (rec && rec.name && rec.email) {
+        try {
+          const cleanEmail = rec.email.trim().toLowerCase();
+          const existing = await (prisma as any).familyMember.findFirst({
+            where: { clientId, email: cleanEmail },
+          });
+          if (!existing) {
+            await (prisma as any).familyMember.create({
+              data: {
+                clientId,
+                name: rec.name.trim(),
+                relationship: rec.relationship?.trim() || "Family Member",
+                email: cleanEmail,
+                phone: (rec as any).phone?.trim() || null,
+                reportAccess: true,
+                portalAccess: false,
+                billingAccess: false,
+                invitationStatus: "PENDING",
+              },
+            });
+          }
+        } catch (recErr) {
+          console.warn("⚠️ Error saving recipient during agreement execution:", recErr);
+        }
+      }
+    }
+  }
+
   // 5. Build Immutable Plan Snapshot
   const planSnapshot = {
     planId: targetPlan?.id,
@@ -506,31 +538,23 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
  * Get Client's Active/Latest Executed Agreement
  */
 export async function getClientAgreement(userId: string) {
-  const user: any = await ((prisma as any).user.findUnique as any)({
-    where: { id: userId },
-    include: {
-      client: {
-        include: {
-          agreements: {
-            orderBy: { createdAt: "desc" },
-            take: 1,
-            include: {
-              plan: true,
-              planVersion: true,
-              agreementVersion: true,
-            },
-          },
-        },
-      },
-    },
-  });
-
-  const client = user?.client;
-  if (!user || !client || !client.agreements || client.agreements.length === 0) {
+  const context = await resolveClientForUser(userId);
+  if (!context || !context.client) {
     return null;
   }
 
-  return client.agreements[0];
+  const clientId = context.client.id;
+  const agreement = await ((prisma as any).serviceAgreement.findFirst as any)({
+    where: { clientId },
+    orderBy: { createdAt: "desc" },
+    include: {
+      plan: true,
+      planVersion: true,
+      agreementVersion: true,
+    },
+  });
+
+  return agreement;
 }
 
 /**

@@ -11,6 +11,7 @@ import { getAllSpecialists } from "../specialist/specialist.service";
 import path from "path";
 import fs from "fs";
 import { sendReportAvailableEmail } from "../../utils/email";
+import { resolveClientForUser } from "../family/family.service";
 
 
 
@@ -551,16 +552,16 @@ export async function uploadVisitReport(
     },
   });
 
-  // 7. Send Client Notification Email
+  // 7. Send Client and Authorized Family Notification Emails
   const clientUser = appointment.client?.user;
-  const recipientEmail = clientUser?.email || appointment.client?.primaryContactEmail;
+  const primaryRecipientEmail = clientUser?.email || appointment.client?.primaryContactEmail;
   const clientName = `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() || appointment.client?.primaryContactName || "Valued Member";
   const specialistName = visit.technician?.name || appointment.technician?.name || "AgeWellRI Specialist";
 
-  if (recipientEmail) {
+  if (primaryRecipientEmail) {
     try {
       await sendReportAvailableEmail({
-        to: recipientEmail,
+        to: primaryRecipientEmail,
         clientName,
         serviceType: serviceName,
         visitDate: visit.completedAt || appointment.startAt || new Date(),
@@ -568,8 +569,37 @@ export async function uploadVisitReport(
         reportTitle: defaultTitle,
       });
     } catch (emailErr) {
-      console.warn("⚠️ Could not send report availability email notification:", emailErr);
+      console.warn("⚠️ Could not send report availability email notification to primary client:", emailErr);
     }
+  }
+
+  // Also dispatch automated report notification to all family members with reportAccess = true
+  try {
+    const familyMembersWithReportAccess = await (prisma.familyMember.findMany as any)({
+      where: {
+        clientId,
+        reportAccess: true,
+      },
+    });
+
+    for (const fam of familyMembersWithReportAccess) {
+      if (fam.email && fam.email.toLowerCase() !== primaryRecipientEmail?.toLowerCase()) {
+        try {
+          await sendReportAvailableEmail({
+            to: fam.email,
+            clientName: `${fam.name} (for ${clientName})`,
+            serviceType: serviceName,
+            visitDate: visit.completedAt || appointment.startAt || new Date(),
+            specialistName,
+            reportTitle: defaultTitle,
+          });
+        } catch (famErr) {
+          console.warn(`Could not email family member ${fam.email}:`, famErr);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Automated family report notification error:", err);
   }
 
   // 8. Return formatted report detail
@@ -595,15 +625,15 @@ export async function getReportFileForDownload(
     throw new Error(`Report with ID ${reportId} not found.`);
   }
 
-  // Object-level authorization
+  // Object-level authorization with Family Member support
   if (user.role !== "ADMIN") {
-    const isOwner =
-      report.clientId === user.id ||
-      report.client?.userId === user.id ||
-      report.client?.id === user.id;
-
-    if (!isOwner) {
+    const context = await resolveClientForUser(user.id);
+    if (!context || !context.client || context.client.id !== report.clientId) {
       throw new Error("You are not authorized to access this report document.");
+    }
+
+    if (!context.permissions.reportAccess) {
+      throw new Error("You do not have permission to view or download reports.");
     }
   }
 
@@ -884,8 +914,14 @@ export async function getReportById(reportId: string, user: { id: string; role: 
     throw new Error(`Report with ID ${reportId} not found.`);
   }
 
-  if (user.role === "CLIENT" && report.client?.userId !== user.id && report.clientId !== user.id) {
-    throw new Error("You are not authorized to view this report.");
+  if (user.role === "CLIENT") {
+    const context = await resolveClientForUser(user.id);
+    if (!context || !context.client || context.client.id !== report.clientId) {
+      throw new Error("You are not authorized to view this report.");
+    }
+    if (!context.permissions.reportAccess) {
+      throw new Error("You do not have permission to view reports.");
+    }
   }
 
   return hydrateSingleReport(report);
@@ -895,19 +931,18 @@ export async function getReportById(reportId: string, user: { id: string; role: 
  * CLIENT: Get My Finalized Reports
  */
 export async function getMyReports(userId: string) {
-  const client = await prisma.client.findFirst({
-    where: {
-      OR: [{ userId }, { id: userId }],
-    },
-  });
+  const context = await resolveClientForUser(userId);
+  if (!context || !context.client) {
+    return [];
+  }
 
-  if (!client) {
+  if (!context.permissions.reportAccess) {
     return [];
   }
 
   const reports = await (prisma.report.findMany as any)({
     where: {
-      clientId: client.id,
+      clientId: context.client.id,
       isArchived: false,
     },
     orderBy: { createdAt: "desc" },

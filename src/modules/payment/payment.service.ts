@@ -26,6 +26,7 @@ import {
   getClientVisitEntitlements,
   formatPeriodEntitlements,
 } from "./visit-entitlement.service";
+import { resolveClientForUser } from "../family/family.service";
 
 export type WebhookEventStatusType = "RECEIVED" | "PROCESSED" | "FAILED" | "IGNORED";
 
@@ -38,31 +39,34 @@ async function createBillingAuditLog(params: {
   entityType: string;
   entityId: string;
   metadata?: any;
-  ipAddress?: string;
-  userAgent?: string;
 }) {
   try {
+    const validActorId = isValidObjectId(params.actorUserId) ? params.actorUserId : null;
     await (prisma.auditLog.create as any)({
       data: {
-        actorUserId: params.actorUserId || null,
+        actorUserId: validActorId,
         action: params.action,
         entityType: params.entityType,
         entityId: params.entityId,
-        metadata: params.metadata || null,
-        ipAddress: params.ipAddress || null,
-        userAgent: params.userAgent || null,
+        metadata: params.metadata || {},
       },
     });
   } catch (err) {
-    console.warn("⚠️ Failed to write audit log:", err);
+    console.warn("⚠️ Billing audit log creation notice:", err);
   }
 }
 
+function isValidObjectId(id?: string | null): boolean {
+  if (!id || typeof id !== "string") return false;
+  return /^[0-9a-fA-F]{24}$/.test(id);
+}
+
 /**
- * Ensure a Stripe Customer exists for the given user/client.
- * If not, creates one in Stripe and records stripeCustomerId in the Client record.
+ * Get or create a Stripe Customer for a given Client or Authorized Family Member with billing access.
  */
 export async function getOrCreateStripeCustomer(userId: string) {
+  const context = await resolveClientForUser(userId);
+
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: { client: true },
@@ -72,7 +76,11 @@ export async function getOrCreateStripeCustomer(userId: string) {
     throw new Error("User not found.");
   }
 
-  let client: any = user.client;
+  if (context && !context.isPrimary && !context.permissions.billingAccess) {
+    throw new Error("You do not have permission to access billing or make payments for this client.");
+  }
+
+  let client: any = context?.client || user.client;
   if (!client) {
     const clientNumber = `AW-${Math.floor(1000 + Math.random() * 9000)}`;
     client = await prisma.client.create({
@@ -81,7 +89,7 @@ export async function getOrCreateStripeCustomer(userId: string) {
         clientNumber,
         address: "",
         city: "",
-        state: "",
+        state: "RI",
         postalCode: "",
         country: "USA",
       },
@@ -103,14 +111,15 @@ export async function getOrCreateStripeCustomer(userId: string) {
     }
   }
 
-  // Create new Customer in Stripe
-  const fullName = `${user.firstName} ${user.lastName}`.trim() || "AgeWellRI Client";
+  // Create new Customer in Stripe for the primary client
+  const clientUser = context?.client?.user || user;
+  const fullName = `${clientUser.firstName} ${clientUser.lastName}`.trim() || "AgeWellRI Client";
   const customer = await stripe.customers.create({
-    email: user.email,
+    email: clientUser.email,
     name: fullName,
-    phone: user.phone || undefined,
+    phone: clientUser.phone || undefined,
     metadata: {
-      userId: user.id,
+      userId: clientUser.id,
       clientId: client.id,
       clientNumber: client.clientNumber,
     },
@@ -932,80 +941,49 @@ export async function reactivateSubscriptionRenewal(userId: string) {
  * Displays the client's contracted PlanVersion and historical price terms.
  */
 export async function getBillingOverview(userId: string) {
-  let user: any = await (prisma.user.findUnique as any)({
-    where: { id: userId },
+  const context = await resolveClientForUser(userId);
+  if (context && !context.isPrimary && !context.permissions.billingAccess) {
+    throw new Error("You do not have permission to view billing information for this client.");
+  }
+
+  const targetClientId = context?.client?.id;
+
+  let client: any = await (prisma.client.findFirst as any)({
+    where: {
+      OR: [
+        ...(targetClientId ? [{ id: targetClientId }] : []),
+        { userId: userId },
+        { id: userId },
+      ],
+    },
     include: {
-      client: {
+      subscriptions: {
         include: {
-          subscriptions: {
+          plan: true,
+          planVersion: {
+            include: { planServices: true },
+          },
+          periods: {
+            orderBy: { periodNumber: "desc" },
+            take: 1,
             include: {
-              plan: true,
-              planVersion: {
-                include: { planServices: true },
-              },
-              periods: {
-                orderBy: { periodNumber: "desc" },
-                take: 1,
-                include: {
-                  allocations: true,
-                },
-              },
+              allocations: true,
             },
-            orderBy: { createdAt: "desc" },
-          },
-          invoices: {
-            orderBy: { createdAt: "desc" },
-          },
-          payments: {
-            orderBy: { createdAt: "desc" },
-          },
-          appointments: {
-            where: { status: { not: "CANCELLED" } },
           },
         },
+        orderBy: { createdAt: "desc" },
+      },
+      invoices: {
+        orderBy: { createdAt: "desc" },
+      },
+      payments: {
+        orderBy: { createdAt: "desc" },
+      },
+      appointments: {
+        where: { status: { not: "CANCELLED" } },
       },
     },
   });
-
-  let client: any = user?.client || null;
-
-  if (!client) {
-    client = await (prisma.client.findFirst as any)({
-      where: {
-        OR: [
-          { userId: userId },
-          { id: userId },
-        ],
-      },
-      include: {
-        subscriptions: {
-          include: {
-            plan: true,
-            planVersion: {
-              include: { planServices: true },
-            },
-            periods: {
-              orderBy: { periodNumber: "desc" },
-              take: 1,
-              include: {
-                allocations: true,
-              },
-            },
-          },
-          orderBy: { createdAt: "desc" },
-        },
-        invoices: {
-          orderBy: { createdAt: "desc" },
-        },
-        payments: {
-          orderBy: { createdAt: "desc" },
-        },
-        appointments: {
-          where: { status: { not: "CANCELLED" } },
-        },
-      },
-    });
-  }
 
   if (!client) {
     return {

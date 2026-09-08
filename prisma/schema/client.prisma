@@ -47,6 +47,7 @@ model Client {
   payments      Payment[]
   appointments  Appointment[]
   reports       Report[]
+  familyMembers FamilyMember[]
 
   @@index([stripeCustomerId])
 }
