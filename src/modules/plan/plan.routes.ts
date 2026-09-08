@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { authenticate } from "../../middlewares/auth.middleware";
-import { cacheResponse, invalidateCacheTags } from "../../middlewares/cache.middleware";
+import { invalidateCacheTags } from "../../middlewares/cache.middleware";
 import {
   handleGetActivePlans,
   handleGetAllAdminPlans,
@@ -8,6 +8,7 @@ import {
   handleCreatePlan,
   handleUpdatePlan,
   handleChangePlanStatus,
+  handleDeletePlan,
   handleGetServiceStats,
   handleGetAllServices,
   handleCreateService,
@@ -45,6 +46,13 @@ router.patch(
   authenticate,
   invalidateCacheTags("plans", "admin_plans"),
   handleChangePlanStatus
+);
+
+router.delete(
+  "/admin/:id",
+  authenticate,
+  invalidateCacheTags("plans", "admin_plans"),
+  handleDeletePlan
 );
 
 // Admin Service Catalog (Real-time live data, no browser caching)

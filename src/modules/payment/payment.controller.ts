@@ -11,6 +11,8 @@ import {
   cancelRenewalSchema,
   adminBillingFilterSchema,
   adminRetryChargeSchema,
+  adminCancelSubscriptionSchema,
+  adminUpdateSubscriptionStatusSchema,
 } from "./payment.validation";
 
 /**
@@ -545,4 +547,171 @@ export async function handleWebhook(
     });
   }
 }
+
+/**
+ * GET /api/v1/payments/visit-entitlements
+ * Authenticated client retrieves their visit entitlements for the active billing period.
+ */
+export async function handleGetClientVisitEntitlements(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: "Authentication required." });
+      return;
+    }
+
+    const { getClientVisitEntitlements } = await import("./visit-entitlement.service");
+    const data = await getClientVisitEntitlements(req.user.id);
+
+    res.status(200).json({
+      success: true,
+      message: "Visit entitlements retrieved successfully.",
+      data,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * GET /api/v1/payments/admin/client/:id/visit-entitlements
+ * Admin retrieves a specific client's visit entitlements.
+ */
+export async function handleGetAdminClientVisitEntitlements(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      res.status(403).json({ success: false, message: "Admin authorization required." });
+      return;
+    }
+
+    const clientId = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id as string);
+    const { getAdminClientVisitEntitlements } = await import("./visit-entitlement.service");
+    const data = await getAdminClientVisitEntitlements(clientId);
+
+    res.status(200).json({
+      success: true,
+      message: "Client visit entitlements retrieved successfully.",
+      data,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /api/v1/payments/admin/subscription/:id/cancel
+ * Admin cancel client's subscription (immediate or end of period).
+ */
+export async function handleAdminCancelSubscription(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      res.status(403).json({ success: false, message: "Admin authorization required." });
+      return;
+    }
+
+    const subscriptionId = req.params.id as string;
+    const parseResult = adminCancelSubscriptionSchema.safeParse(req.body);
+    const input = parseResult.success ? parseResult.data : {};
+
+    const result = await paymentService.adminCancelSubscription(
+      subscriptionId,
+      input,
+      req.user.id
+    );
+
+    res.status(200).json({
+      success: true,
+      message: result.message,
+      data: result.subscription,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /api/v1/payments/admin/subscription/:id/reactivate
+ * Admin reactivate client's subscription.
+ */
+export async function handleAdminReactivateSubscription(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      res.status(403).json({ success: false, message: "Admin authorization required." });
+      return;
+    }
+
+    const subscriptionId = req.params.id as string;
+    const result = await paymentService.adminReactivateSubscription(
+      subscriptionId,
+      req.user.id
+    );
+
+    res.status(200).json({
+      success: true,
+      message: result.message,
+      data: result.subscription,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /api/v1/payments/admin/subscription/:id/status
+ * Admin update client's subscription status.
+ */
+export async function handleAdminUpdateSubscriptionStatus(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      res.status(403).json({ success: false, message: "Admin authorization required." });
+      return;
+    }
+
+    const subscriptionId = req.params.id as string;
+    const parseResult = adminUpdateSubscriptionStatusSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid status parameters.",
+        errors: parseResult.error.flatten().fieldErrors,
+      });
+      return;
+    }
+
+    const result = await paymentService.adminUpdateSubscriptionStatus(
+      subscriptionId,
+      parseResult.data as any,
+      req.user.id
+    );
+
+    res.status(200).json({
+      success: true,
+      message: result.message,
+      data: result.subscription,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+
 

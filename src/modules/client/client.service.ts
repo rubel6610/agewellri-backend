@@ -1,4 +1,5 @@
 import prisma from "../../lib/prisma";
+import { formatPeriodEntitlements } from "../payment/visit-entitlement.service";
 
 export interface AdminClientsQuery {
   search?: string;
@@ -106,6 +107,11 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
 
     const subscriptionStatus = latestSub?.status || (isSubActive ? "ACTIVE" : "PENDING");
 
+    const isEnrolledAndPaid = isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
+    const totalVisitsAllowed = isEnrolledAndPaid ? (c.hasCleaningAddon ? 18 : 12) : 0;
+    const completedVisitsCount = 0;
+    const remainingVisitsCount = isEnrolledAndPaid ? (c.hasCleaningAddon ? 18 : 12) : 0;
+
     return {
       id: c.clientNumber || c.id,
       internalId: c.id,
@@ -144,12 +150,12 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
       subscriptionStatus,
       cardBrand: c.cardBrand,
       cardLast4: c.cardLast4,
-      totalVisitsAllowed: c.hasCleaningAddon ? 18 : 12,
-      completedVisitsCount: 0,
-      remainingVisitsCount: c.hasCleaningAddon ? 18 : 12,
+      totalVisitsAllowed,
+      completedVisitsCount,
+      remainingVisitsCount,
       nextVisitDate: safeFormatDate(nextAppt?.startAt),
       renewalDate: safeFormatDate(latestSub?.currentPeriodEnd),
-      status: isSubActive ? "active" : isExecutedAgreement ? "active" : "pending_onboarding",
+      status: isEnrolledAndPaid ? "active" : isExecutedAgreement ? "pending_payment" : "pending_onboarding",
       createdAt: safeFormatDate(c.createdAt) || "Recently",
       // Onboarding Timeline Flags
       timeline: {
@@ -246,7 +252,12 @@ export async function getAdminClientById(clientIdOrNumber: string) {
       subscriptions: {
         orderBy: { createdAt: "desc" },
         include: {
-          periods: { orderBy: { startDate: "desc" } },
+          periods: {
+            orderBy: { startDate: "desc" },
+            include: {
+              allocations: true,
+            },
+          },
         },
       },
       invoices: {
@@ -363,16 +374,268 @@ export async function getAdminClientById(clientIdOrNumber: string) {
     subscriptionStatus: latestSub?.status || (isSubActive ? "ACTIVE" : "PENDING"),
     cardBrand: client.cardBrand,
     cardLast4: client.cardLast4,
-    totalVisitsAllowed: client.hasCleaningAddon ? 18 : 12,
-    completedVisitsCount: client.appointments?.filter((a: any) => a.status === "COMPLETED").length || 0,
-    remainingVisitsCount: (client.hasCleaningAddon ? 18 : 12) - (client.appointments?.filter((a: any) => a.status === "COMPLETED").length || 0),
+    totalVisitsAllowed: (() => {
+      const isEnrolledAndPaid = isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
+      if (!isEnrolledAndPaid) return 0;
+      const currentPeriod = latestSub?.periods?.[0];
+      const entitlements = formatPeriodEntitlements(currentPeriod, client.appointments || []);
+      if (entitlements.length > 0) {
+        return entitlements.reduce((sum, item) => sum + item.allocated, 0);
+      }
+      return client.hasCleaningAddon ? 18 : 12;
+    })(),
+    completedVisitsCount: (() => {
+      const isEnrolledAndPaid = isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
+      if (!isEnrolledAndPaid) return 0;
+      const currentPeriod = latestSub?.periods?.[0];
+      const entitlements = formatPeriodEntitlements(currentPeriod, client.appointments || []);
+      if (entitlements.length > 0) {
+        return entitlements.reduce((sum, item) => sum + item.completed, 0);
+      }
+      return client.appointments?.filter((a: any) => a.status === "COMPLETED").length || 0;
+    })(),
+    remainingVisitsCount: (() => {
+      const isEnrolledAndPaid = isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
+      if (!isEnrolledAndPaid) return 0;
+      const currentPeriod = latestSub?.periods?.[0];
+      const entitlements = formatPeriodEntitlements(currentPeriod, client.appointments || []);
+      if (entitlements.length > 0) {
+        return entitlements.reduce((sum, item) => sum + item.remaining, 0);
+      }
+      return (client.hasCleaningAddon ? 18 : 12) - (client.appointments?.filter((a: any) => a.status === "COMPLETED").length || 0);
+    })(),
+    visitEntitlements: (() => {
+      const isEnrolledAndPaid = isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
+      if (!isEnrolledAndPaid) return [];
+      const currentPeriod = latestSub?.periods?.[0];
+      return formatPeriodEntitlements(currentPeriod, client.appointments || []);
+    })(),
     nextVisitDate: safeFormatDate(nextAppt?.startAt),
     renewalDate: safeFormatDate(latestSub?.currentPeriodEnd),
-    status: isSubActive ? "active" : isExecutedAgreement ? "active" : "pending_onboarding",
+    status: isExecutedAgreement && (isSubActive || paymentStatus === "PAID") ? "active" : isExecutedAgreement ? "pending_payment" : "pending_onboarding",
     createdAt: safeFormatDate(client.createdAt) || "Recently",
     timeline: {
       welcomeSent: Boolean(client.invitations?.length || client.createdAt),
       accountCreated: true,
+      signerSelected: Boolean(client.signerRole),
+      emergencyContactAdded: Boolean(client.emergencyContactName && client.emergencyContactPhone),
+      stateSelected: Boolean(client.state),
+      agreementSent: Boolean(latestAgreement || isExecutedAgreement),
+      agreementSigned: isExecutedAgreement,
+      paymentProcessed: paymentStatus === "PAID",
+      subscriptionActive: isSubActive,
+    },
+    agreements: client.agreements,
+    latestAgreement,
+  };
+}
+
+export function formatAuditLogDescription(action: string, metadata: any): string {
+  if (!metadata) {
+    return (action || "")
+      .replace(/_/g, " ")
+      .toLowerCase()
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  let data = metadata;
+  if (typeof metadata === "string") {
+    try {
+      data = JSON.parse(metadata);
+    } catch {
+      return metadata;
+    }
+  }
+
+  if (typeof data !== "object" || data === null) {
+    return String(data);
+  }
+
+  const act = (action || "").toUpperCase().replace(/[\s_-]+/g, "_");
+
+  const formatDate = (val: any) => {
+    if (!val) return "";
+    try {
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return String(val);
+      return d.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    } catch {
+      return String(val);
+    }
+  };
+
+  const formatPlanName = (p?: string) => {
+    if (!p) return "Membership";
+    return p.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+  };
+
+  const formatRole = (r?: string) => {
+    if (!r) return "";
+    return r.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+  };
+
+  const stateNames: Record<string, string> = {
+    RI: "Rhode Island",
+    MA: "Massachusetts",
+    CT: "Connecticut",
+  };
+
+  if (act.includes("AGREEMENT_EXECUTED")) {
+    const signer = data.signerName || "Member";
+    const role = formatRole(data.signerRole);
+    const state = stateNames[data.state] || data.state || "Rhode Island";
+    const deadline = data.cancellationDeadline ? formatDate(data.cancellationDeadline) : null;
+    let text = `Service agreement executed for ${state} by ${signer}${role ? ` (${role})` : ""}.`;
+    if (deadline) {
+      text += ` Statutory cancellation deadline: ${deadline}.`;
+    }
+    return text;
+  }
+
+  if (act.includes("AGREEMENT_CREATED") || act.includes("AGREEMENT_SENT")) {
+    const state = stateNames[data.state] || data.state || "Rhode Island";
+    const version = data.templateVersion || "v2.0";
+    return `Client service agreement initiated (${version} for ${state}).`;
+  }
+
+  if (act.includes("SUBSCRIPTION_ACTIVATED")) {
+    const plan = formatPlanName(data.plan);
+    const price = data.totalPrice ? `$${Number(data.totalPrice).toFixed(2)}` : null;
+    const method = data.billingMethod
+      ? data.billingMethod === "AUTOMATIC"
+        ? "billed automatically"
+        : data.billingMethod.replace(/_/g, " ").toLowerCase()
+      : "billed automatically";
+    const invoice = data.invoiceNumber ? `Invoice #${data.invoiceNumber}` : null;
+    const parts = [
+      `${plan} plan subscription activated`,
+      price ? `(${price} / ${method})` : null,
+      invoice ? `• ${invoice}` : null,
+    ].filter(Boolean);
+    return parts.join(" ");
+  }
+
+  if (act.includes("PAYMENT_STARTED")) {
+    const plan = formatPlanName(data.plan);
+    const addon = data.hasCleaningAddon ? " with House Cleaning add-on" : "";
+    return `Payment checkout initiated for ${plan} plan${addon}.`;
+  }
+
+  if (act.includes("PAYMENT_PROCESSED") || act.includes("PAYMENT_SUCCEEDED")) {
+    const amount = data.amount || data.totalPrice ? `$${Number(data.amount || data.totalPrice).toFixed(2)}` : "Payment";
+    const plan = data.plan ? ` for ${formatPlanName(data.plan)} plan` : "";
+    const invoice = data.invoiceNumber ? ` (Invoice #${data.invoiceNumber})` : "";
+    return `${amount} processed successfully${plan}${invoice}.`;
+  }
+
+  if (act.includes("REPORT_UPLOADED")) {
+    const title = data.title || "Visit Report";
+    const specialist = data.specialistName ? ` from ${data.specialistName}` : "";
+    return `Official PDF report "${title}"${specialist} uploaded and published to member portal.`;
+  }
+
+  if (act.includes("APPOINTMENT_SCHEDULED") || act.includes("VISIT_SCHEDULED")) {
+    const service = data.serviceType || "Visit";
+    const date = data.date ? formatDate(data.date) : "scheduled date";
+    const time = data.timeSlot ? ` (${data.timeSlot})` : "";
+    const specialist = data.technicianName ? ` with specialist ${data.technicianName}` : "";
+    return `${service} booked for ${date}${time}${specialist}.`;
+  }
+
+  if (act.includes("APPOINTMENT_COMPLETED") || act.includes("VISIT_COMPLETED")) {
+    const service = data.serviceType || "Visit";
+    return `${service} marked as completed.`;
+  }
+
+  if (act.includes("APPOINTMENT_CANCELLED") || act.includes("VISIT_CANCELLED")) {
+    const reason = data.reason ? ` Reason: ${data.reason}` : "";
+    return `Visit appointment was cancelled.${reason}`;
+  }
+
+  if (act.includes("INVITATION_SENT")) {
+    const email = data.email ? ` to ${data.email}` : "";
+    return `Onboarding welcome invitation sent${email}.`;
+  }
+
+  if (act.includes("ACCOUNT_CREATED") || act.includes("USER_REGISTERED")) {
+    return `Member user account registration completed.`;
+  }
+
+  // Generic fallback: strip IDs and format dates nicely
+  const cleanParts: string[] = [];
+  for (const [key, val] of Object.entries(data)) {
+    if (
+      key.toLowerCase().endsWith("id") ||
+      key.toLowerCase() === "id" ||
+      key.toLowerCase().includes("token") ||
+      key.toLowerCase().includes("hash")
+    ) {
+      continue;
+    }
+
+    if (val === null || val === undefined || val === "") continue;
+
+    const label = key
+      .replace(/([A-Z])/g, " $1")
+      .replace(/_/g, " ")
+      .toLowerCase()
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+
+    if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}/.test(val)) {
+      cleanParts.push(`${label}: ${formatDate(val)}`);
+    } else if (typeof val === "boolean") {
+      cleanParts.push(val ? label : `No ${label}`);
+    } else if (
+      typeof val === "number" &&
+      (key.toLowerCase().includes("price") ||
+        key.toLowerCase().includes("amount") ||
+        key.toLowerCase().includes("cost"))
+    ) {
+      cleanParts.push(`${label}: $${val.toFixed(2)}`);
+    } else if (typeof val === "object") {
+      continue;
+    } else {
+      const formattedVal = String(val).replace(/_/g, " ");
+      cleanParts.push(`${label}: ${formattedVal}`);
+    }
+  }
+
+  if (cleanParts.length > 0) {
+    return cleanParts.join(" • ");
+  }
+
+  return (action || "")
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * Format Admin Client Detailed View
+ */
+export function formatClientDetail(client: any, auditLogs: any[] = []): any {
+  const latestAgreement = client.agreements?.[0] || null;
+  const isExecutedAgreement = latestAgreement?.status === "EXECUTED";
+
+  const isSubActive =
+    client.subscriptionStatus === "ACTIVE" ||
+    client.subscriptions?.some((s: any) => s.status === "ACTIVE");
+
+  const paymentStatus =
+    client.invoices?.some((i: any) => i.status === "PAID") ||
+    client.paymentStatus === "PAID"
+      ? "PAID"
+      : client.paymentStatus || "PENDING";
+
+  return {
+    ...client,
+    timeline: {
+      welcomeSent: true,
+      accountCreated: Boolean(client.user?.id),
       signerSelected: Boolean(client.signerRole),
       emergencyContactAdded: Boolean(client.emergencyContactName && client.emergencyContactPhone),
       stateSelected: Boolean(client.state),
@@ -391,7 +654,7 @@ export async function getAdminClientById(clientIdOrNumber: string) {
     auditLogs: (auditLogs || []).map((log: any) => ({
       id: log.id,
       action: (log.action || "").replace(/_/g, " "),
-      details: log.metadata ? JSON.stringify(log.metadata) : log.action,
+      details: formatAuditLogDescription(log.action, log.metadata),
       performedBy: log.actorUser
         ? `${log.actorUser.firstName} ${log.actorUser.lastName} (${log.actorUser.role})`
         : "System / Member",
@@ -404,6 +667,297 @@ export async function getAdminClientById(clientIdOrNumber: string) {
             minute: "2-digit",
           })
         : "Recently",
+    })),
+  };
+}
+
+/**
+ * Real-time Comprehensive Admin Dashboard Analytics & Overview Metrics
+ */
+export async function getAdminDashboardStats() {
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const next30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const sevenDaysLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+  const [
+    allClients,
+    upcomingAppointments,
+    allAppointments,
+    allAgreements,
+    allInvoices,
+    activeSubscriptions,
+    upcomingRenewalsCount,
+    allReports,
+    recentAuditLogs,
+  ] = await Promise.all([
+    (prisma.client.findMany as any)({
+      where: { isArchived: false },
+      include: {
+        user: { select: { firstName: true, lastName: true, email: true, phone: true } },
+        subscriptions: { where: { status: "ACTIVE" }, take: 1, include: { plan: true } },
+        agreements: { orderBy: { createdAt: "desc" }, take: 1 },
+      },
+    }),
+    (prisma.appointment.findMany as any)({
+      where: {
+        isArchived: false,
+        status: { in: ["SCHEDULED", "CONFIRMED"] },
+        startAt: { gte: now, lte: sevenDaysLater },
+      },
+      orderBy: { startAt: "asc" },
+      take: 10,
+      include: {
+        client: { include: { user: true } },
+        serviceType: true,
+        technician: true,
+      },
+    }),
+    (prisma.appointment.findMany as any)({
+      where: { isArchived: false },
+      select: {
+        id: true,
+        status: true,
+        startAt: true,
+        clientId: true,
+        serviceTypeId: true,
+        visit: { select: { id: true } },
+      },
+    }),
+    ((prisma as any).serviceAgreement.findMany as any)({
+      where: { isArchived: false },
+      select: {
+        id: true,
+        status: true,
+        state: true,
+        signedAt: true,
+        clientId: true,
+        clientPrintedName: true,
+        selectedPlan: true,
+      },
+    }),
+    (prisma.invoice.findMany as any)({
+      where: { isArchived: false },
+      select: { id: true, status: true, amount: true, createdAt: true, paidAt: true },
+    }),
+    (prisma.subscription.findMany as any)({
+      where: { status: "ACTIVE" },
+      include: { plan: true },
+    }),
+    prisma.subscription.count({
+      where: {
+        status: "ACTIVE",
+        nextRenewalDate: { gte: now, lte: next30Days },
+        autoRenew: true,
+      },
+    }),
+    (prisma.report.findMany as any)({
+      where: { isArchived: false },
+      select: {
+        id: true,
+        visitId: true,
+        createdAt: true,
+        visit: { select: { id: true, appointmentId: true } },
+      },
+    }),
+    (prisma.auditLog.findMany as any)({
+      orderBy: { createdAt: "desc" },
+      take: 10,
+      include: {
+        actorUser: {
+          select: { firstName: true, lastName: true, email: true, role: true },
+        },
+      },
+    }),
+  ]);
+
+  // Client Metrics
+  const totalClients = allClients.length;
+  const activeClients = allClients.filter(
+    (c: any) =>
+      c.onboardingStatus === "COMPLETED" ||
+      c.subscriptions?.length > 0 ||
+      c.agreements?.[0]?.status === "EXECUTED"
+  );
+  const pendingOnboarding = allClients.filter(
+    (c: any) => !activeClients.some((ac: any) => ac.id === c.id)
+  );
+  const newClientsThisMonth = allClients.filter(
+    (c: any) => new Date(c.createdAt) >= startOfMonth
+  ).length;
+
+  // Appointment & Visit Metrics
+  const completedVisits = allAppointments.filter((a: any) => a.status === "COMPLETED");
+  const upcomingVisitsCount = upcomingAppointments.length;
+
+  // Report Metrics
+  const uploadedReportApptIds = new Set(
+    allReports.map((r: any) => r.visit?.appointmentId).filter(Boolean)
+  );
+  const uploadedReportVisitIds = new Set(
+    allReports.map((r: any) => r.visitId || r.visit?.id).filter(Boolean)
+  );
+  const reportsPendingCount = completedVisits.filter(
+    (a: any) =>
+      !uploadedReportApptIds.has(a.id) &&
+      (!a.visit?.id || !uploadedReportVisitIds.has(a.visit.id))
+  ).length;
+
+  // Agreement Metrics
+  const executedAgreementsCount = allAgreements.filter(
+    (a: any) => a.status === "EXECUTED" || a.status === "SIGNED" || Boolean(a.signedAt)
+  ).length;
+  const pendingAgreementsCount = allAgreements.filter(
+    (a: any) => a.status === "DRAFT" || a.status === "PENDING_SIGNATURE" || !a.signedAt
+  ).length;
+
+  // Billing & Invoices Metrics
+  const paidInvoices = allInvoices.filter((i: any) => i.status === "PAID");
+  const openInvoices = allInvoices.filter(
+    (i: any) => i.status === "OPEN" || i.status === "DRAFT"
+  );
+  const totalRevenueCollected = paidInvoices.reduce(
+    (sum: number, i: any) => sum + (i.amount || 0),
+    0
+  );
+  const totalPendingInvoicesAmount = openInvoices.reduce(
+    (sum: number, i: any) => sum + (i.amount || 0),
+    0
+  );
+
+  // Plan Distribution Breakdown
+  const planDistribution: Record<string, number> = {};
+  allClients.forEach((c: any) => {
+    const planName = c.subscriptions?.[0]?.plan?.name || c.selectedPlan || "Guardian Plus";
+    planDistribution[planName] = (planDistribution[planName] || 0) + 1;
+  });
+
+  // State Jurisdiction (Rhode Island)
+  const stateDistribution: Record<string, number> = { RI: allClients.length };
+
+  // Format Attention Items dynamically
+  const attentionItems: Array<{
+    id: string;
+    type: "AGREEMENT" | "REPORT" | "BILLING" | "ONBOARDING";
+    title: string;
+    description: string;
+    actionLabel: string;
+    actionHref: string;
+    urgency: "HIGH" | "MEDIUM" | "LOW";
+  }> = [];
+
+  // 1. Pending agreements needing signature
+  if (pendingAgreementsCount > 0) {
+    attentionItems.push({
+      id: "attn_agreements",
+      type: "AGREEMENT",
+      title: `${pendingAgreementsCount} Service Agreement${pendingAgreementsCount > 1 ? "s" : ""} Pending Signature`,
+      description: "Members have not executed their state service agreements yet.",
+      actionLabel: "View Agreements",
+      actionHref: "/admin/agreements",
+      urgency: "HIGH",
+    });
+  }
+
+  // 2. Completed visits without reports
+  if (reportsPendingCount > 0) {
+    attentionItems.push({
+      id: "attn_reports",
+      type: "REPORT",
+      title: `${reportsPendingCount} Completed Visit${reportsPendingCount > 1 ? "s" : ""} Missing Reports`,
+      description: "Care specialists have finished home visits requiring official PDF report uploads.",
+      actionLabel: "View Completed Visits",
+      actionHref: "/admin/appointments?tab=COMPLETED",
+      urgency: "HIGH",
+    });
+  }
+
+  // 3. Open invoices
+  if (openInvoices.length > 0) {
+    attentionItems.push({
+      id: "attn_billing",
+      type: "BILLING",
+      title: `${openInvoices.length} Unpaid Invoice${openInvoices.length > 1 ? "s" : ""} ($${totalPendingInvoicesAmount.toFixed(2)})`,
+      description: "Invoices awaiting member payment or Stripe processing.",
+      actionLabel: "View Billing",
+      actionHref: "/admin/billing",
+      urgency: "MEDIUM",
+    });
+  }
+
+  // 4. Pending onboarding
+  if (pendingOnboarding.length > 0) {
+    attentionItems.push({
+      id: "attn_onboarding",
+      type: "ONBOARDING",
+      title: `${pendingOnboarding.length} Client${pendingOnboarding.length > 1 ? "s" : ""} Incomplete Onboarding`,
+      description: "New members currently completing intake questionnaire or credentials.",
+      actionLabel: "View Clients",
+      actionHref: "/admin/clients",
+      urgency: "LOW",
+    });
+  }
+
+  return {
+    kpis: {
+      activeClientsCount: activeClients.length,
+      totalClientsCount: totalClients,
+      newClientsThisMonth,
+      pendingOnboardingCount: pendingOnboarding.length,
+      upcomingVisitsCount,
+      completedVisitsCount: completedVisits.length,
+      reportsPendingCount,
+      totalReportsUploaded: allReports.length,
+      executedAgreementsCount,
+      pendingAgreementsCount,
+      paymentsDueCount: openInvoices.length,
+      totalPendingInvoicesAmount: `$${totalPendingInvoicesAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      totalRevenueCollected: `$${totalRevenueCollected.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      renewalsUpcomingCount: upcomingRenewalsCount,
+      activeSubscriptionsCount: activeSubscriptions.length,
+    },
+    upcomingSchedule: upcomingAppointments.map((appt: any) => ({
+      id: appt.id,
+      clientName: appt.client?.user
+        ? `${appt.client.user.firstName} ${appt.client.user.lastName}`.trim()
+        : "Client",
+      clientId: appt.client?.clientNumber || appt.clientId,
+      serviceType: appt.serviceType?.name || "Safety Oversight Visit",
+      specialistName: appt.technician?.name || "Assigned Specialist",
+      specialistColor: appt.technician?.color || "#294B68",
+      dateFormatted: safeFormatDate(appt.startAt) || "Upcoming",
+      timeSlot: appt.timeSlot || "Morning Visit",
+      status: appt.status,
+      address: appt.client?.address || "On File",
+    })),
+    recentClients: allClients.slice(0, 6).map((c: any) => ({
+      id: c.clientNumber || c.id,
+      internalId: c.id,
+      name: `${c.user?.firstName || "Client"} ${c.user?.lastName || ""}`.trim(),
+      email: c.user?.email || c.primaryContactEmail || "N/A",
+      state: c.state || "RI",
+      planName: c.subscriptions?.[0]?.plan?.name || c.selectedPlan || "Guardian Plus",
+      status: c.onboardingStatus === "COMPLETED" ? "active" : "pending_onboarding",
+      createdAt: safeFormatDate(c.createdAt) || "Recently",
+    })),
+    attentionItems,
+    planDistribution,
+    stateDistribution,
+    recentActivity: recentAuditLogs.map((log: any) => ({
+      id: log.id,
+      action: (log.action || "").replace(/_/g, " "),
+      details: formatAuditLogDescription(log.action, log.metadata),
+      performedBy: log.actorUser
+        ? `${log.actorUser.firstName} ${log.actorUser.lastName}`
+        : "System / Member",
+      role: log.actorUser?.role || "SYSTEM",
+      time: log.createdAt
+        ? new Date(log.createdAt).toLocaleTimeString("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : "Recently",
+      date: safeFormatDate(log.createdAt) || "Today",
     })),
   };
 }
