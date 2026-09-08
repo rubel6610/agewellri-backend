@@ -1,9 +1,9 @@
 model Visit {
-  id            String      @id @default(auto()) @map("_id") @db.ObjectId
-  appointmentId String      @unique @db.ObjectId
-  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
-  technicianId  String      @db.ObjectId
-  technician    Technician  @relation(fields: [technicianId], references: [id], onDelete: Restrict)
+  id            String       @id @default(auto()) @map("_id") @db.ObjectId
+  appointmentId String?      @unique @db.ObjectId
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  technicianId  String?      @db.ObjectId
+  technician    Technician?  @relation(fields: [technicianId], references: [id], onDelete: SetNull)
   status        VisitStatus @default(SCHEDULED)
   startedAt     DateTime?
   completedAt   DateTime?

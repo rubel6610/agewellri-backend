@@ -1232,4 +1232,247 @@ export async function sendAgreementExecutedEmail(
   return { success: true, mode: "console" };
 }
 
+export interface SendReportAvailableEmailOptions {
+  to: string | string[];
+  clientName: string;
+  serviceType: string;
+  visitDate: Date | string;
+  specialistName?: string;
+  reportTitle?: string;
+  portalUrl?: string;
+  supportPhone?: string;
+  supportEmail?: string;
+}
+
+/**
+ * Send Visit Report Available Notification Email to Client
+ */
+export async function sendReportAvailableEmail(
+  options: SendReportAvailableEmailOptions
+): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
+  const {
+    to,
+    clientName,
+    serviceType,
+    visitDate,
+    specialistName = "AgeWellRI Specialist",
+    reportTitle = "Completed Visit Report",
+    portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
+    supportPhone = "(401) 555-0199",
+    supportEmail = "support@agewellri.com",
+  } = options;
+
+  const formattedDate = new Date(visitDate).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  const subject = `Your Visit Report is Ready — ${serviceType} (${formattedDate})`;
+
+  const content = `
+    <div class="greeting">Hello ${clientName},</div>
+    <div class="message">
+      Your official visit report for your completed <strong>${serviceType}</strong> on <strong>${formattedDate}</strong> is now available in your AgeWellRI member portal.
+    </div>
+
+    <div class="highlight-card">
+      <div style="font-size: 13px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; border-bottom: 1px solid #D9E4EC; padding-bottom: 6px;">
+        📄 Visit Report Summary
+      </div>
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Client:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${clientName}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Service Provided:</td>
+          <td style="padding: 6px 0; color: #294B68; font-weight: 800; text-align: right;">${serviceType}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Visit Date:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${formattedDate}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Assigned Specialist:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${specialistName}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Report Status:</td>
+          <td style="padding: 6px 0; color: #166534; font-weight: 900; text-align: right;">UPLOADED &amp; READY ✓</td>
+        </tr>
+      </table>
+    </div>
+
+    <div style="text-align: center; margin: 28px 0;">
+      <a href="${portalUrl}/dashboard/reports" class="btn-primary">
+        View &amp; Download Report PDF →
+      </a>
+    </div>
+
+    <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 12px; color: #475569; line-height: 1.6;">
+      <strong>Access Anytime:</strong><br>
+      You can securely view, print, or download all of your completed visit reports from the Reports section in your member portal at any time.<br><br>
+      Questions or need assistance? Contact our team: <strong>${supportPhone}</strong> | <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>
+    </div>
+  `;
+
+  const htmlContent = wrapHtmlEmail(subject, content);
+  const recipientString = Array.isArray(to) ? to.join(", ") : to;
+
+  console.log(`\n======================================================`);
+  console.log(`📑 [EMAIL SERVICE] Visit Report Available Email dispatched to: ${recipientString}`);
+  console.log(`Client: ${clientName} | Service: ${serviceType} | Date: ${formattedDate}`);
+  console.log(`======================================================\n`);
+
+  const transporter = createTransporter();
+  if (transporter) {
+    try {
+      const info = await transporter.sendMail({
+        from: getDefaultFromAddress("AgeWellRI Care Coordination"),
+        to: recipientString,
+        subject,
+        html: htmlContent,
+      });
+      return { success: true, messageId: info.messageId, mode: "smtp" };
+    } catch (err: any) {
+      console.warn(`[EMAIL SERVICE] Report available SMTP error: ${err.message}`);
+      return { success: true, mode: "console" };
+    }
+  }
+
+  return { success: true, mode: "console" };
+}
+
+export interface SendQuarterlyRenewalActiveEmailOptions {
+  to: string | string[];
+  clientName: string;
+  planName: string;
+  periodStartDate: Date;
+  periodEndDate: Date;
+  periodNumber?: number;
+  allocatedVisits?: Array<{ serviceName: string; count: number; durationMinutes?: number }>;
+  totalVisits?: number;
+  portalUrl?: string;
+  supportPhone?: string;
+  supportEmail?: string;
+}
+
+export async function sendQuarterlyRenewalActiveEmail(
+  options: SendQuarterlyRenewalActiveEmailOptions
+): Promise<{ success: boolean; messageId?: string; mode: string }> {
+  const {
+    to,
+    clientName,
+    planName,
+    periodStartDate,
+    periodEndDate,
+    periodNumber,
+    allocatedVisits = [],
+    totalVisits = 12,
+    portalUrl = process.env.FRONTEND_URL || "https://agewellri.com",
+    supportPhone = "(401) 555-CARE",
+    supportEmail = "support@agewellri.com",
+  } = options;
+
+  const subject = `Your New AgeWellRI Service Quarter is Active — Schedule Your Visits`;
+
+  const formattedStart = periodStartDate.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const formattedEnd = periodEndDate.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  const visitRowsHtml =
+    allocatedVisits.length > 0
+      ? allocatedVisits
+          .map(
+            (v) => `
+        <tr>
+          <td style="padding: 8px 0; color: #243746; font-weight: 700; font-size: 13px;">${v.serviceName}:</td>
+          <td style="padding: 8px 0; color: #294B68; font-weight: 800; font-size: 13px; text-align: right;">${v.count} Included Visits</td>
+        </tr>
+      `
+          )
+          .join("")
+      : `
+        <tr>
+          <td style="padding: 8px 0; color: #243746; font-weight: 700; font-size: 13px;">Total Included Visits:</td>
+          <td style="padding: 8px 0; color: #294B68; font-weight: 800; font-size: 13px; text-align: right;">${totalVisits} Visits</td>
+        </tr>
+      `;
+
+  const content = `
+    <h2 style="font-size: 20px; font-weight: 800; color: #243746; margin: 0 0 12px 0;">
+      Your New Service Quarter Is Active!
+    </h2>
+    <p style="font-size: 14px; color: #475569; line-height: 1.6; margin-bottom: 20px;">
+      Hello <strong>${clientName}</strong>,<br><br>
+      Your <strong>${planName}</strong> subscription has successfully renewed for the upcoming service quarter (<strong>${formattedStart} – ${formattedEnd}</strong>). Your fresh visit allocations are ready to be scheduled.
+    </p>
+
+    <div class="highlight-card">
+      <div style="font-size: 13px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; border-bottom: 1px solid #D9E4EC; padding-bottom: 6px;">
+        🗓️ New Quarter Visit Entitlements
+      </div>
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Plan:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${planName}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Service Quarter:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${formattedStart} – ${formattedEnd}</td>
+        </tr>
+        ${visitRowsHtml}
+      </table>
+    </div>
+
+    <div style="text-align: center; margin: 28px 0;">
+      <a href="${portalUrl}/dashboard" class="btn-primary">
+        Schedule Your Visits Now →
+      </a>
+    </div>
+
+    <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 12px; color: #475569; line-height: 1.6;">
+      <strong>Care Scheduling Notice:</strong><br>
+      You can select your preferred dates, times, and specialists directly from your member portal. If you need any assistance scheduling, our care coordination team is available at <strong>${supportPhone}</strong> or <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>.
+    </div>
+  `;
+
+  const htmlContent = wrapHtmlEmail(subject, content);
+  const recipientString = Array.isArray(to) ? to.join(", ") : to;
+
+  console.log(`\n======================================================`);
+  console.log(`🎉 [EMAIL SERVICE] Quarterly Renewal Active Email dispatched to: ${recipientString}`);
+  console.log(`Client: ${clientName} | Plan: ${planName} | Quarter: ${formattedStart} – ${formattedEnd}`);
+  console.log(`======================================================\n`);
+
+  const transporter = createTransporter();
+  if (transporter) {
+    try {
+      const info = await transporter.sendMail({
+        from: getDefaultFromAddress("AgeWellRI Care Coordination"),
+        to: recipientString,
+        subject,
+        html: htmlContent,
+      });
+      return { success: true, messageId: info.messageId, mode: "smtp" };
+    } catch (err: any) {
+      console.warn(`[EMAIL SERVICE] Quarterly renewal active SMTP error: ${err.message}`);
+      return { success: true, mode: "console" };
+    }
+  }
+
+  return { success: true, mode: "console" };
+}
+
+
+
 

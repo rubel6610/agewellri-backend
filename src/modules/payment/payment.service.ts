@@ -6,6 +6,7 @@ import {
   BillingInterval,
   BillingMethod,
   ServiceTypeCategory,
+  RenewalStatus,
 } from "@prisma/client";
 import prisma from "../../lib/prisma";
 import { stripe, STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET } from "../../config/stripe";
@@ -17,7 +18,14 @@ import {
   CancelRenewalInput,
   AdminBillingFilterInput,
   AdminRetryChargeInput,
+  AdminCancelSubscriptionInput,
+  AdminUpdateSubscriptionStatusInput,
 } from "./payment.validation";
+import {
+  ensureVisitAllocationsForPeriod,
+  getClientVisitEntitlements,
+  formatPeriodEntitlements,
+} from "./visit-entitlement.service";
 
 export type WebhookEventStatusType = "RECEIVED" | "PROCESSED" | "FAILED" | "IGNORED";
 
@@ -562,40 +570,13 @@ export async function processAgreementPayment(
       },
     });
 
-    // Create visit allocations dynamically from plan services configured in DB
-    if (pricing.services && pricing.services.length > 0) {
-      for (const service of pricing.services) {
-        if (service.allocatedVisits > 0 && service.serviceTypeId) {
-          try {
-            await (prisma.visitAllocation.create as any)({
-              data: {
-                subscriptionPeriodId: period.id,
-                serviceTypeId: service.serviceTypeId,
-                allocatedCount: service.allocatedVisits,
-                usedCount: 0,
-              },
-            });
-          } catch {
-            // Index collision safeguard
-          }
-        }
-      }
-    } else {
-      // If plan has no specific services attached, dynamically link active service types from DB
-      const defaultServiceType = await prisma.serviceType.findFirst({
-        where: { isActive: true },
-      });
-      if (defaultServiceType) {
-        await prisma.visitAllocation.create({
-          data: {
-            subscriptionPeriodId: period.id,
-            serviceTypeId: defaultServiceType.id,
-            allocatedCount: pricing.totalVisits || 6,
-            usedCount: 0,
-          },
-        });
-      }
-    }
+    // Create visit allocations dynamically from plan services configured in DB (idempotent)
+    await ensureVisitAllocationsForPeriod(
+      period.id,
+      pricing.versionId,
+      pricing.planId,
+      input.hasCleaningAddon
+    );
   }
 
   // 5. Update Client status
@@ -960,11 +941,14 @@ export async function getBillingOverview(userId: string) {
             include: {
               plan: true,
               planVersion: {
-                include: { planServices: { include: { serviceType: true } } },
+                include: { planServices: true },
               },
               periods: {
                 orderBy: { periodNumber: "desc" },
                 take: 1,
+                include: {
+                  allocations: true,
+                },
               },
             },
             orderBy: { createdAt: "desc" },
@@ -974,6 +958,9 @@ export async function getBillingOverview(userId: string) {
           },
           payments: {
             orderBy: { createdAt: "desc" },
+          },
+          appointments: {
+            where: { status: { not: "CANCELLED" } },
           },
         },
       },
@@ -995,11 +982,14 @@ export async function getBillingOverview(userId: string) {
           include: {
             plan: true,
             planVersion: {
-              include: { planServices: { include: { serviceType: true } } },
+              include: { planServices: true },
             },
             periods: {
               orderBy: { periodNumber: "desc" },
               take: 1,
+              include: {
+                allocations: true,
+              },
             },
           },
           orderBy: { createdAt: "desc" },
@@ -1009,6 +999,9 @@ export async function getBillingOverview(userId: string) {
         },
         payments: {
           orderBy: { createdAt: "desc" },
+        },
+        appointments: {
+          where: { status: { not: "CANCELLED" } },
         },
       },
     });
@@ -1035,6 +1028,7 @@ export async function getBillingOverview(userId: string) {
       },
       invoices: [],
       payments: [],
+      visitEntitlements: [],
     };
   }
 
@@ -1088,6 +1082,11 @@ export async function getBillingOverview(userId: string) {
     paymentMethod: pm.paymentMethod,
   }));
 
+  const visitEntitlements = formatPeriodEntitlements(
+    currentPeriod,
+    client.appointments || []
+  );
+
   return {
     currentPlanName: contractedPlanName,
     selectedPlanCode: activeSub?.plan?.code || client.selectedPlan || "GUARDIAN_PLUS",
@@ -1111,6 +1110,7 @@ export async function getBillingOverview(userId: string) {
     },
     invoices: formattedInvoices,
     payments: formattedPayments,
+    visitEntitlements,
   };
 }
 
@@ -1265,7 +1265,7 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
                 include: {
                   periods: { orderBy: { periodNumber: "desc" }, take: 1 },
                   plan: true,
-                  planVersion: { include: { planServices: { include: { serviceType: true } } } },
+                  planVersion: { include: { planServices: true } },
                 },
               },
             },
@@ -1301,39 +1301,13 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
               });
             }
 
-            // Provision fresh visit allocations from active version or fallback
-            const versionServices = activeSub.planVersion?.planServices || [];
-            if (versionServices.length > 0) {
-              for (const vs of versionServices) {
-                if (vs.serviceTypeId && vs.allocatedVisits > 0) {
-                  try {
-                    await (prisma.visitAllocation.create as any)({
-                      data: {
-                        subscriptionPeriodId: newPeriod.id,
-                        serviceTypeId: vs.serviceTypeId,
-                        allocatedCount: vs.allocatedVisits,
-                        usedCount: 0,
-                      },
-                    });
-                  } catch {}
-                }
-              }
-            } else {
-              // Safety oversight default quota
-              const safetyType = await prisma.serviceType.findFirst({
-                where: { category: ServiceTypeCategory.SAFETY_OVERSIGHT },
-              });
-              if (safetyType) {
-                await (prisma.visitAllocation.create as any)({
-                  data: {
-                    subscriptionPeriodId: newPeriod.id,
-                    serviceTypeId: safetyType.id,
-                    allocatedCount: 6,
-                    usedCount: 0,
-                  },
-                });
-              }
-            }
+            // Provision fresh visit allocations idempotently from active plan version / services
+            await ensureVisitAllocationsForPeriod(
+              newPeriod.id,
+              activeSub.planVersionId,
+              activeSub.planId,
+              activeSub.client?.hasCleaningAddon
+            );
 
             // Update Subscription timestamps
             await (prisma.subscription.update as any)({
@@ -1351,8 +1325,7 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
               where: { stripeInvoiceId },
             });
 
-
-            await (prisma.payment.create as any)({
+            const paymentRecord = await (prisma.payment.create as any)({
               data: {
                 clientId: client.id,
                 subscriptionId: activeSub.id,
@@ -1367,11 +1340,30 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
               },
             });
 
-            // Send Payment Confirmation Receipt Email
+            // Create Renewal lifecycle tracking record
+            try {
+              await (prisma.renewal.create as any)({
+                data: {
+                  subscriptionId: activeSub.id,
+                  previousPeriodId: latestPeriod?.id || null,
+                  newPeriodId: newPeriod.id,
+                  invoiceId: invoiceRecord?.id || null,
+                  paymentId: paymentRecord.id,
+                  status: RenewalStatus.COMPLETED,
+                  scheduledRenewalDate: newPeriodStart,
+                  processedAt: new Date(),
+                },
+              });
+            } catch (renewalErr: any) {
+              console.warn("⚠️ Failed to record Renewal lifecycle entry:", renewalErr.message);
+            }
+
+            // Send Payment Confirmation Receipt Email & Next Quarter Active Notification
             if (client.user?.email) {
               const planName = activeSub.planVersion?.name || activeSub.plan?.name || "Guardian Plus";
               try {
-                const { sendPaymentSuccessEmail } = await import("../../utils/email");
+                const { sendPaymentSuccessEmail, sendQuarterlyRenewalActiveEmail } = await import("../../utils/email");
+                
                 await sendPaymentSuccessEmail({
                   to: client.user.email,
                   clientName: `${client.user.firstName || ""} ${client.user.lastName || ""}`.trim() || "Valued Client",
@@ -1384,8 +1376,37 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
                   invoiceNumber: invoiceRecord?.invoiceNumber,
                   receiptUrl: stripeInvoice.hosted_invoice_url,
                 });
+
+                // Fetch new allocations for email breakdown
+                const periodWithAlloc = await (prisma.subscriptionPeriod.findUnique as any)({
+                  where: { id: newPeriod.id },
+                  include: {
+                    allocations: {
+                      include: { serviceType: true },
+                    },
+                  },
+                });
+
+                const allocatedVisits = (periodWithAlloc?.allocations || []).map((a: any) => ({
+                  serviceName: a.serviceType?.name || "Care Visit",
+                  count: a.allocatedCount || 6,
+                  durationMinutes: a.serviceType?.durationMinutes || 60,
+                }));
+
+                const totalAllocVisits = allocatedVisits.reduce((sum: number, v: any) => sum + v.count, 0);
+
+                await sendQuarterlyRenewalActiveEmail({
+                  to: client.user.email,
+                  clientName: `${client.user.firstName || ""} ${client.user.lastName || ""}`.trim() || "Valued Client",
+                  planName,
+                  periodStartDate: newPeriodStart,
+                  periodEndDate: newPeriodEnd,
+                  periodNumber: nextPeriodNumber,
+                  allocatedVisits,
+                  totalVisits: totalAllocVisits > 0 ? totalAllocVisits : 12,
+                });
               } catch (mailErr) {
-                console.warn("⚠️ Failed to dispatch payment success email:", mailErr);
+                console.warn("⚠️ Failed to dispatch renewal emails:", mailErr);
               }
             }
 
@@ -1919,3 +1940,217 @@ export async function adminRetryCharge(input: AdminRetryChargeInput) {
   };
 }
 
+/**
+ * Admin: Cancel a Client's Subscription
+ * Supports both Immediate Cancellation and Cancel-at-Period-End.
+ */
+export async function adminCancelSubscription(
+  subscriptionId: string,
+  input: AdminCancelSubscriptionInput,
+  actorUserId?: string
+) {
+  const subscription = await (prisma.subscription.findUnique as any)({
+    where: { id: subscriptionId },
+    include: {
+      client: { include: { user: true } },
+      periods: {
+        where: { isCurrent: true },
+      },
+    },
+  });
+
+  if (!subscription) {
+    throw new Error("Subscription not found.");
+  }
+
+  const now = new Date();
+
+  if (input.immediate) {
+    // 1. Immediate Cancellation: Invalidate subscription right now
+    const updated = await (prisma.subscription.update as any)({
+      where: { id: subscriptionId },
+      data: {
+        status: SubscriptionStatus.CANCELLED,
+        autoRenew: false,
+        cancelAtPeriodEnd: false,
+        cancelledAt: now,
+        cancellationRequestedAt: now,
+        cancellationEffectiveAt: now,
+        cancellationReason: input.reason || "Immediate cancellation executed by Administrator.",
+      },
+    });
+
+    // Mark current period inactive
+    try {
+      await (prisma.subscriptionPeriod.updateMany as any)({
+        where: { subscriptionId },
+        data: {
+          status: "CANCELLED",
+          isCurrent: false,
+        },
+      });
+    } catch {}
+
+    // Cancel Stripe subscription if active
+    if (subscription.stripeSubscriptionId) {
+      try {
+        await stripe.subscriptions.cancel(subscription.stripeSubscriptionId);
+      } catch (stripeErr: any) {
+        console.warn("⚠️ Notice: Stripe subscription cancellation:", stripeErr.message);
+      }
+    }
+
+    // Cancel future pending appointments for this client
+    try {
+      await (prisma.appointment.updateMany as any)({
+        where: {
+          clientId: subscription.clientId,
+          status: { in: ["SCHEDULED", "CONFIRMED", "REQUESTED"] },
+        },
+        data: {
+          status: "CANCELLED",
+          notes: "Cancelled due to subscription cancellation by Administrator.",
+        },
+      });
+    } catch {}
+
+    await createBillingAuditLog({
+      actorUserId,
+      action: "ADMIN_SUBSCRIPTION_CANCELLED_IMMEDIATELY",
+      entityType: "Subscription",
+      entityId: subscriptionId,
+      metadata: { reason: input.reason, clientId: subscription.clientId },
+    });
+
+    return {
+      success: true,
+      message: `Subscription for ${subscription.client?.user?.firstName || "Client"} has been cancelled immediately.`,
+      subscription: updated,
+    };
+  } else {
+    // 2. Scheduled Cancellation: Cancel at period end
+    const effectiveDate = subscription.currentPeriodEnd || subscription.nextRenewalDate || now;
+    const updated = await (prisma.subscription.update as any)({
+      where: { id: subscriptionId },
+      data: {
+        status: SubscriptionStatus.CANCELLATION_REQUESTED,
+        autoRenew: false,
+        cancelAtPeriodEnd: true,
+        cancellationRequestedAt: now,
+        cancellationEffectiveAt: effectiveDate,
+        cancellationReason: input.reason || "Cancellation scheduled at period end by Administrator.",
+      },
+    });
+
+    await createBillingAuditLog({
+      actorUserId,
+      action: "ADMIN_SUBSCRIPTION_CANCEL_SCHEDULED",
+      entityType: "Subscription",
+      entityId: subscriptionId,
+      metadata: { reason: input.reason, effectiveDate, clientId: subscription.clientId },
+    });
+
+    return {
+      success: true,
+      message: `Subscription for ${subscription.client?.user?.firstName || "Client"} is scheduled to end on ${effectiveDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}.`,
+      subscription: updated,
+    };
+  }
+}
+
+/**
+ * Admin: Reactivate / Resume Auto-Renew on a Subscription
+ */
+export async function adminReactivateSubscription(
+  subscriptionId: string,
+  actorUserId?: string
+) {
+  const subscription = await (prisma.subscription.findUnique as any)({
+    where: { id: subscriptionId },
+    include: { client: { include: { user: true } } },
+  });
+
+  if (!subscription) {
+    throw new Error("Subscription not found.");
+  }
+
+  const updated = await (prisma.subscription.update as any)({
+    where: { id: subscriptionId },
+    data: {
+      status: SubscriptionStatus.ACTIVE,
+      autoRenew: true,
+      cancelAtPeriodEnd: false,
+      cancellationRequestedAt: null,
+      cancellationEffectiveAt: null,
+      cancellationReason: null,
+      cancelledAt: null,
+    },
+  });
+
+  // Restore current period status if needed
+  try {
+    const latestPeriod = await (prisma.subscriptionPeriod.findFirst as any)({
+      where: { subscriptionId },
+      orderBy: { periodNumber: "desc" },
+    });
+    if (latestPeriod && latestPeriod.endDate > new Date()) {
+      await (prisma.subscriptionPeriod.update as any)({
+        where: { id: latestPeriod.id },
+        data: { status: "ACTIVE", isCurrent: true },
+      });
+    }
+  } catch {}
+
+  await createBillingAuditLog({
+    actorUserId,
+    action: "ADMIN_SUBSCRIPTION_REACTIVATED",
+    entityType: "Subscription",
+    entityId: subscriptionId,
+    metadata: { clientId: subscription.clientId },
+  });
+
+  return {
+    success: true,
+    message: `Subscription for ${subscription.client?.user?.firstName || "Client"} has been reactivated with auto-renewal enabled.`,
+    subscription: updated,
+  };
+}
+
+/**
+ * Admin: Change Subscription Status (e.g. PAUSED, ACTIVE, PENDING)
+ */
+export async function adminUpdateSubscriptionStatus(
+  subscriptionId: string,
+  input: AdminUpdateSubscriptionStatusInput,
+  actorUserId?: string
+) {
+  const subscription = await (prisma.subscription.findUnique as any)({
+    where: { id: subscriptionId },
+  });
+
+  if (!subscription) {
+    throw new Error("Subscription not found.");
+  }
+
+  const updated = await (prisma.subscription.update as any)({
+    where: { id: subscriptionId },
+    data: {
+      status: input.status,
+      cancellationReason: input.reason || subscription.cancellationReason,
+    },
+  });
+
+  await createBillingAuditLog({
+    actorUserId,
+    action: `ADMIN_SUBSCRIPTION_STATUS_${input.status}`,
+    entityType: "Subscription",
+    entityId: subscriptionId,
+    metadata: { status: input.status, reason: input.reason },
+  });
+
+  return {
+    success: true,
+    message: `Subscription status updated to ${input.status}.`,
+    subscription: updated,
+  };
+}

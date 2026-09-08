@@ -5,6 +5,8 @@ import { seedInitialPlansAndServices } from "../src/modules/plan/plan.service";
 import { seedDefaultSpecialists } from "../src/modules/specialist/specialist.service";
 import { seedDefaultAgreementTemplates } from "../src/modules/agreement/agreement.service";
 
+import { seedDefaultAssessmentTemplate } from "../src/modules/report/report.service";
+
 const prisma = new PrismaClient();
 
 async function main() {
@@ -62,7 +64,11 @@ async function main() {
 
   console.log("📜 Seeding State-Specific Agreement Templates (RI, CT, MA)...");
   await seedDefaultAgreementTemplates();
-  console.log("✅ State agreements seeded successfully!\n");
+  console.log("✅ State agreements seeded successfully!");
+
+  console.log("📋 Seeding Age Safe® Home Score™ Assessment Template & 25 Questions...");
+  await seedDefaultAssessmentTemplate();
+  console.log("✅ Assessment template seeded successfully!\n");
 }
 
 main()

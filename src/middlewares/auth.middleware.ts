@@ -21,16 +21,24 @@ export async function authenticate(
   next: NextFunction
 ): Promise<void> {
   try {
+    let token: string | undefined;
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      token = authHeader.split(" ")[1];
+    } else if (req.query && typeof req.query.token === "string" && req.query.token) {
+      token = req.query.token;
+    } else if ((req as any).cookies) {
+      token = (req as any).cookies.agewell_auth_token || (req as any).cookies.token;
+    }
+
+    if (!token) {
       res.status(401).json({
         success: false,
-        message: "Authentication required. Please provide a valid Bearer token.",
+        message: "Authentication required. Please provide a valid Bearer token or token parameter.",
       });
       return;
     }
 
-    const token = authHeader.split(" ")[1];
     let decoded: JwtPayload;
 
     try {
