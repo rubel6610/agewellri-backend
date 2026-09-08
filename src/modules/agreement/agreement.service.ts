@@ -224,6 +224,34 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
   let clientId = user.client?.id;
   const homeAccessType = input.homeAccessType || "RESIDENT_ANSWERS";
 
+  const emergencyContactName =
+    input.emergencyContactName ||
+    (input.authorizedRecipients && input.authorizedRecipients[0]?.name) ||
+    input.clientFullName;
+  const emergencyContactPhone =
+    input.emergencyContactPhone || input.phone || "Not Provided";
+  const emergencyContactEmail =
+    input.emergencyContactEmail ||
+    (input.authorizedRecipients && input.authorizedRecipients[0]?.email) ||
+    null;
+  const emergencyContactRelation =
+    input.emergencyContactRelation ||
+    (input.authorizedRecipients && input.authorizedRecipients[0]?.relationship) ||
+    (isRepresentative ? "Authorized Signer" : "Primary Resident");
+
+  const onboardingData = {
+    signingTrack: input.signingTrack || (isRepresentative ? "TRACK_B" : "TRACK_A"),
+    representativeCapacity: input.representativeCapacity || null,
+    authorityDocumentUrl: input.authorityDocumentUrl || null,
+    authorizedRecipients: input.authorizedRecipients || [],
+    homeAccessAuthorized: input.homeAccessAuthorized ?? true,
+    authorizations: input.authorizations || {
+      emergencyRightOfEntry: true,
+      residentAutonomyAcknowledgment: true,
+      automaticBillingAuthorization: true,
+    },
+  };
+
   if (!clientId) {
     const clientCount = await prisma.client.count();
     const clientNumber = `AW-${1001 + clientCount}`;
@@ -236,7 +264,7 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
         state,
         postalCode: input.postalCode,
         country: "USA",
-        dateOfBirth: input.dob,
+        dateOfBirth: input.dob || null,
         signerRole,
         legalAuthority: isRepresentative ? input.legalAuthority || null : null,
         legalAuthorityOther: isRepresentative && input.legalAuthority === "OTHER" ? input.legalAuthorityOther || null : null,
@@ -244,10 +272,10 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
         primaryContactPhone: input.primaryContactPhone || input.phone,
         primaryContactEmail: input.primaryContactEmail || input.email || user.email,
         primaryContactRelation: input.primaryContactRelation || (isRepresentative ? "Authorized Signer" : "Self"),
-        emergencyContactName: input.emergencyContactName,
-        emergencyContactPhone: input.emergencyContactPhone,
-        emergencyContactEmail: input.emergencyContactEmail || null,
-        emergencyContactRelation: input.emergencyContactRelation || null,
+        emergencyContactName,
+        emergencyContactPhone,
+        emergencyContactEmail,
+        emergencyContactRelation,
         homeAccessType,
         homeAccessInstructions: input.homeAccessInstructions || null,
         homeAccessCode: input.homeAccessCode || null,
@@ -256,6 +284,7 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
         hasCompletedAgreement: true,
         onboardingStatus: OnboardingStatus.AGREEMENT_SIGNED,
         onboardingStep: 6,
+        onboardingData,
       },
     });
     clientId = newClient.id;
@@ -267,7 +296,7 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
         city: input.city,
         state,
         postalCode: input.postalCode,
-        dateOfBirth: input.dob,
+        dateOfBirth: input.dob || null,
         signerRole,
         legalAuthority: isRepresentative ? input.legalAuthority || null : null,
         legalAuthorityOther: isRepresentative && input.legalAuthority === "OTHER" ? input.legalAuthorityOther || null : null,
@@ -275,10 +304,10 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
         primaryContactPhone: input.primaryContactPhone || input.phone,
         primaryContactEmail: input.primaryContactEmail || input.email || user.email,
         primaryContactRelation: input.primaryContactRelation || (isRepresentative ? "Authorized Signer" : "Self"),
-        emergencyContactName: input.emergencyContactName,
-        emergencyContactPhone: input.emergencyContactPhone,
-        emergencyContactEmail: input.emergencyContactEmail || null,
-        emergencyContactRelation: input.emergencyContactRelation || null,
+        emergencyContactName,
+        emergencyContactPhone,
+        emergencyContactEmail,
+        emergencyContactRelation,
         homeAccessType,
         homeAccessInstructions: input.homeAccessInstructions || null,
         homeAccessCode: input.homeAccessCode || null,
@@ -287,6 +316,7 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
         hasCompletedAgreement: true,
         onboardingStatus: OnboardingStatus.AGREEMENT_SIGNED,
         onboardingStep: 6,
+        onboardingData,
       },
     });
   }
@@ -328,16 +358,17 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
       cancellationDeadlineRule: deadlineResult.ruleExplanation,
       planSnapshot,
       status: "EXECUTED",
+      documentUrl: input.authorityDocumentUrl || null,
       selectedPlan: targetPlan?.code || input.selectedPlan,
       planPrice: finalPrice,
       hasCleaningAddon: input.hasCleaningAddon,
       clientPrintedName: input.clientPrintedName,
       authorizedRepName: isRepresentative ? signerName : null,
       relationshipToClient: isRepresentative ? input.relationshipToClient || input.primaryContactRelation || null : "Self",
-      emergencyContactName: input.emergencyContactName,
-      emergencyContactPhone: input.emergencyContactPhone,
-      emergencyContactEmail: input.emergencyContactEmail || null,
-      emergencyContactRelation: input.emergencyContactRelation || null,
+      emergencyContactName,
+      emergencyContactPhone,
+      emergencyContactEmail,
+      emergencyContactRelation,
       clientSignature: input.clientSignature,
       agreementDate: new Date(input.agreementDate),
       signedAt: new Date(),

@@ -245,3 +245,43 @@ export async function handleSendAgreementReminder(
     });
   }
 }
+
+/**
+ * POST /api/v1/agreements/upload-authority-document
+ * Upload POA / legal authority document
+ */
+export async function handleUploadAuthorityDocument(
+  req: AuthenticatedRequest,
+  res: Response,
+  _next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.file) {
+      sendResponse(res, {
+        statusCode: 400,
+        success: false,
+        message: "No document file was uploaded.",
+      });
+      return;
+    }
+
+    const fileUrl = `/uploads/authority-documents/${req.file.filename}`;
+    sendResponse(res, {
+      statusCode: 200,
+      success: true,
+      message: "Authority document uploaded successfully.",
+      data: {
+        fileUrl,
+        originalName: req.file.originalname,
+        size: req.file.size,
+      },
+    });
+  } catch (error: any) {
+    sendResponse(res, {
+      statusCode: 500,
+      success: false,
+      message: error.message || "Failed to upload authority document.",
+    });
+  }
+}
+

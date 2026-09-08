@@ -9,7 +9,9 @@ import {
   handleGetMyAgreement,
   handleGetAdminAgreements,
   handleSendAgreementReminder,
+  handleUploadAuthorityDocument,
 } from "./agreement.controller";
+import { handleAuthorityDocFileUpload } from "../../middlewares/upload.middleware";
 
 const router = Router();
 
@@ -33,6 +35,13 @@ router.get(
 );
 
 // Protected client routes
+router.post(
+  "/upload-authority-document",
+  authenticate,
+  handleAuthorityDocFileUpload,
+  handleUploadAuthorityDocument
+);
+
 router.post(
   "/sign",
   authenticate,

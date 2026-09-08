@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express, { Application, Request, Response, NextFunction } from "express";
 import cors from "cors";
+import path from "path";
 import routes from "./routes";
 import { setupSwagger } from "./config/swagger";
 import { requestLogger, errorLogger } from "./middlewares/logger.middleware";
@@ -36,14 +37,8 @@ app.use(requestLogger);
 // Swagger UI Documentation
 setupSwagger(app);
 
-// Health Check / Base Route
-app.get("/", (req: Request, res: Response) => {
-  res.status(200).json({
-    success: true,
-    message: "Age Well RI Backend is running",
-    documentation: "/docs",
-  });
-});
+// Static Assets Uploads
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 // Global API v1 Routes
 app.use("/api/v1", routes);
