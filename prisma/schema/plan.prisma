@@ -97,8 +97,8 @@ model PlanService {
   plan            ServicePlan? @relation(fields: [planId], references: [id], onDelete: Cascade)
   planVersionId   String?      @db.ObjectId
   planVersion     PlanVersion? @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
-  serviceTypeId   String       @db.ObjectId
-  serviceType     ServiceType  @relation(fields: [serviceTypeId], references: [id], onDelete: Cascade)
+  serviceTypeId   String?      @db.ObjectId
+  serviceType     ServiceType? @relation(fields: [serviceTypeId], references: [id], onDelete: SetNull)
   allocatedVisits Int          @default(0)
   unit            String       @default("visits")
   durationMinutes Int?

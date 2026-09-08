@@ -6,6 +6,8 @@ import specialistRoutes from "../modules/specialist/specialist.routes";
 import invitationRoutes from "../modules/invitation/invitation.routes";
 import agreementRoutes from "../modules/agreement/agreement.routes";
 import clientRoutes from "../modules/client/client.routes";
+import appointmentRoutes from "../modules/appointment/appointment.routes";
+import reportRoutes from "../modules/report/report.routes";
 
 const router = Router();
 
@@ -42,6 +44,14 @@ const moduleRoutes: ModuleRoute[] = [
   {
     path: "/specialists",
     route: specialistRoutes,
+  },
+  {
+    path: "/appointments",
+    route: appointmentRoutes,
+  },
+  {
+    path: "/reports",
+    route: reportRoutes,
   },
 ];
 

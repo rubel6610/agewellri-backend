@@ -835,6 +835,81 @@ export async function changePlanStatus(
 }
 
 /**
+ * Admin: Delete a Service Plan permanently.
+ */
+export async function deletePlan(planId: string, actorUserId?: string) {
+  const plan = await (prisma.servicePlan.findUnique as any)({
+    where: { id: planId },
+    include: {
+      subscriptions: {
+        where: { status: "ACTIVE" },
+      },
+    },
+  });
+
+  if (!plan) {
+    throw new Error("Plan not found.");
+  }
+
+  // Check if there are active subscribers
+  const activeSubscribersCount = plan.subscriptions?.length || 0;
+  if (activeSubscribersCount > 0) {
+    throw new Error(
+      `Cannot delete "${plan.name}" because it currently has ${activeSubscribersCount} active subscriber(s). Please reassign or cancel existing subscriptions before deleting.`
+    );
+  }
+
+  // Clean up relations
+  // 1. Delete linked planServices on Plan
+  await (prisma.planService.deleteMany as any)({
+    where: { planId },
+  });
+
+  // 2. Delete linked PlanPrices and PlanServices on PlanVersions
+  const versions = await (prisma.planVersion.findMany as any)({
+    where: { planId },
+    select: { id: true },
+  });
+  const versionIds = versions.map((v: any) => v.id);
+
+  if (versionIds.length > 0) {
+    await (prisma.planPrice.deleteMany as any)({
+      where: { planVersionId: { in: versionIds } },
+    });
+    await (prisma.planService.deleteMany as any)({
+      where: { planVersionId: { in: versionIds } },
+    });
+    await (prisma.planVersion.deleteMany as any)({
+      where: { planId },
+    });
+  }
+
+  // 3. Delete the ServicePlan itself
+  const deletedPlan = await (prisma.servicePlan.delete as any)({
+    where: { id: planId },
+  });
+
+  // 4. Audit Log
+  await createPlanAuditLog({
+    actorUserId,
+    action: "PLAN_DELETED",
+    entityType: "ServicePlan",
+    entityId: planId,
+    newValues: {
+      name: plan.name,
+      code: plan.code,
+      price: plan.price,
+    },
+  });
+
+  return {
+    deleted: true,
+    message: `Service plan "${plan.name}" has been permanently deleted.`,
+    plan: deletedPlan,
+  };
+}
+
+/**
  * Admin: Dynamic Service Catalog Operations
  */
 export async function getAllServices(query?: {

@@ -74,7 +74,7 @@ export async function handleGetAdminClientById(
     sendResponse(res, {
       statusCode: 200,
       success: true,
-      message: "Client details retrieved.",
+      message: "Admin client details retrieved.",
       data: client,
     });
   } catch (error: any) {
@@ -82,6 +82,42 @@ export async function handleGetAdminClientById(
       statusCode: 500,
       success: false,
       message: error.message || "Failed to retrieve client details.",
+    });
+  }
+}
+
+/**
+ * GET /api/v1/clients/admin/dashboard-stats
+ * Real-time dynamic overview statistics and KPI intelligence.
+ */
+export async function handleGetAdminDashboardStats(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      sendResponse(res, {
+        statusCode: 403,
+        success: false,
+        message: "Access restricted to administrators.",
+      });
+      return;
+    }
+
+    const stats = await clientService.getAdminDashboardStats();
+
+    sendResponse(res, {
+      statusCode: 200,
+      success: true,
+      message: "Admin dashboard statistics retrieved.",
+      data: stats,
+    });
+  } catch (error: any) {
+    sendResponse(res, {
+      statusCode: 500,
+      success: false,
+      message: error.message || "Failed to retrieve dashboard statistics.",
     });
   }
 }
