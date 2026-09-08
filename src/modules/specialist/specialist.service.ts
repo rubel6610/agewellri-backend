@@ -170,25 +170,19 @@ export async function updateSpecialist(
  */
 export async function deleteSpecialist(specialistId: string, actorUserId?: string) {
   try {
-    await (prisma as any).$runCommandRaw({
-      update: "Technician",
-      updates: [
-        {
-          q: {
-            $or: [
-              { _id: { $oid: specialistId } },
-              { _id: specialistId },
-            ],
-          },
-          u: { $set: { isArchived: true, status: "INACTIVE", updatedAt: new Date() } },
-        },
-      ],
-    });
-  } catch (rawErr: any) {
+    if ((prisma as any).technician?.update) {
+      await (prisma as any).technician.update({
+        where: { id: specialistId },
+        data: { isArchived: true, status: "INACTIVE", updatedAt: new Date() },
+      });
+    } else {
+      throw new Error("fallback to raw");
+    }
+  } catch {
     try {
       await (prisma as any).$runCommandRaw({
-        delete: "Technician",
-        deletes: [
+        update: "Technician",
+        updates: [
           {
             q: {
               $or: [
@@ -196,11 +190,28 @@ export async function deleteSpecialist(specialistId: string, actorUserId?: strin
                 { _id: specialistId },
               ],
             },
-            limit: 1,
+            u: { $set: { isArchived: true, status: "INACTIVE", updatedAt: new Date() } },
           },
         ],
       });
-    } catch {}
+    } catch (rawErr: any) {
+      try {
+        await (prisma as any).$runCommandRaw({
+          delete: "Technician",
+          deletes: [
+            {
+              q: {
+                $or: [
+                  { _id: { $oid: specialistId } },
+                  { _id: specialistId },
+                ],
+              },
+              limit: 1,
+            },
+          ],
+        });
+      } catch {}
+    }
   }
 
   await createSpecialistAuditLog({

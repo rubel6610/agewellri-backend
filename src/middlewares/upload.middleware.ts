@@ -55,7 +55,7 @@ export const uploadReportMiddleware = multer({
  * Express middleware wrapper to handle multer errors gracefully for reports
  */
 export function handleReportFileUpload(req: Request, res: Response, next: NextFunction) {
-  const upload = uploadReportMiddleware.single("file");
+  const upload = uploadReportMiddleware.any();
 
   upload(req, res, (err: any) => {
     if (err instanceof multer.MulterError) {
@@ -74,6 +74,10 @@ export function handleReportFileUpload(req: Request, res: Response, next: NextFu
         success: false,
         message: err.message || "Failed to process uploaded file.",
       });
+    }
+
+    if (!req.file && Array.isArray(req.files) && req.files.length > 0) {
+      req.file = req.files[0];
     }
 
     next();
@@ -127,12 +131,11 @@ export const uploadAuthorityDocMiddleware = multer({
   fileFilter: authorityDocFileFilter,
   limits: {
     fileSize: 15 * 1024 * 1024, // 15 MB
-    files: 1,
   },
 });
 
 export function handleAuthorityDocFileUpload(req: Request, res: Response, next: NextFunction) {
-  const upload = uploadAuthorityDocMiddleware.single("file");
+  const upload = uploadAuthorityDocMiddleware.any();
 
   upload(req, res, (err: any) => {
     if (err instanceof multer.MulterError) {
@@ -151,6 +154,10 @@ export function handleAuthorityDocFileUpload(req: Request, res: Response, next: 
         success: false,
         message: err.message || "Failed to process uploaded file.",
       });
+    }
+
+    if (!req.file && Array.isArray(req.files) && req.files.length > 0) {
+      req.file = req.files[0];
     }
 
     next();
