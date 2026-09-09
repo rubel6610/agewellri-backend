@@ -282,20 +282,20 @@ export async function sendBillingRenewalReminderEmail(
   });
 
   const intervalLabel =
-    billingInterval === "MONTHLY"
-      ? "Monthly"
+    billingInterval === "QUARTERLY"
+      ? "Quarterly"
       : billingInterval === "ANNUAL"
         ? "Annual"
-        : "Quarterly";
+        : "Monthly";
 
   const isAuto = billingMethod === "AUTOMATIC";
 
   const subject =
-    billingInterval === "MONTHLY"
-      ? `Upcoming Bill Notice: Your AgeWellRI Monthly Service Plan`
-      : billingInterval === "ANNUAL"
-        ? `Annual Service Renewal Notice: Your AgeWellRI Membership Plan`
-        : `Upcoming Renewal Notice: Your AgeWellRI Quarterly Service Contract`;
+    billingInterval === "ANNUAL"
+      ? `Annual Service Renewal Notice: Your AgeWellRI Membership Plan`
+      : billingInterval === "QUARTERLY"
+        ? `Upcoming Renewal Notice: Your AgeWellRI Quarterly Service Contract`
+        : `Upcoming Bill Notice: Your AgeWellRI Monthly Service Plan`;
 
   const content = `
     <div class="greeting">Hello ${representativeName ? `${representativeName} (on behalf of ${clientName})` : clientName},</div>
@@ -719,7 +719,7 @@ export async function sendPlanPurchaseConfirmationEmail(
     hasCleaningAddon = false,
     amount,
     currency = "USD",
-    billingInterval = "QUARTERLY",
+    billingInterval = "MONTHLY",
     billingMethod = "AUTOMATIC",
     paymentStatus = "PAID",
     cardBrand,
@@ -738,13 +738,13 @@ export async function sendPlanPurchaseConfirmationEmail(
 
   const isPaid = paymentStatus === "PAID";
   const intervalLabel =
-    billingInterval === "MONTHLY"
-      ? "Monthly"
+    billingInterval === "QUARTERLY"
+      ? "Quarterly (Every 3 Months)"
       : billingInterval === "ANNUAL"
         ? "Annual"
         : billingInterval === "ONE_TIME"
           ? "One-Time Service"
-          : "Quarterly (Every 3 Months)";
+          : "Monthly";
 
   const paidDateFormatted = paidAt
     ? new Date(paidAt).toLocaleDateString("en-US", {
@@ -1402,6 +1402,7 @@ export interface SendQuarterlyRenewalActiveEmailOptions {
   periodStartDate: Date;
   periodEndDate: Date;
   periodNumber?: number;
+  billingInterval?: string;
   allocatedVisits?: Array<{
     serviceName: string;
     count: number;
@@ -1423,14 +1424,17 @@ export async function sendQuarterlyRenewalActiveEmail(
     periodStartDate,
     periodEndDate,
     periodNumber,
+    billingInterval = "MONTHLY",
     allocatedVisits = [],
-    totalVisits = 12,
+    totalVisits = 4,
     portalUrl = process.env.FRONTEND_URL || "https://agewellri.com",
     supportPhone = "(401) 555-CARE",
     supportEmail = "support@agewellri.com",
   } = options;
 
-  const subject = `Your New AgeWellRI Service Quarter is Active — Schedule Your Visits`;
+  const isQuarterly = billingInterval?.toUpperCase() === "QUARTERLY";
+  const intervalTitle = isQuarterly ? "Quarter" : "Monthly";
+  const subject = `Your New AgeWellRI ${intervalTitle} Service Period is Active — Schedule Your Visits`;
 
   const formattedStart = periodStartDate.toLocaleDateString("en-US", {
     month: "short",
@@ -1464,16 +1468,16 @@ export async function sendQuarterlyRenewalActiveEmail(
 
   const content = `
     <h2 style="font-size: 20px; font-weight: 800; color: #243746; margin: 0 0 12px 0;">
-      Your New Service Quarter Is Active!
+      Your New Service Period Is Active!
     </h2>
     <p style="font-size: 14px; color: #475569; line-height: 1.6; margin-bottom: 20px;">
       Hello <strong>${clientName}</strong>,<br><br>
-      Your <strong>${planName}</strong> subscription has successfully renewed for the upcoming service quarter (<strong>${formattedStart} – ${formattedEnd}</strong>). Your fresh visit allocations are ready to be scheduled.
+      Your <strong>${planName}</strong> subscription has successfully renewed for the upcoming service period (<strong>${formattedStart} – ${formattedEnd}</strong>). Your fresh visit allocations are ready to be scheduled.
     </p>
 
     <div class="highlight-card">
       <div style="font-size: 13px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; border-bottom: 1px solid #D9E4EC; padding-bottom: 6px;">
-        🗓️ New Quarter Visit Entitlements
+        🗓️ Active Period Visit Entitlements
       </div>
       <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
         <tr>
@@ -1481,7 +1485,7 @@ export async function sendQuarterlyRenewalActiveEmail(
           <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${planName}</td>
         </tr>
         <tr>
-          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Service Quarter:</td>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Service Period:</td>
           <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${formattedStart} – ${formattedEnd}</td>
         </tr>
         ${visitRowsHtml}
@@ -1505,10 +1509,10 @@ export async function sendQuarterlyRenewalActiveEmail(
 
   console.log(`\n======================================================`);
   console.log(
-    `🎉 [EMAIL SERVICE] Quarterly Renewal Active Email dispatched to: ${recipientString}`,
+    `🎉 [EMAIL SERVICE] Renewal Active Email dispatched to: ${recipientString}`,
   );
   console.log(
-    `Client: ${clientName} | Plan: ${planName} | Quarter: ${formattedStart} – ${formattedEnd}`,
+    `Client: ${clientName} | Plan: ${planName} | Period: ${formattedStart} – ${formattedEnd}`,
   );
   console.log(`======================================================\n`);
 

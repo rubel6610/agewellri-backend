@@ -279,6 +279,10 @@ export function formatAppointmentRecord(appt: any, specialistsList: any[] = []) 
     reportUploadedAt: activeReport?.uploadedAt ? new Date(activeReport.uploadedAt).toISOString() : null,
     location: appt.location || client.address || "Client Residence",
     notes: appt.notes || "",
+    accessMethodTitle: appt.accessMethodTitle || null,
+    accessMethodType: appt.accessMethodType || null,
+    accessMethodInstructions: appt.accessMethodInstructions || null,
+    accessMethodCode: appt.accessMethodCode || null,
     bookedBy: appt.createdByUser ? `${appt.createdByUser.firstName} ${appt.createdByUser.lastName}`.trim() : "AgeWellRI Team",
     createdAt: appt.createdAt ? new Date(appt.createdAt).toISOString() : new Date().toISOString(),
   };
@@ -296,6 +300,11 @@ interface ContractualSchedulingParams {
   technicianName?: string;
   location?: string;
   notes?: string;
+  accessMethodId?: string;
+  accessMethodType?: any;
+  accessMethodTitle?: string;
+  accessMethodCode?: string | null;
+  accessMethodInstructions?: string | null;
   actorUserId: string;
   isAdmin: boolean;
 }
@@ -375,8 +384,11 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
     });
 
     if (anySub?.status === SubscriptionStatus.PENDING) {
+      const startDateStr = anySub.currentPeriodStart
+        ? new Date(anySub.currentPeriodStart).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+        : "the 1st of next month";
       throw new Error(
-        "Client payment is pending. Payment must be submitted and processed before visits can be scheduled."
+        `Your membership coverage is scheduled to commence on ${startDateStr} (the 1st of the month following signup). Visits can be scheduled once your service period begins.`
       );
     }
     throw new Error(
@@ -390,6 +402,18 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
     throw new Error(
       "No active billing period found for the client's subscription. Payment and enrollment must be completed first."
     );
+  }
+
+  // Validate that requested appointment date is within or after the service period start date
+  const { startAt: requestedStart } = parseDateAndTimeSlot(params.date, params.timeSlot);
+  if (activePeriod && activePeriod.startDate) {
+    const periodStart = new Date(activePeriod.startDate);
+    periodStart.setHours(0, 0, 0, 0);
+    if (requestedStart.getTime() < periodStart.getTime()) {
+      throw new Error(
+        `Visits cannot be scheduled prior to your service commencement date (${periodStart.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}).`
+      );
+    }
   }
 
   // 4. Resolve Selected Service Type
@@ -507,6 +531,36 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
     const initialStatus = isAdmin ? AppointmentStatus.SCHEDULED : ("REQUESTED" as any);
     const assignedTechId = isAdmin ? technician?.id || null : null;
 
+    let accessMethodTitle = params.accessMethodTitle || null;
+    let accessMethodType: any = params.accessMethodType || null;
+    let accessMethodCode = params.accessMethodCode || null;
+    let accessMethodInstructions = params.accessMethodInstructions || null;
+
+    if (params.accessMethodId && client.accessMethods) {
+      try {
+        const methods: any[] = typeof client.accessMethods === "string" ? JSON.parse(client.accessMethods) : (client.accessMethods as any);
+        const match = methods.find((m: any) => m.id === params.accessMethodId);
+        if (match) {
+          accessMethodTitle = match.title || accessMethodTitle;
+          accessMethodType = match.type || accessMethodType;
+          accessMethodCode = match.code || accessMethodCode;
+          accessMethodInstructions = match.instructions || accessMethodInstructions;
+        }
+      } catch {}
+    }
+
+    if (!accessMethodType && client.homeAccessType) {
+      accessMethodType = client.homeAccessType;
+      accessMethodCode = accessMethodCode || client.homeAccessCode;
+      accessMethodInstructions = accessMethodInstructions || client.homeAccessInstructions;
+      accessMethodTitle = accessMethodTitle || (
+        client.homeAccessType === "LOCKBOX" ? "Primary Home Lockbox" :
+        client.homeAccessType === "DIGITAL_CODE" ? "Keypad Entry Code" :
+        client.homeAccessType === "OTHER" ? "Custom Entry Method" :
+        "Resident Answers Door"
+      );
+    }
+
     const createdAppt = await tx.appointment.create({
       data: {
         clientId: client.id,
@@ -518,6 +572,10 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
         status: initialStatus,
         location: params.location || clientAddress,
         notes: params.notes || null,
+        accessMethodTitle,
+        accessMethodType,
+        accessMethodInstructions,
+        accessMethodCode,
         createdByUserId: actorUserId,
       },
       include: {
@@ -599,6 +657,11 @@ export async function scheduleClientAppointment(
     technicianName: input.technicianName,
     location: input.location,
     notes: input.notes,
+    accessMethodId: input.accessMethodId,
+    accessMethodType: input.accessMethodType,
+    accessMethodTitle: input.accessMethodTitle,
+    accessMethodCode: input.accessMethodCode,
+    accessMethodInstructions: input.accessMethodInstructions,
     actorUserId: userId,
     isAdmin: false,
   });
@@ -657,6 +720,11 @@ export async function scheduleAdminAppointment(
     technicianName: input.technicianName,
     location: input.location,
     notes: input.notes,
+    accessMethodId: input.accessMethodId,
+    accessMethodType: input.accessMethodType,
+    accessMethodTitle: input.accessMethodTitle,
+    accessMethodCode: input.accessMethodCode,
+    accessMethodInstructions: input.accessMethodInstructions,
     actorUserId,
     isAdmin: true,
   });

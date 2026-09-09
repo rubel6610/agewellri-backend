@@ -17,7 +17,7 @@ export const createPlanSchema = z.object({
   fullDescription: z.string().optional(),
   price: z.number().positive("Price must be greater than zero"),
   currency: z.string().default("USD").optional(),
-  billingInterval: z.enum(["MONTHLY", "QUARTERLY", "ANNUAL", "ONE_TIME"]).default("QUARTERLY"),
+  billingInterval: z.enum(["MONTHLY", "QUARTERLY", "ANNUAL", "ONE_TIME"]).default("MONTHLY"),
   displayOrder: z.number().int().default(0).optional(),
   supportsAutomaticBilling: z.boolean().default(true).optional(),
   supportsInvoiceBilling: z.boolean().default(true).optional(),

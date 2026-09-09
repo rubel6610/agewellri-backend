@@ -23,6 +23,7 @@ model Client {
   homeAccessType           HomeAccessType   @default(RESIDENT_ANSWERS)
   homeAccessInstructions   String?
   homeAccessCode           String?
+  accessMethods            Json?
   selectedPlan             String?
   hasCleaningAddon         Boolean          @default(false)
   hasCompletedAgreement    Boolean          @default(false)

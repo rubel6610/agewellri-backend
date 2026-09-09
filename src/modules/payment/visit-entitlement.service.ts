@@ -425,7 +425,7 @@ export async function getClientVisitEntitlements(
     subscriptionId: activeSub?.id || null,
     planName: formattedPlanName,
     planCode,
-    billingInterval: activeSub?.billingInterval || "QUARTERLY",
+    billingInterval: activeSub?.billingInterval || "MONTHLY",
     billingPeriod: currentPeriod
       ? {
           id: currentPeriod.id,
@@ -519,7 +519,7 @@ export async function getAdminClientVisitEntitlements(
     subscriptionId: activeSub?.id || null,
     planName,
     planCode,
-    billingInterval: activeSub?.billingInterval || "QUARTERLY",
+    billingInterval: activeSub?.billingInterval || "MONTHLY",
     billingPeriod: currentPeriod
       ? {
           id: currentPeriod.id,

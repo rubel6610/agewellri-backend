@@ -1069,3 +1069,233 @@ export async function getAdminDashboardStats() {
     })),
   };
 }
+
+export interface ClientAccessMethod {
+  id: string;
+  type: "LOCKBOX" | "RESIDENT_ANSWERS" | "DIGITAL_CODE" | "OTHER";
+  title: string;
+  code?: string | null;
+  instructions?: string | null;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+/**
+ * Resolves the client record for a given user ID or client ID.
+ */
+async function resolveClientRecord(userIdOrClientId: string) {
+  return (prisma.client.findFirst as any)({
+    where: {
+      OR: [{ userId: userIdOrClientId }, { id: userIdOrClientId }],
+    },
+    include: { user: true },
+  });
+}
+
+/**
+ * GET Client Access Methods
+ */
+export async function getClientAccessMethods(userIdOrClientId: string): Promise<ClientAccessMethod[]> {
+  const client = await resolveClientRecord(userIdOrClientId);
+  if (!client) return [];
+
+  let methods: ClientAccessMethod[] = [];
+  if (client.accessMethods) {
+    try {
+      methods = typeof client.accessMethods === "string" ? JSON.parse(client.accessMethods) : (client.accessMethods as any);
+    } catch {
+      methods = [];
+    }
+  }
+
+  // If no access methods are stored yet, generate the initial one from what was signed in the agreement
+  if (!Array.isArray(methods) || methods.length === 0) {
+    const defaultType: "LOCKBOX" | "RESIDENT_ANSWERS" | "DIGITAL_CODE" | "OTHER" =
+      client.homeAccessType || "RESIDENT_ANSWERS";
+    const defaultTitle =
+      defaultType === "LOCKBOX"
+        ? "Primary Home Lockbox"
+        : defaultType === "DIGITAL_CODE"
+        ? "Keypad Entry Code"
+        : defaultType === "OTHER"
+        ? "Custom Entry Method"
+        : "Resident Answers Door";
+
+    const initialMethod: ClientAccessMethod = {
+      id: `acc_agreement_${client.id.slice(-6)}`,
+      type: defaultType,
+      title: defaultTitle,
+      code: client.homeAccessCode || null,
+      instructions: client.homeAccessInstructions || null,
+      isDefault: true,
+      createdAt: client.createdAt ? new Date(client.createdAt).toISOString() : new Date().toISOString(),
+    };
+
+    methods = [initialMethod];
+
+    // Persist default into client record
+    await (prisma.client.update as any)({
+      where: { id: client.id },
+      data: {
+        accessMethods: methods as any,
+      },
+    });
+  }
+
+  return methods;
+}
+
+/**
+ * ADD Client Access Method
+ */
+export async function addClientAccessMethod(
+  userIdOrClientId: string,
+  input: {
+    type: "LOCKBOX" | "RESIDENT_ANSWERS" | "DIGITAL_CODE" | "OTHER";
+    title: string;
+    code?: string | null;
+    instructions?: string | null;
+    isDefault?: boolean;
+  }
+): Promise<{ success: boolean; method: ClientAccessMethod; accessMethods: ClientAccessMethod[] }> {
+  const client = await resolveClientRecord(userIdOrClientId);
+  if (!client) throw new Error("Client record not found.");
+
+  const currentMethods = await getClientAccessMethods(client.id);
+  const isFirst = currentMethods.length === 0;
+  const isDefault = input.isDefault ?? isFirst;
+
+  const newMethod: ClientAccessMethod = {
+    id: `acc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    type: input.type,
+    title: input.title.trim() || "Home Access Method",
+    code: input.code?.trim() || null,
+    instructions: input.instructions?.trim() || null,
+    isDefault,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const updatedMethods = currentMethods.map((m) =>
+    isDefault ? { ...m, isDefault: false } : m
+  );
+  updatedMethods.push(newMethod);
+
+  const clientUpdate: any = { accessMethods: updatedMethods as any };
+  if (isDefault) {
+    clientUpdate.homeAccessType = newMethod.type;
+    clientUpdate.homeAccessInstructions = newMethod.instructions;
+    clientUpdate.homeAccessCode = newMethod.code;
+  }
+
+  await (prisma.client.update as any)({
+    where: { id: client.id },
+    data: clientUpdate,
+  });
+
+  return { success: true, method: newMethod, accessMethods: updatedMethods };
+}
+
+/**
+ * UPDATE Client Access Method
+ */
+export async function updateClientAccessMethod(
+  userIdOrClientId: string,
+  methodId: string,
+  input: Partial<{
+    type: "LOCKBOX" | "RESIDENT_ANSWERS" | "DIGITAL_CODE" | "OTHER";
+    title: string;
+    code?: string | null;
+    instructions?: string | null;
+    isDefault?: boolean;
+  }>
+): Promise<{ success: boolean; method: ClientAccessMethod; accessMethods: ClientAccessMethod[] }> {
+  const client = await resolveClientRecord(userIdOrClientId);
+  if (!client) throw new Error("Client record not found.");
+
+  const currentMethods = await getClientAccessMethods(client.id);
+  const index = currentMethods.findIndex((m) => m.id === methodId);
+  if (index === -1) throw new Error(`Access method with ID "${methodId}" not found.`);
+
+  const existing = currentMethods[index];
+  const isDefault = input.isDefault !== undefined ? input.isDefault : existing.isDefault;
+
+  const updatedMethod: ClientAccessMethod = {
+    ...existing,
+    type: input.type || existing.type,
+    title: input.title !== undefined ? input.title.trim() : existing.title,
+    code: input.code !== undefined ? (input.code?.trim() || null) : existing.code,
+    instructions: input.instructions !== undefined ? (input.instructions?.trim() || null) : existing.instructions,
+    isDefault,
+    updatedAt: new Date().toISOString(),
+  };
+
+  const updatedMethods = currentMethods.map((m) => {
+    if (m.id === methodId) return updatedMethod;
+    if (isDefault) return { ...m, isDefault: false };
+    return m;
+  });
+
+  const clientUpdate: any = { accessMethods: updatedMethods as any };
+  if (isDefault) {
+    clientUpdate.homeAccessType = updatedMethod.type;
+    clientUpdate.homeAccessInstructions = updatedMethod.instructions;
+    clientUpdate.homeAccessCode = updatedMethod.code;
+  }
+
+  await (prisma.client.update as any)({
+    where: { id: client.id },
+    data: clientUpdate,
+  });
+
+  return { success: true, method: updatedMethod, accessMethods: updatedMethods };
+}
+
+/**
+ * DELETE Client Access Method
+ */
+export async function deleteClientAccessMethod(
+  userIdOrClientId: string,
+  methodId: string
+): Promise<{ success: boolean; accessMethods: ClientAccessMethod[] }> {
+  const client = await resolveClientRecord(userIdOrClientId);
+  if (!client) throw new Error("Client record not found.");
+
+  const currentMethods = await getClientAccessMethods(client.id);
+  const target = currentMethods.find((m) => m.id === methodId);
+  if (!target) throw new Error(`Access method with ID "${methodId}" not found.`);
+
+  let updatedMethods = currentMethods.filter((m) => m.id !== methodId);
+
+  // If deleted method was default and others remain, make the first one default
+  if (target.isDefault && updatedMethods.length > 0) {
+    updatedMethods[0] = { ...updatedMethods[0], isDefault: true };
+  }
+
+  const clientUpdate: any = { accessMethods: updatedMethods as any };
+  if (updatedMethods.length > 0) {
+    const defaultMethod = updatedMethods.find((m) => m.isDefault) || updatedMethods[0];
+    clientUpdate.homeAccessType = defaultMethod.type;
+    clientUpdate.homeAccessInstructions = defaultMethod.instructions;
+    clientUpdate.homeAccessCode = defaultMethod.code;
+  }
+
+  await (prisma.client.update as any)({
+    where: { id: client.id },
+    data: clientUpdate,
+  });
+
+  return { success: true, accessMethods: updatedMethods };
+}
+
+/**
+ * SET Default Access Method
+ */
+export async function setDefaultClientAccessMethod(
+  userIdOrClientId: string,
+  methodId: string
+): Promise<{ success: boolean; accessMethods: ClientAccessMethod[] }> {
+  return updateClientAccessMethod(userIdOrClientId, methodId, { isDefault: true });
+}
+

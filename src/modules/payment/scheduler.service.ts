@@ -19,10 +19,11 @@ export async function checkAndSendRenewalReminders() {
   console.log(`\n⏰ [RENEWAL SCHEDULER] Running renewal reminder checks at ${now.toISOString()}...`);
 
   try {
-    // 1. Fetch all active subscriptions with upcoming renewal dates
+    // 1. Fetch all active or scheduled subscriptions with upcoming renewal / first billing dates
     const subscriptions: any[] = await (prisma.subscription.findMany as any)({
       where: {
-        status: { in: [SubscriptionStatus.ACTIVE, "ACTIVE"] },
+        status: { in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.PENDING, "ACTIVE", "PENDING"] },
+        autoRenew: true,
         nextRenewalDate: {
           not: null,
           gte: now, // Must be today or future
@@ -47,17 +48,12 @@ export async function checkAndSendRenewalReminders() {
       const diffMs = renewalDate.getTime() - now.getTime();
       const daysUntilRenewal = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
-      const interval = (sub.billingInterval || "QUARTERLY") as BillingInterval;
+      const interval = (sub.billingInterval || "MONTHLY") as BillingInterval;
 
-      // Determine reminder threshold window based on interval
-      let thresholdDays = 14; // Default Quarterly = 14 days
-      if (interval === BillingInterval.MONTHLY) {
-        thresholdDays = 7;
-      } else if (interval === BillingInterval.ANNUAL) {
-        thresholdDays = 30;
-      }
+      // Authoritative requirement: reminder is sent exactly 15 days before the upcoming billing date
+      const thresholdDays = 15;
 
-      // Check if subscription falls within notification threshold
+      // Check if subscription falls within 15-day notification threshold
       if (daysUntilRenewal > thresholdDays || daysUntilRenewal < 0) {
         continue;
       }

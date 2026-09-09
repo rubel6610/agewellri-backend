@@ -11,9 +11,13 @@ model Appointment {
   startAt              DateTime
   endAt                DateTime
   status               AppointmentStatus   @default(SCHEDULED)
-  location             String
-  notes                String?
-  createdByUserId      String              @db.ObjectId
+  location                   String
+  notes                      String?
+  accessMethodTitle          String?
+  accessMethodType           HomeAccessType?
+  accessMethodInstructions   String?
+  accessMethodCode           String?
+  createdByUserId            String              @db.ObjectId
   createdByUser        User                @relation("CreatedAppointments", fields: [createdByUserId], references: [id], onDelete: Restrict)
   isArchived           Boolean             @default(false)
   createdAt            DateTime            @default(now())

@@ -27,6 +27,16 @@ import {
   formatPeriodEntitlements,
 } from "./visit-entitlement.service";
 import { resolveClientForUser } from "../family/family.service";
+import {
+  getFirstBillingDate,
+  getServiceCommencementDate,
+  getStripeTrialEndTimestamp,
+  isChargeAllowed,
+  calculatePeriodEndDate,
+  getCancellationCutoffDate,
+  isWithinCancellationCutoff,
+  formatBillingDate,
+} from "../../utils/billing-dates.util";
 
 export type WebhookEventStatusType = "RECEIVED" | "PROCESSED" | "FAILED" | "IGNORED";
 
@@ -265,7 +275,7 @@ export async function resolvePlanPricingDynamic(
     billingInterval: (activePrice?.billingInterval ||
       activeVersion?.billingInterval ||
       plan.billingInterval ||
-      "QUARTERLY") as BillingInterval,
+      "MONTHLY") as BillingInterval,
     currency: activePrice?.currency || activeVersion?.currency || "USD",
     stripePriceId: activePrice?.stripePriceId || activeVersion?.stripePriceId || null,
     services,
@@ -436,6 +446,13 @@ export async function getPaymentMethods(userId: string) {
 /**
  * Process Agreement Payment & Provision Subscription, Periods, Invoices & Payments.
  * Accurately records PlanVersion and contracted terms for historical preservation.
+ * 
+ * CRITICAL LIFECYCLE RULE:
+ * 1. NO CHARGE OCCURS AT SIGNUP.
+ * 2. First billing date & service commencement date = 1st day of the NEXT calendar month.
+ * 3. Stripe Subscription is scheduled with trial_end anchored to the 1st of next month.
+ * 4. Local subscription starts in PENDING status.
+ * 5. Entitlements and period 1 are provisioned when Stripe's invoice.paid webhook arrives on the 1st.
  */
 export async function processAgreementPayment(
   userId: string,
@@ -472,28 +489,78 @@ export async function processAgreementPayment(
   }
 
   const now = new Date();
-  const periodEnd = new Date(now);
-  if (pricing.billingInterval === "MONTHLY") {
-    periodEnd.setMonth(periodEnd.getMonth() + 1);
-  } else if (pricing.billingInterval === "ANNUAL") {
-    periodEnd.setFullYear(periodEnd.getFullYear() + 1);
-  } else if (pricing.billingInterval === "ONE_TIME") {
-    periodEnd.setTime(now.getTime());
-  } else {
-    // Default Quarterly
-    periodEnd.setMonth(periodEnd.getMonth() + 3);
-  }
+  // Authoritative Calculation: First billing & service commencement date is strictly the 1st of the following calendar month
+  const firstBillingDate = getFirstBillingDate(now);
+  const periodEndDate = calculatePeriodEndDate(firstBillingDate, pricing.billingInterval);
 
-  // 1. Create or Update Subscription with contracted terms
-  let subscription = client.subscriptions?.[0];
-  const subscriptionStatus = isInvoiceBilling ? SubscriptionStatus.PENDING : SubscriptionStatus.ACTIVE;
-
-  // Resolve planId and versionId
+  // 1. Resolve planId and versionId
   let planId = pricing.planId;
   if (!planId) {
     const fallbackPlan = await prisma.servicePlan.findFirst();
     planId = fallbackPlan?.id;
   }
+
+  // 2. Create Stripe-Native Subscription with trial_end anchored to the 1st of next month (NO charge on signup day)
+  let stripeSubscriptionId: string | null = null;
+  if (!isInvoiceBilling && client.stripeCustomerId && (input.paymentMethodId || client.stripePaymentMethodId)) {
+    try {
+      const pmId = input.paymentMethodId || client.stripePaymentMethodId;
+      const intervalCount = pricing.billingInterval === "QUARTERLY" ? 3 : (pricing.billingInterval === "ANNUAL" ? 12 : 1);
+      const trialEndTimestamp = getStripeTrialEndTimestamp(now);
+
+      let stripeProductId: string | undefined = undefined;
+      try {
+        const product = await stripe.products.create({
+          name: pricing.planName || "AgeWellRI Plan",
+          metadata: {
+            planId: planId || "",
+            versionId: pricing.versionId || "",
+          },
+        });
+        stripeProductId = product.id;
+      } catch {
+        // fallback if product creation error
+      }
+
+      const stripeSub = await (stripe.subscriptions.create as any)({
+        customer: client.stripeCustomerId,
+        default_payment_method: pmId,
+        items: [
+          {
+            price_data: {
+              currency: (pricing.currency || "usd").toLowerCase(),
+              product: stripeProductId,
+              unit_amount: Math.round(pricing.totalPrice * 100),
+              recurring: {
+                interval: "month",
+                interval_count: intervalCount,
+              },
+            },
+          },
+        ],
+        trial_end: trialEndTimestamp,
+        proration_behavior: "none",
+        metadata: {
+          clientId: client.id,
+          planId: planId || "",
+          versionId: pricing.versionId || "",
+          selectedPlan: pricing.code,
+        },
+      });
+      stripeSubscriptionId = stripeSub.id;
+    } catch (subErr: any) {
+      console.warn("⚠️ Stripe native subscription creation notice:", subErr.message);
+    }
+  }
+
+  // 3. Create or Update Subscription with contracted terms (Starts in PENDING status until 1st of month charge)
+  const existingSubs = await (prisma.subscription.findMany as any)({
+    where: { clientId: client.id },
+    orderBy: { createdAt: "desc" },
+  });
+
+  let subscription = existingSubs[0];
+  const subscriptionStatus = SubscriptionStatus.PENDING;
 
   if (!subscription) {
     subscription = await (prisma.subscription.create as any)({
@@ -506,11 +573,12 @@ export async function processAgreementPayment(
         status: subscriptionStatus,
         billingInterval: pricing.billingInterval,
         billingMethod,
-        currentPeriodStart: now,
-        currentPeriodEnd: periodEnd,
-        nextRenewalDate: pricing.isOneTime ? null : periodEnd,
-        autoRenew: !pricing.isOneTime && !isInvoiceBilling,
+        currentPeriodStart: firstBillingDate,
+        currentPeriodEnd: periodEndDate,
+        nextRenewalDate: firstBillingDate,
+        autoRenew: !pricing.isOneTime,
         cancelAtPeriodEnd: false,
+        stripeSubscriptionId: stripeSubscriptionId || null,
       },
     });
   } else {
@@ -520,95 +588,110 @@ export async function processAgreementPayment(
         planId: planId || subscription.planId,
         planVersionId: pricing.versionId || subscription.planVersionId,
         contractedPrice: pricing.totalPrice,
-        status: subscriptionStatus,
+        currency: pricing.currency,
+        billingInterval: pricing.billingInterval,
+        status: subscription.status === SubscriptionStatus.ACTIVE ? SubscriptionStatus.ACTIVE : subscriptionStatus,
         billingMethod,
-        autoRenew: !pricing.isOneTime && !isInvoiceBilling,
+        currentPeriodStart: firstBillingDate,
+        currentPeriodEnd: periodEndDate,
+        nextRenewalDate: firstBillingDate,
+        autoRenew: !pricing.isOneTime,
         cancelAtPeriodEnd: false,
+        stripeSubscriptionId: stripeSubscriptionId || subscription.stripeSubscriptionId,
       },
     });
+
+    // Remove any duplicate orphaned pending subscriptions for this client
+    if (existingSubs.length > 1) {
+      const extraPendingSubIds = existingSubs
+        .slice(1)
+        .filter((s: any) => s.status === SubscriptionStatus.PENDING)
+        .map((s: any) => s.id);
+      if (extraPendingSubIds.length > 0) {
+        await (prisma.subscription.deleteMany as any)({
+          where: { id: { in: extraPendingSubIds } },
+        });
+      }
+    }
   }
 
-  // 2. Generate Initial Invoice
-  const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
-  const invoice = await (prisma.invoice.create as any)({
-    data: {
-      invoiceNumber,
+  // 4. Generate or Update Initial Scheduled / Draft Invoice (Due on the 1st of next month)
+  const existingUnpaidInvoices = await (prisma.invoice.findMany as any)({
+    where: {
       clientId: client.id,
-      subscriptionId: subscription.id,
-      amount: pricing.totalPrice,
-      currency: pricing.currency,
-      status: isInvoiceBilling ? InvoiceStatus.OPEN : InvoiceStatus.PAID,
-      billingMethod,
-      dueDate: isInvoiceBilling ? new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000) : now,
-      issuedAt: now,
-      paidAt: isInvoiceBilling ? null : now,
+      paidAt: null,
+      status: { in: [InvoiceStatus.DRAFT, InvoiceStatus.OPEN] },
     },
+    orderBy: { createdAt: "desc" },
   });
 
-  // 3. Create Initial Payment Record if Paid
-  if (!isInvoiceBilling) {
-    await (prisma.payment.create as any)({
+  let invoice = existingUnpaidInvoices[0];
+  if (invoice) {
+    invoice = await (prisma.invoice.update as any)({
+      where: { id: invoice.id },
       data: {
+        subscriptionId: subscription.id,
+        amount: pricing.totalPrice,
+        currency: pricing.currency,
+        status: isInvoiceBilling ? InvoiceStatus.OPEN : InvoiceStatus.DRAFT,
+        billingMethod,
+        dueDate: firstBillingDate,
+      },
+    });
+
+    // Clean up any extra duplicate draft invoices created during previous plan toggles
+    if (existingUnpaidInvoices.length > 1) {
+      const duplicateIds = existingUnpaidInvoices.slice(1).map((inv: any) => inv.id);
+      await (prisma.invoice.deleteMany as any)({
+        where: { id: { in: duplicateIds } },
+      });
+    }
+  } else {
+    const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
+    invoice = await (prisma.invoice.create as any)({
+      data: {
+        invoiceNumber,
         clientId: client.id,
         subscriptionId: subscription.id,
-        invoiceId: invoice.id,
         amount: pricing.totalPrice,
         currency: pricing.currency,
-        status: PaymentStatus.PAID,
-        paymentMethod: BillingMethod.AUTOMATIC,
-        stripeCustomerId: client.stripeCustomerId,
-        stripePaymentMethodId: input.paymentMethodId || client.stripePaymentMethodId,
-        paidAt: now,
+        status: isInvoiceBilling ? InvoiceStatus.OPEN : InvoiceStatus.DRAFT,
+        billingMethod,
+        dueDate: firstBillingDate,
+        issuedAt: now,
+        paidAt: null, // NOT paid at signup
       },
     });
   }
 
-  // 4. Create Active Subscription Period & Visit Allocations if Paid
-  if (!isInvoiceBilling) {
-    const period = await (prisma.subscriptionPeriod.create as any)({
-      data: {
-        subscriptionId: subscription.id,
-        periodNumber: 1,
-        startDate: now,
-        endDate: periodEnd,
-        isCurrent: true,
-        status: "ACTIVE",
-        amount: pricing.totalPrice,
-        contractedPrice: pricing.totalPrice,
-        currency: pricing.currency,
-      },
-    });
+  // CRITICAL: We DO NOT create a PAID Payment record at signup.
+  // CRITICAL: We DO NOT create an active SubscriptionPeriod or VisitAllocation at signup.
+  // They will be created automatically when Stripe fires the invoice.paid webhook on the 1st of next month.
 
-    // Create visit allocations dynamically from plan services configured in DB (idempotent)
-    await ensureVisitAllocationsForPeriod(
-      period.id,
-      pricing.versionId,
-      pricing.planId,
-      input.hasCleaningAddon
-    );
-  }
-
-  // 5. Update Client status
+  // 5. Update Client onboarding status (PENDING until first payment settles on 1st of next month)
   await prisma.client.update({
     where: { id: client.id },
     data: {
       selectedPlan: pricing.code,
       hasCleaningAddon: input.hasCleaningAddon,
-      onboardingStatus: isInvoiceBilling ? OnboardingStatus.PAYMENT_PENDING : OnboardingStatus.ACTIVE,
+      onboardingStatus: OnboardingStatus.PAYMENT_PENDING,
     },
   });
 
   // 6. Record Audit Log
   await createBillingAuditLog({
     actorUserId: userId,
-    action: isInvoiceBilling ? "INVOICE_CREATED" : "SUBSCRIPTION_ACTIVATED",
+    action: "SUBSCRIPTION_SCHEDULED_FOR_FIRST_OF_MONTH",
     entityType: "Subscription",
     entityId: subscription.id,
     metadata: {
       plan: pricing.code,
       totalPrice: pricing.totalPrice,
       billingMethod,
-      invoiceNumber,
+      firstBillingDate: firstBillingDate.toISOString(),
+      serviceCommencementDate: firstBillingDate.toISOString(),
+      invoiceNumber: invoice.invoiceNumber,
+      stripeSubscriptionId,
     },
   });
 
@@ -677,14 +760,14 @@ export async function processAgreementPayment(
       currency: pricing.currency,
       billingInterval: pricing.billingInterval,
       billingMethod: isInvoiceBilling ? "INVOICE" : "AUTOMATIC",
-      paymentStatus: isInvoiceBilling ? "PENDING_INVOICE" : "PAID",
+      paymentStatus: "SCHEDULED_FIRST_OF_MONTH",
       cardBrand: client.cardBrand || undefined,
       cardLast4: client.cardLast4 || undefined,
       invoiceNumber: invoice.invoiceNumber,
-      paidAt: isInvoiceBilling ? null : now,
-      coveragePeriodStart: now,
-      coveragePeriodEnd: periodEnd,
-      nextRenewalDate: pricing.isOneTime ? null : periodEnd,
+      paidAt: null,
+      coveragePeriodStart: firstBillingDate,
+      coveragePeriodEnd: periodEndDate,
+      nextRenewalDate: firstBillingDate,
       cancellationDeadline: agreement?.cancellationDeadline,
       cancellationDeadlineRule: agreement?.cancellationDeadlineRule,
     });
@@ -694,15 +777,15 @@ export async function processAgreementPayment(
 
   return {
     success: true,
-    message: isInvoiceBilling
-      ? "Invoice generated successfully. Your plan will activate upon invoice payment."
-      : "Membership payment confirmed. Subscription is now fully active.",
+    message: `Agreement executed and payment method saved. You will not be charged today. Your first charge is scheduled for ${formatBillingDate(firstBillingDate)} when your service commences.`,
     subscriptionId: subscription.id,
     invoiceNumber: invoice.invoiceNumber,
     invoiceId: invoice.id,
     totalPrice: pricing.totalPrice,
     billingMethod,
     status: subscription.status,
+    firstBillingDate: firstBillingDate.toISOString(),
+    serviceCommencementDate: firstBillingDate.toISOString(),
   };
 }
 
@@ -806,7 +889,32 @@ export async function cancelSubscriptionRenewal(
       };
     }
 
+    const upcomingBillingDate = activeSub.nextRenewalDate || activeSub.currentPeriodEnd || now;
+    const isEligible = isWithinCancellationCutoff(now, upcomingBillingDate, 10);
+
+    if (!isEligible) {
+      const cutoffDate = getCancellationCutoffDate(upcomingBillingDate, 10);
+      return {
+        success: false,
+        message: `Auto-renewal cancellation must be submitted at least 10 days before the end of the month (cutoff was ${formatBillingDate(cutoffDate)}). Your upcoming renewal for ${formatBillingDate(upcomingBillingDate)} is already scheduled.`,
+        cancellationEffectiveAt: activeSub.currentPeriodEnd,
+        autoRenew: activeSub.autoRenew,
+        cancelAtPeriodEnd: false,
+      };
+    }
+
     const effectiveDate = activeSub.currentPeriodEnd || new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    // Update Stripe Subscription to cancel at period end if exists
+    if (activeSub.stripeSubscriptionId) {
+      try {
+        await stripe.subscriptions.update(activeSub.stripeSubscriptionId, {
+          cancel_at_period_end: true,
+        });
+      } catch (stripeErr: any) {
+        console.warn("⚠️ Could not set cancel_at_period_end on Stripe Subscription:", stripeErr.message);
+      }
+    }
 
     await (prisma.subscription.update as any)({
       where: { id: activeSub.id },
@@ -830,7 +938,7 @@ export async function cancelSubscriptionRenewal(
 
     return {
       success: true,
-      message: `Automatic renewal has been cancelled. Your active coverage remains in effect until ${new Date(effectiveDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}.`,
+      message: `Automatic renewal has been cancelled. Your active coverage remains in effect until ${formatBillingDate(effectiveDate)}.`,
       cancellationEffectiveAt: effectiveDate,
       autoRenew: false,
       cancelAtPeriodEnd: true,
@@ -990,7 +1098,7 @@ export async function getBillingOverview(userId: string) {
       currentPlanName: "Guardian Plus",
       selectedPlanCode: "GUARDIAN_PLUS",
       hasCleaningAddon: false,
-      billingFrequency: "Quarterly",
+      billingFrequency: "Monthly",
       billingMethod: "AUTOMATIC",
       subscriptionStatus: "ACTIVE",
       autoPayEnabled: true,
@@ -998,7 +1106,7 @@ export async function getBillingOverview(userId: string) {
       cancellationEffectiveAt: null,
       currentPeriod: "Active Cycle",
       nextPaymentDate: "September 1, 2026",
-      nextPaymentAmount: "$1,892.00",
+      nextPaymentAmount: "$495.00",
       paymentMethod: {
         brand: "VISA",
         last4: "4242",
@@ -1012,26 +1120,32 @@ export async function getBillingOverview(userId: string) {
 
   const activeSub: any = client.subscriptions?.[0];
 
+  const now = new Date();
+  const defaultFirstBilling = getFirstBillingDate(now);
+  const firstBillingDate = activeSub?.currentPeriodStart ? new Date(activeSub.currentPeriodStart) : defaultFirstBilling;
+  const serviceCommencementDate = firstBillingDate;
+  const targetRenewalDate = activeSub?.nextRenewalDate ? new Date(activeSub.nextRenewalDate) : firstBillingDate;
+  const cancellationCutoffDate = getCancellationCutoffDate(targetRenewalDate, 10);
+  const isPendingFirstBilling = activeSub?.status === SubscriptionStatus.PENDING;
+
   // Contracted terms preservation
   const contractedPlanName =
     activeSub?.planVersion?.name || activeSub?.plan?.name || "Guardian Plus";
   const contractedPrice =
-    activeSub?.contractedPrice ?? activeSub?.planVersion?.price ?? activeSub?.plan?.price ?? 1892;
+    activeSub?.contractedPrice ?? activeSub?.planVersion?.price ?? activeSub?.plan?.price ?? 495;
   const billingInterval =
-    activeSub?.billingInterval || activeSub?.planVersion?.billingInterval || "QUARTERLY";
+    activeSub?.billingInterval || activeSub?.planVersion?.billingInterval || "MONTHLY";
 
   const currentPeriod = activeSub?.periods?.[0];
   const currentPeriodFormatted = currentPeriod
     ? `${currentPeriod.startDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${currentPeriod.endDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+    : isPendingFirstBilling
+    ? `Commences ${formatBillingDate(serviceCommencementDate)}`
     : "Active Cycle";
 
   const nextRenewal = activeSub?.nextRenewalDate
-    ? new Date(activeSub.nextRenewalDate).toLocaleDateString("en-US", {
-        month: "long",
-        day: "numeric",
-        year: "numeric",
-      })
-    : "September 1, 2026";
+    ? formatBillingDate(activeSub.nextRenewalDate)
+    : formatBillingDate(defaultFirstBilling);
 
   const formattedInvoices = (client.invoices || []).map((inv: any) => ({
     id: inv.id,
@@ -1069,7 +1183,7 @@ export async function getBillingOverview(userId: string) {
     currentPlanName: contractedPlanName,
     selectedPlanCode: activeSub?.plan?.code || client.selectedPlan || "GUARDIAN_PLUS",
     hasCleaningAddon: client.hasCleaningAddon,
-    billingFrequency: billingInterval === "MONTHLY" ? "Monthly" : billingInterval === "ANNUAL" ? "Annual" : "Quarterly",
+    billingFrequency: billingInterval === "QUARTERLY" ? "Quarterly" : billingInterval === "ANNUAL" ? "Annual" : "Monthly",
     billingMethod: activeSub?.billingMethod || "AUTOMATIC",
     subscriptionStatus: activeSub?.status || "PENDING",
     autoPayEnabled: activeSub?.autoRenew ?? true,
@@ -1078,6 +1192,10 @@ export async function getBillingOverview(userId: string) {
     currentPeriod: currentPeriodFormatted,
     nextPaymentDate: nextRenewal,
     nextPaymentAmount: `$${contractedPrice.toFixed(2)}`,
+    firstBillingDate: formatBillingDate(firstBillingDate),
+    serviceCommencementDate: formatBillingDate(serviceCommencementDate),
+    cancellationCutoffDate: formatBillingDate(cancellationCutoffDate),
+    isPendingFirstBilling,
     paymentMethod: {
       brand: client.cardBrand || "VISA",
       last4: client.cardLast4 || "4242",
@@ -1090,24 +1208,6 @@ export async function getBillingOverview(userId: string) {
     payments: formattedPayments,
     visitEntitlements,
   };
-}
-
-/**
- * Helper to compute period end date from interval
- */
-function calculatePeriodEndDate(startDate: Date, interval: BillingInterval | string): Date {
-  const endDate = new Date(startDate);
-  if (interval === BillingInterval.MONTHLY || interval === "MONTHLY") {
-    endDate.setMonth(endDate.getMonth() + 1);
-  } else if (interval === BillingInterval.ANNUAL || interval === "ANNUAL") {
-    endDate.setFullYear(endDate.getFullYear() + 1);
-  } else if (interval === BillingInterval.ONE_TIME || interval === "ONE_TIME") {
-    // 0 duration
-  } else {
-    // Default Quarterly
-    endDate.setMonth(endDate.getMonth() + 3);
-  }
-  return endDate;
 }
 
 /**
@@ -1252,8 +1352,11 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
           const activeSub = client?.subscriptions?.[0];
           if (activeSub) {
             const latestPeriod = activeSub.periods?.[0];
-            const nextPeriodNumber = (latestPeriod?.periodNumber || 1) + 1;
-            const newPeriodStart = latestPeriod ? new Date(latestPeriod.endDate) : new Date();
+            const isFirstPeriod = !latestPeriod || activeSub.periods?.length === 0;
+            const nextPeriodNumber = (latestPeriod?.periodNumber || 0) + 1;
+            const newPeriodStart = latestPeriod
+              ? new Date(latestPeriod.endDate)
+              : new Date(activeSub.currentPeriodStart || new Date());
             const newPeriodEnd = calculatePeriodEndDate(newPeriodStart, activeSub.billingInterval);
 
             // Create new Subscription Period
@@ -1287,7 +1390,7 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
               activeSub.client?.hasCleaningAddon
             );
 
-            // Update Subscription timestamps
+            // Update Subscription timestamps & status
             await (prisma.subscription.update as any)({
               where: { id: activeSub.id },
               data: {
@@ -1298,7 +1401,15 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
               },
             });
 
-            // Create Payment record for this renewal
+            // Activate Client status if first payment
+            if (isFirstPeriod) {
+              await prisma.client.update({
+                where: { id: client.id },
+                data: { onboardingStatus: OnboardingStatus.ACTIVE },
+              });
+            }
+
+            // Create Payment record for this renewal / first payment
             const invoiceRecord = await (prisma.invoice.findFirst as any)({
               where: { stripeInvoiceId },
             });
@@ -1336,7 +1447,7 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
               console.warn("⚠️ Failed to record Renewal lifecycle entry:", renewalErr.message);
             }
 
-            // Send Payment Confirmation Receipt Email & Next Quarter Active Notification
+            // Send Payment Confirmation Receipt Email & Service Active Notification
             if (client.user?.email) {
               const planName = activeSub.planVersion?.name || activeSub.plan?.name || "Guardian Plus";
               try {
@@ -1389,7 +1500,7 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
             }
 
             await createBillingAuditLog({
-              action: "SUBSCRIPTION_RENEWED",
+              action: isFirstPeriod ? "FIRST_PAYMENT_PROCESSED_ACTIVE" : "SUBSCRIPTION_RENEWED",
               entityType: "Subscription",
               entityId: activeSub.id,
               metadata: {
@@ -1406,6 +1517,25 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
           action: "INVOICE_PAID",
           entityType: "Invoice",
           entityId: stripeInvoiceId,
+        });
+        break;
+      }
+
+      case "customer.subscription.deleted": {
+        const stripeSub = event.data.object;
+        const stripeSubId = stripeSub.id;
+        await (prisma.subscription.updateMany as any)({
+          where: { stripeSubscriptionId: stripeSubId },
+          data: {
+            status: SubscriptionStatus.CANCELLED,
+            autoRenew: false,
+            cancelledAt: new Date(),
+          },
+        });
+        await createBillingAuditLog({
+          action: "STRIPE_SUBSCRIPTION_DELETED",
+          entityType: "Subscription",
+          entityId: stripeSubId,
         });
         break;
       }
@@ -1428,7 +1558,7 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
             where: { stripeCustomerId: customerId },
             include: {
               user: true,
-              subscriptions: { where: { status: SubscriptionStatus.ACTIVE } },
+              subscriptions: { where: { status: { in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.PENDING] } } },
             },
           });
 
@@ -1448,7 +1578,7 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
                 await sendPaymentFailureEmail({
                   to: client.user.email,
                   clientName: `${client.user.firstName || ""} ${client.user.lastName || ""}`.trim() || "Valued Client",
-                  planName: sub.plan?.name || "Quarterly Plan",
+                  planName: sub.plan?.name || "AgeWellRI Plan",
                   amount: (stripeInvoice.amount_due || 0) / 100 || sub.contractedPrice,
                   failedAt: new Date(),
                   failureReason,
@@ -1458,7 +1588,7 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
                   alertType: "RENEWAL_FAILED",
                   clientName: `${client.user.firstName} ${client.user.lastName}`,
                   clientEmail: client.user.email,
-                  planName: sub.plan?.name || "Quarterly Plan",
+                  planName: sub.plan?.name || "AgeWellRI Plan",
                   amount: (stripeInvoice.amount_due || 0) / 100 || sub.contractedPrice,
                   details: failureReason,
                 });
@@ -1564,7 +1694,7 @@ export async function getAdminBillingOverview() {
       id: pm.id,
       clientName: pm.client?.user ? `${pm.client.user.firstName} ${pm.client.user.lastName}`.trim() : "Client",
       clientId: pm.clientId,
-      planName: pm.subscription?.plan?.name || "Quarterly Care",
+      planName: pm.subscription?.plan?.name || "Monthly Care",
       amount: `$${pm.amount.toFixed(2)}`,
       status: pm.status.toLowerCase(),
       date: pm.createdAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
@@ -1648,7 +1778,7 @@ export async function getAdminInvoices(query: AdminBillingFilterInput) {
       clientName: inv.client?.user ? `${inv.client.user.firstName} ${inv.client.user.lastName}`.trim() : "Client",
       clientNumber: inv.client?.clientNumber || "AW-0000",
       planName: inv.subscription?.plan?.name || "Essential Guard",
-      billingFrequency: "Quarterly",
+      billingFrequency: inv.subscription?.billingInterval === "ANNUAL" ? "Annual" : inv.subscription?.billingInterval === "QUARTERLY" ? "Quarterly" : "Monthly",
       amount: `$${inv.amount.toFixed(2)}`,
       paymentMethod: inv.billingMethod === "AUTOMATIC" ? "Credit Card (Auto)" : "Pay by Invoice",
       status: inv.status.toLowerCase(),
@@ -1747,9 +1877,9 @@ export async function getAdminSubscriptions(query: AdminBillingFilterInput) {
       clientName: sub.client?.user ? `${sub.client.user.firstName} ${sub.client.user.lastName}`.trim() : "Client",
       clientNumber: sub.client?.clientNumber || "AW-0000",
       planName: sub.planVersion?.name || sub.plan?.name || "Guardian Plus",
-      planPrice: `$${(sub.contractedPrice || sub.planVersion?.price || sub.plan?.price || 995).toFixed(2)}`,
+      planPrice: `$${(sub.contractedPrice || sub.planVersion?.price || sub.plan?.price || 495).toFixed(2)}`,
       status: sub.status,
-      billingInterval: sub.billingInterval || "QUARTERLY",
+      billingInterval: sub.billingInterval || "MONTHLY",
       billingMethod: sub.billingMethod,
       autoRenew: sub.autoRenew,
       cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
@@ -1827,8 +1957,8 @@ export async function getAdminUpcomingRenewals(query?: {
       clientPhone: sub.client?.phone || clientUser?.phone || "",
       representativeEmail: sub.client?.primaryContactEmail || null,
       planName: sub.planVersion?.name || sub.plan?.name || "Guardian Plus",
-      contractedPrice: sub.contractedPrice ?? sub.planVersion?.price ?? sub.plan?.price ?? 1892,
-      billingInterval: sub.billingInterval || "QUARTERLY",
+      contractedPrice: sub.contractedPrice ?? sub.planVersion?.price ?? sub.plan?.price ?? 495,
+      billingInterval: sub.billingInterval || "MONTHLY",
       billingMethod: sub.billingMethod || "AUTOMATIC",
       autoRenew: sub.autoRenew ?? true,
       cancelAtPeriodEnd: sub.cancelAtPeriodEnd ?? false,
@@ -1866,6 +1996,13 @@ export async function adminRetryCharge(input: AdminRetryChargeInput) {
 
   if (!invoice) {
     throw new Error("Invoice not found for retry.");
+  }
+
+  // Prevent premature charges prior to first billing date
+  if (invoice.dueDate && !isChargeAllowed(invoice.dueDate)) {
+    throw new Error(
+      `Cannot execute payment before the scheduled first billing date (${formatBillingDate(invoice.dueDate)}). Real Stripe payment will execute on the 1st of the month.`
+    );
   }
 
   const client: any = invoice.client;

@@ -166,19 +166,32 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
   let targetVersion: any = null;
 
   if (input.planId) {
-    targetPlan = await ((prisma as any).servicePlan.findUnique as any)({
-      where: { id: input.planId },
-      include: {
-        versions: {
-          where: { status: "ACTIVE" },
-          orderBy: { versionNumber: "desc" },
-          take: 1,
-          include: { planServices: { include: { serviceType: true } } },
+    try {
+      targetPlan = await ((prisma as any).servicePlan.findFirst as any)({
+        where: {
+          OR: [
+            { id: input.planId },
+            { code: input.planId.toUpperCase() },
+            { code: (input.selectedPlan || "").toUpperCase() },
+            { name: { equals: input.selectedPlan || "", mode: "insensitive" } },
+          ],
         },
-      },
-    });
-    targetVersion = targetPlan?.versions?.[0];
-  } else if (input.planVersionId) {
+        include: {
+          versions: {
+            where: { status: "ACTIVE" },
+            orderBy: { versionNumber: "desc" },
+            take: 1,
+            include: { planServices: { include: { serviceType: true } } },
+          },
+        },
+      });
+      targetVersion = targetPlan?.versions?.[0];
+    } catch {
+      targetPlan = null;
+    }
+  }
+
+  if (!targetPlan && input.planVersionId) {
     targetVersion = await ((prisma as any).planVersion.findUnique as any)({
       where: { id: input.planVersionId },
       include: {
@@ -187,7 +200,9 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
       },
     });
     targetPlan = targetVersion?.plan;
-  } else {
+  }
+
+  if (!targetPlan && input.selectedPlan) {
     targetPlan = await ((prisma as any).servicePlan.findFirst as any)({
       where: {
         OR: [
@@ -207,8 +222,8 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
     targetVersion = targetPlan?.versions?.[0];
   }
 
-  const basePrice = targetVersion?.price ?? targetPlan?.price ?? 995;
-  const finalPrice = input.hasCleaningAddon ? basePrice + 60 : basePrice;
+  const basePrice = targetVersion?.price ?? targetPlan?.price ?? 495;
+  const finalPrice = input.hasCleaningAddon ? basePrice + 50 : basePrice;
 
   // 2. Server-side 3-Business-Day Cancellation Deadline Calculation
   const deadlineResult = CancellationDeadlineService.calculateDeadline(
@@ -426,7 +441,7 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
         paymentMethodId: input.paymentMethodId || undefined,
         setupIntentId: input.setupIntentId || undefined,
         billingMethod: "AUTOMATIC",
-        selectedPlan: (targetPlan?.code as any) || "GUARDIAN_PLUS",
+        selectedPlan: (targetPlan?.code as any) || (input.selectedPlan as any) || "GUARDIAN_PLUS",
         hasCleaningAddon: input.hasCleaningAddon,
       });
     } catch (paymentErr) {

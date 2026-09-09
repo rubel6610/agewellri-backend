@@ -12,6 +12,11 @@ export const ScheduleAppointmentSchema = z.object({
   endAt: z.string().optional(),
   notes: z.string().optional(),
   location: z.string().optional(),
+  accessMethodId: z.string().optional(),
+  accessMethodType: z.enum(["LOCKBOX", "RESIDENT_ANSWERS", "DIGITAL_CODE", "OTHER"]).optional(),
+  accessMethodTitle: z.string().optional(),
+  accessMethodCode: z.string().optional().nullable(),
+  accessMethodInstructions: z.string().optional().nullable(),
 });
 
 export type ScheduleAppointmentInput = z.infer<typeof ScheduleAppointmentSchema>;
@@ -28,6 +33,11 @@ export const AdminScheduleAppointmentSchema = z.object({
   endAt: z.string().optional(),
   notes: z.string().optional(),
   location: z.string().optional(),
+  accessMethodId: z.string().optional(),
+  accessMethodType: z.enum(["LOCKBOX", "RESIDENT_ANSWERS", "DIGITAL_CODE", "OTHER"]).optional(),
+  accessMethodTitle: z.string().optional(),
+  accessMethodCode: z.string().optional().nullable(),
+  accessMethodInstructions: z.string().optional().nullable(),
 });
 
 export type AdminScheduleAppointmentInput = z.infer<typeof AdminScheduleAppointmentSchema>;

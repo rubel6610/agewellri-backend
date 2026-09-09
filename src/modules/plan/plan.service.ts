@@ -111,21 +111,21 @@ export async function getActivePlans() {
       services.reduce(
         (sum: number, s: any) => sum + (s.allocatedVisits || 0),
         0
-      ) || (plan.code === "GUARDIAN_PLUS" ? 12 : 6);
+      ) || (plan.code === "GUARDIAN_PLUS" ? 4 : 2);
 
     const metadataFeatures = (plan.metadata as any)?.features;
     const versionFeatures = latestVersion?.features;
     const defaultFeatures =
       plan.code === "GUARDIAN_PLUS"
         ? [
-            "6 Safety Oversight Visits / Quarter",
-            "6 Home Cleaning Visits / Quarter",
+            "2 Safety Oversight Visits / Month",
+            "2 Home Cleaning Visits / Month",
             "HEPA Allergen Deep Vacuuming & Sanitization",
             "Home Safety Hazard Mitigation",
             "Direct Caregiver & Family Report Dispatch",
           ]
         : [
-            "6 Safety Oversight Visits / Quarter",
+            "2 Safety Oversight Visits / Month",
             "Home Safety Score & Hazard Assessment",
             "Family Portal Access with Live Reports",
             "Dedicated Local Care Concierge",
@@ -149,7 +149,7 @@ export async function getActivePlans() {
       fullDescription: plan.fullDescription || "",
       price: plan.price,
       currency: "USD",
-      billingInterval: plan.billingInterval || "QUARTERLY",
+      billingInterval: plan.billingInterval || "MONTHLY",
       supportsAutomaticBilling: plan.supportsAutomaticBilling ?? true,
       supportsInvoiceBilling: plan.supportsInvoiceBilling ?? true,
       autoRenewDefault: plan.autoRenewDefault ?? true,
@@ -207,13 +207,13 @@ export async function getAllAdminPlans() {
     const defaultFeatures =
       plan.code === "GUARDIAN_PLUS"
         ? [
-            "6 Safety Oversight Visits / Quarter",
-            "6 Home Cleaning Visits / Quarter",
+            "2 Safety Oversight Visits / Month",
+            "2 Home Cleaning Visits / Month",
             "HEPA Allergen Deep Vacuuming & Sanitization",
             "Home Safety Hazard Mitigation",
           ]
         : [
-            "6 Safety Oversight Visits / Quarter",
+            "2 Safety Oversight Visits / Month",
             "Home Safety Score & Hazard Assessment",
             "Family Portal Access with Live Reports",
           ];
@@ -235,7 +235,7 @@ export async function getAllAdminPlans() {
             status: ver.status || "ACTIVE",
             price: ver.price,
             currency: ver.currency || "USD",
-            billingInterval: ver.billingInterval || plan.billingInterval || "QUARTERLY",
+            billingInterval: ver.billingInterval || plan.billingInterval || "MONTHLY",
             features: ver.features && ver.features.length > 0 ? ver.features : features,
             effectiveFrom: ver.effectiveFrom || ver.createdAt || plan.createdAt,
             effectiveTo: ver.effectiveTo || null,
@@ -258,7 +258,7 @@ export async function getAllAdminPlans() {
               status: "ACTIVE",
               price: plan.price,
               currency: "USD",
-              billingInterval: plan.billingInterval || "QUARTERLY",
+              billingInterval: plan.billingInterval || "MONTHLY",
               features,
               effectiveFrom: plan.createdAt,
               effectiveTo: null,
@@ -275,7 +275,7 @@ export async function getAllAdminPlans() {
       currentPrice: plan.price,
       price: plan.price,
       currency: "USD",
-      billingInterval: plan.billingInterval || "QUARTERLY",
+      billingInterval: plan.billingInterval || "MONTHLY",
       displayOrder: plan.displayOrder ?? 0,
       isActive: plan.isActive ?? true,
       isArchived: plan.isArchived ?? false,
@@ -329,13 +329,13 @@ export async function getAdminPlanById(planId: string) {
   const defaultFeatures =
     plan.code === "GUARDIAN_PLUS"
       ? [
-          "6 Safety Oversight Visits / Quarter",
-          "6 Home Cleaning Visits / Quarter",
+          "2 Safety Oversight Visits / Month",
+          "2 Home Cleaning Visits / Month",
           "HEPA Allergen Deep Vacuuming & Sanitization",
           "Home Safety Hazard Mitigation",
         ]
       : [
-          "6 Safety Oversight Visits / Quarter",
+          "2 Safety Oversight Visits / Month",
           "Home Safety Score & Hazard Assessment",
           "Family Portal Access with Live Reports",
         ];
@@ -364,7 +364,7 @@ export async function getAdminPlanById(planId: string) {
           status: ver.status || "ACTIVE",
           price: ver.price,
           currency: ver.currency || "USD",
-          billingInterval: ver.billingInterval || plan.billingInterval || "QUARTERLY",
+          billingInterval: ver.billingInterval || plan.billingInterval || "MONTHLY",
           features: ver.features && ver.features.length > 0 ? ver.features : planFeatures,
           effectiveFrom: ver.effectiveFrom || ver.createdAt || plan.createdAt,
           effectiveTo: ver.effectiveTo || null,
@@ -387,7 +387,7 @@ export async function getAdminPlanById(planId: string) {
             status: "ACTIVE",
             price: plan.price,
             currency: "USD",
-            billingInterval: plan.billingInterval || "QUARTERLY",
+            billingInterval: plan.billingInterval || "MONTHLY",
             features: planFeatures,
             effectiveFrom: plan.createdAt,
             effectiveTo: null,
@@ -1207,7 +1207,7 @@ export async function seedInitialPlansAndServices() {
     });
   }
 
-  // 1. Seed / Sync "Essential Guard" Plan ($995/Quarterly - 6 Safety Oversight Visits)
+  // 1. Seed / Sync "Essential Guard" Plan ($295/Monthly - 2 Safety Oversight Visits)
   let essentialPlan = await (prisma.servicePlan.findFirst as any)({
     where: { code: "ESSENTIAL_GUARD" },
   });
@@ -1217,32 +1217,36 @@ export async function seedInitialPlansAndServices() {
       name: "Essential Guard",
       code: "ESSENTIAL_GUARD",
       shortDescription: "Essential non-medical home safety oversight and hazard mitigation.",
-      fullDescription: "Comprehensive quarterly non-medical home safety oversight and hazard mitigation designed to protect and support independent senior living.",
-      price: 995,
-      billingInterval: "QUARTERLY",
+      fullDescription: "Comprehensive monthly non-medical home safety oversight and hazard mitigation designed to protect and support independent senior living.",
+      price: 295,
+      billingInterval: "MONTHLY",
       displayOrder: 1,
       features: [
-        "6 Safety Oversight Visits / Quarter",
+        "2 Safety Oversight Visits / Month",
         "Home Safety Score & Hazard Assessment",
         "Family Portal Access with Live Reports",
       ],
       services: [
         {
           serviceTypeId: safetyService.id,
-          allocatedVisits: 6,
+          allocatedVisits: 2,
           unit: "visits",
         },
       ],
       isActive: true,
     });
-  } else if (!essentialPlan.isActive || essentialPlan.isArchived) {
+  } else {
     essentialPlan = await (prisma.servicePlan.update as any)({
       where: { id: essentialPlan.id },
-      data: { isActive: true, isArchived: false },
+      data: {
+        isActive: true,
+        isArchived: false,
+        billingInterval: "MONTHLY",
+      },
     });
   }
 
-  // 2. Seed / Sync "Guardian Plus" Plan ($1892/Quarterly - 6 Safety + 6 Cleaning Visits)
+  // 2. Seed / Sync "Guardian Plus" Plan ($495/Monthly - 2 Safety + 2 Cleaning Visits)
   let guardianPlan = await (prisma.servicePlan.findFirst as any)({
     where: { code: "GUARDIAN_PLUS" },
   });
@@ -1252,13 +1256,13 @@ export async function seedInitialPlansAndServices() {
       name: "Guardian Plus",
       code: "GUARDIAN_PLUS",
       shortDescription: "Complete dual-protection safety oversight and specialized home cleaning.",
-      fullDescription: "Complete dual-protection safety oversight and specialized environmental home cleaning. Includes 12 total visits per quarter.",
-      price: 1892,
-      billingInterval: "QUARTERLY",
+      fullDescription: "Complete dual-protection monthly safety oversight and specialized environmental home cleaning. Includes 4 total visits per month.",
+      price: 495,
+      billingInterval: "MONTHLY",
       displayOrder: 2,
       features: [
-        "6 Safety Oversight Visits / Quarter",
-        "6 Home Cleaning Visits / Quarter",
+        "2 Safety Oversight Visits / Month",
+        "2 Home Cleaning Visits / Month",
         "HEPA Allergen Deep Vacuuming & Sanitization",
         "Home Safety Hazard Mitigation",
         "Direct Caregiver & Family Report Dispatch",
@@ -1266,23 +1270,43 @@ export async function seedInitialPlansAndServices() {
       services: [
         {
           serviceTypeId: safetyService.id,
-          allocatedVisits: 6,
+          allocatedVisits: 2,
           unit: "visits",
         },
         {
           serviceTypeId: cleaningService.id,
-          allocatedVisits: 6,
+          allocatedVisits: 2,
           unit: "visits",
         },
       ],
       isActive: true,
     });
-  } else if (!guardianPlan.isActive || guardianPlan.isArchived) {
+  } else {
     guardianPlan = await (prisma.servicePlan.update as any)({
       where: { id: guardianPlan.id },
-      data: { isActive: true, isArchived: false },
+      data: {
+        isActive: true,
+        isArchived: false,
+        billingInterval: "MONTHLY",
+      },
     });
   }
+
+  // 3. Migrate any existing database plan versions & prices to MONTHLY
+  try {
+    await (prisma.planVersion.updateMany as any)({
+      where: { billingInterval: "QUARTERLY" },
+      data: { billingInterval: "MONTHLY" },
+    });
+    await (prisma.planPrice.updateMany as any)({
+      where: { billingInterval: "QUARTERLY" },
+      data: { billingInterval: "MONTHLY" },
+    });
+    await (prisma.subscription.updateMany as any)({
+      where: { billingInterval: "QUARTERLY" },
+      data: { billingInterval: "MONTHLY" },
+    });
+  } catch {}
 
   return { safetyService, cleaningService, essentialPlan, guardianPlan };
 }
