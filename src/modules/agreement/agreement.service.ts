@@ -598,6 +598,10 @@ export async function getAllAdminAgreements(query?: { state?: string; status?: s
     const clientName = `${clientUser?.firstName || agr.clientPrintedName || "Client"} ${clientUser?.lastName || ""}`.trim();
     const clientEmail = clientUser?.email || agr.primaryBillingContact || "";
     const title = `${agr.state} Client Service Agreement`;
+    const primaryContactName = agr.client?.primaryContactName || clientName;
+    const primaryContactPhone = agr.client?.primaryContactPhone || clientUser?.phone || agr.signerPhone || null;
+    const primaryContactEmail = agr.client?.primaryContactEmail || clientEmail;
+    const primaryContactRelation = agr.client?.primaryContactRelation || (agr.signerRole === "RESIDENT" ? "Self" : "Representative");
 
     return {
       id: agr.id,
@@ -605,6 +609,10 @@ export async function getAllAdminAgreements(query?: { state?: string; status?: s
       clientNumber: agr.client?.clientNumber || agr.clientId,
       clientName,
       clientEmail,
+      primaryContactName,
+      primaryContactPhone,
+      primaryContactEmail,
+      primaryContactRelation,
       title,
       state: agr.state,
       version: agr.templateVersion || agr.agreementVersion?.versionNumber || "v2.0",
@@ -700,4 +708,69 @@ export async function sendAgreementReminder(adminUserId: string, agreementId: st
   } catch (err: any) {
     throw new Error(`Failed to send reminder: ${err.message}`);
   }
+}
+
+/**
+ * Admin Delete Service Agreement
+ */
+export async function deleteAgreement(adminUserId: string, agreementId: string) {
+  const agreement = await ((prisma as any).serviceAgreement.findUnique as any)({
+    where: { id: agreementId },
+  });
+
+  if (!agreement) {
+    throw new Error("Service Agreement not found.");
+  }
+
+  const clientId = agreement.clientId;
+
+  await ((prisma as any).serviceAgreement.delete as any)({
+    where: { id: agreementId },
+  });
+
+  // Check if client has any other active/signed agreements remaining
+  if (clientId) {
+    try {
+      const remainingAgreements = await ((prisma as any).serviceAgreement.findMany as any)({
+        where: {
+          clientId,
+          status: { in: ["SIGNED", "EXECUTED"] },
+        },
+      });
+
+      if (!remainingAgreements || remainingAgreements.length === 0) {
+        await ((prisma as any).client.update as any)({
+          where: { id: clientId },
+          data: {
+            hasCompletedAgreement: false,
+            onboardingStatus: OnboardingStatus.AGREEMENT_PENDING,
+          },
+        });
+      }
+    } catch (clientSyncErr) {
+      console.warn("Client state sync error after agreement deletion:", clientSyncErr);
+    }
+  }
+
+  try {
+    await ((prisma as any).auditLog.create as any)({
+      data: {
+        actorUserId: adminUserId,
+        action: "AGREEMENT_DELETED",
+        entityType: "SERVICE_AGREEMENT",
+        entityId: agreementId,
+        metadata: {
+          agreementState: agreement.state,
+          clientId: agreement.clientId,
+        },
+      },
+    });
+  } catch (auditErr) {
+    console.warn("Audit log creation error:", auditErr);
+  }
+
+  return {
+    success: true,
+    message: "Service Agreement deleted successfully.",
+  };
 }

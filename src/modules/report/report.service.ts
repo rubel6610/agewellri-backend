@@ -996,3 +996,43 @@ export async function getAdminReports(query: {
 
   return hydrateReports(reports);
 }
+
+/**
+ * ADMIN: Delete or Archive Report
+ */
+export async function deleteReport(actorUserId: string, reportId: string) {
+  const report = await (prisma.report.findUnique as any)({
+    where: { id: reportId },
+  });
+
+  if (report) {
+    await (prisma.report.delete as any)({
+      where: { id: reportId },
+    });
+  } else if (reportId.startsWith("rep_")) {
+    const visitId = reportId.replace("rep_", "");
+    await (prisma.assessment.deleteMany as any)({
+      where: { visitId },
+    });
+  } else {
+    throw new Error("Report not found.");
+  }
+
+  try {
+    await ((prisma as any).auditLog.create as any)({
+      data: {
+        actorUserId,
+        action: "REPORT_DELETED",
+        entityType: "REPORT",
+        entityId: reportId,
+      },
+    });
+  } catch (auditErr) {
+    console.warn("Audit log creation error:", auditErr);
+  }
+
+  return {
+    success: true,
+    message: "Report deleted successfully.",
+  };
+}

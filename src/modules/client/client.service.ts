@@ -78,7 +78,9 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
     },
   });
 
-  const unarchivedClients = (clients || []).filter((c: any) => c.isArchived !== true);
+  const unarchivedClients = (clients || []).filter(
+    (c: any) => c.isArchived !== true,
+  );
 
   const mapped = unarchivedClients.map((c: any) => {
     const latestAgreement = c.agreements?.[0] || null;
@@ -100,17 +102,27 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
     const paymentStatus = isSubActive
       ? "PAID"
       : latestInvoice?.status === "PAID"
-      ? "PAID"
-      : latestInvoice?.status === "OPEN"
-      ? "OPEN_INVOICE"
-      : "PENDING_PAYMENT";
+        ? "PAID"
+        : latestInvoice?.status === "OPEN"
+          ? "OPEN_INVOICE"
+          : "PENDING_PAYMENT";
 
-    const subscriptionStatus = latestSub?.status || (isSubActive ? "ACTIVE" : "PENDING");
+    const subscriptionStatus =
+      latestSub?.status || (isSubActive ? "ACTIVE" : "PENDING");
 
-    const isEnrolledAndPaid = isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
-    const totalVisitsAllowed = isEnrolledAndPaid ? (c.hasCleaningAddon ? 18 : 12) : 0;
+    const isEnrolledAndPaid =
+      isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
+    const totalVisitsAllowed = isEnrolledAndPaid
+      ? c.hasCleaningAddon
+        ? 18
+        : 12
+      : 0;
     const completedVisitsCount = 0;
-    const remainingVisitsCount = isEnrolledAndPaid ? (c.hasCleaningAddon ? 18 : 12) : 0;
+    const remainingVisitsCount = isEnrolledAndPaid
+      ? c.hasCleaningAddon
+        ? 18
+        : 12
+      : 0;
 
     return {
       id: c.clientNumber || c.id,
@@ -155,14 +167,20 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
       remainingVisitsCount,
       nextVisitDate: safeFormatDate(nextAppt?.startAt),
       renewalDate: safeFormatDate(latestSub?.currentPeriodEnd),
-      status: isEnrolledAndPaid ? "active" : isExecutedAgreement ? "pending_payment" : "pending_onboarding",
+      status: isEnrolledAndPaid
+        ? "active"
+        : isExecutedAgreement
+          ? "pending_payment"
+          : "pending_onboarding",
       createdAt: safeFormatDate(c.createdAt) || "Recently",
       // Onboarding Timeline Flags
       timeline: {
         welcomeSent: Boolean(latestInvitation || c.createdAt),
         accountCreated: true,
         signerSelected: Boolean(c.signerRole),
-        emergencyContactAdded: Boolean(c.emergencyContactName && c.emergencyContactPhone),
+        emergencyContactAdded: Boolean(
+          c.emergencyContactName && c.emergencyContactPhone,
+        ),
         stateSelected: Boolean(c.state),
         agreementSent: Boolean(latestAgreement || isExecutedAgreement),
         agreementSigned: isExecutedAgreement,
@@ -176,19 +194,22 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
 
   if (query?.search && query.search.trim()) {
     const term = query.search.trim().toLowerCase();
-    result = result.filter((c: any) =>
-      c.firstName.toLowerCase().includes(term) ||
-      c.lastName.toLowerCase().includes(term) ||
-      c.email.toLowerCase().includes(term) ||
-      c.phone.toLowerCase().includes(term) ||
-      c.clientNumber.toLowerCase().includes(term) ||
-      c.address.street.toLowerCase().includes(term) ||
-      c.address.city.toLowerCase().includes(term)
+    result = result.filter(
+      (c: any) =>
+        c.firstName.toLowerCase().includes(term) ||
+        c.lastName.toLowerCase().includes(term) ||
+        c.email.toLowerCase().includes(term) ||
+        c.phone.toLowerCase().includes(term) ||
+        c.clientNumber.toLowerCase().includes(term) ||
+        c.address.street.toLowerCase().includes(term) ||
+        c.address.city.toLowerCase().includes(term),
     );
   }
 
   if (query?.agreementStatus && query.agreementStatus !== "ALL") {
-    result = result.filter((c: any) => c.agreementStatus === query.agreementStatus);
+    result = result.filter(
+      (c: any) => c.agreementStatus === query.agreementStatus,
+    );
   }
 
   if (query?.page && query?.limit) {
@@ -227,7 +248,9 @@ export async function getAdminClientById(clientIdOrNumber: string) {
   const digits = trimmed.replace(/\D/g, "");
   if (digits.length >= 3) {
     orConditions.push({ clientNumber: `AW-${digits}` });
-    orConditions.push({ clientNumber: { contains: digits, mode: "insensitive" } });
+    orConditions.push({
+      clientNumber: { contains: digits, mode: "insensitive" },
+    });
   }
 
   // If valid 24-character hexadecimal MongoDB ObjectId, match id or userId
@@ -309,7 +332,7 @@ export async function getAdminClientById(clientIdOrNumber: string) {
   const latestSub = client.subscriptions?.[0] || null;
   const latestInvoice = client.invoices?.[0] || null;
   const nextAppt = client.appointments?.find((a: any) =>
-    ["SCHEDULED", "CONFIRMED"].includes(a.status)
+    ["SCHEDULED", "CONFIRMED"].includes(a.status),
   );
 
   const isExecutedAgreement =
@@ -325,10 +348,10 @@ export async function getAdminClientById(clientIdOrNumber: string) {
   const paymentStatus = isSubActive
     ? "PAID"
     : latestInvoice?.status === "PAID"
-    ? "PAID"
-    : latestInvoice?.status === "OPEN"
-    ? "OPEN_INVOICE"
-    : "PENDING_PAYMENT";
+      ? "PAID"
+      : latestInvoice?.status === "OPEN"
+        ? "OPEN_INVOICE"
+        : "PENDING_PAYMENT";
 
   return {
     id: client.clientNumber || client.id,
@@ -371,54 +394,82 @@ export async function getAdminClientById(clientIdOrNumber: string) {
     agreementSignedDate: safeFormatDate(latestAgreement?.signedAt),
     agreementDeadline: safeFormatDate(latestAgreement?.cancellationDeadline),
     paymentStatus,
-    subscriptionStatus: latestSub?.status || (isSubActive ? "ACTIVE" : "PENDING"),
+    subscriptionStatus:
+      latestSub?.status || (isSubActive ? "ACTIVE" : "PENDING"),
     cardBrand: client.cardBrand,
     cardLast4: client.cardLast4,
     totalVisitsAllowed: (() => {
-      const isEnrolledAndPaid = isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
+      const isEnrolledAndPaid =
+        isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
       if (!isEnrolledAndPaid) return 0;
       const currentPeriod = latestSub?.periods?.[0];
-      const entitlements = formatPeriodEntitlements(currentPeriod, client.appointments || []);
+      const entitlements = formatPeriodEntitlements(
+        currentPeriod,
+        client.appointments || [],
+      );
       if (entitlements.length > 0) {
         return entitlements.reduce((sum, item) => sum + item.allocated, 0);
       }
       return client.hasCleaningAddon ? 18 : 12;
     })(),
     completedVisitsCount: (() => {
-      const isEnrolledAndPaid = isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
+      const isEnrolledAndPaid =
+        isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
       if (!isEnrolledAndPaid) return 0;
       const currentPeriod = latestSub?.periods?.[0];
-      const entitlements = formatPeriodEntitlements(currentPeriod, client.appointments || []);
+      const entitlements = formatPeriodEntitlements(
+        currentPeriod,
+        client.appointments || [],
+      );
       if (entitlements.length > 0) {
         return entitlements.reduce((sum, item) => sum + item.completed, 0);
       }
-      return client.appointments?.filter((a: any) => a.status === "COMPLETED").length || 0;
+      return (
+        client.appointments?.filter((a: any) => a.status === "COMPLETED")
+          .length || 0
+      );
     })(),
     remainingVisitsCount: (() => {
-      const isEnrolledAndPaid = isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
+      const isEnrolledAndPaid =
+        isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
       if (!isEnrolledAndPaid) return 0;
       const currentPeriod = latestSub?.periods?.[0];
-      const entitlements = formatPeriodEntitlements(currentPeriod, client.appointments || []);
+      const entitlements = formatPeriodEntitlements(
+        currentPeriod,
+        client.appointments || [],
+      );
       if (entitlements.length > 0) {
         return entitlements.reduce((sum, item) => sum + item.remaining, 0);
       }
-      return (client.hasCleaningAddon ? 18 : 12) - (client.appointments?.filter((a: any) => a.status === "COMPLETED").length || 0);
+      return (
+        (client.hasCleaningAddon ? 18 : 12) -
+        (client.appointments?.filter((a: any) => a.status === "COMPLETED")
+          .length || 0)
+      );
     })(),
     visitEntitlements: (() => {
-      const isEnrolledAndPaid = isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
+      const isEnrolledAndPaid =
+        isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
       if (!isEnrolledAndPaid) return [];
       const currentPeriod = latestSub?.periods?.[0];
       return formatPeriodEntitlements(currentPeriod, client.appointments || []);
     })(),
     nextVisitDate: safeFormatDate(nextAppt?.startAt),
     renewalDate: safeFormatDate(latestSub?.currentPeriodEnd),
-    status: isExecutedAgreement && (isSubActive || paymentStatus === "PAID") ? "active" : isExecutedAgreement ? "pending_payment" : "pending_onboarding",
+    status:
+      isExecutedAgreement && (isSubActive || paymentStatus === "PAID")
+        ? "active"
+        : isExecutedAgreement
+          ? "pending_payment"
+          : "pending_onboarding",
     createdAt: safeFormatDate(client.createdAt) || "Recently",
     timeline: {
       welcomeSent: Boolean(client.invitations?.length || client.createdAt),
       accountCreated: true,
       signerSelected: Boolean(client.signerRole),
-      emergencyContactAdded: Boolean(client.emergencyContactName && client.emergencyContactPhone),
+      emergencyContactAdded: Boolean(
+        client.emergencyContactName && client.emergencyContactPhone,
+      ),
       stateSelected: Boolean(client.state),
       agreementSent: Boolean(latestAgreement || isExecutedAgreement),
       agreementSigned: isExecutedAgreement,
@@ -430,7 +481,10 @@ export async function getAdminClientById(clientIdOrNumber: string) {
   };
 }
 
-export function formatAuditLogDescription(action: string, metadata: any): string {
+export function formatAuditLogDescription(
+  action: string,
+  metadata: any,
+): string {
   if (!metadata) {
     return (action || "")
       .replace(/_/g, " ")
@@ -470,12 +524,18 @@ export function formatAuditLogDescription(action: string, metadata: any): string
 
   const formatPlanName = (p?: string) => {
     if (!p) return "Membership";
-    return p.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+    return p
+      .replace(/_/g, " ")
+      .toLowerCase()
+      .replace(/\b\w/g, (c) => c.toUpperCase());
   };
 
   const formatRole = (r?: string) => {
     if (!r) return "";
-    return r.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+    return r
+      .replace(/_/g, " ")
+      .toLowerCase()
+      .replace(/\b\w/g, (c) => c.toUpperCase());
   };
 
   const stateNames: Record<string, string> = {
@@ -488,7 +548,9 @@ export function formatAuditLogDescription(action: string, metadata: any): string
     const signer = data.signerName || "Member";
     const role = formatRole(data.signerRole);
     const state = stateNames[data.state] || data.state || "Rhode Island";
-    const deadline = data.cancellationDeadline ? formatDate(data.cancellationDeadline) : null;
+    const deadline = data.cancellationDeadline
+      ? formatDate(data.cancellationDeadline)
+      : null;
     let text = `Service agreement executed for ${state} by ${signer}${role ? ` (${role})` : ""}.`;
     if (deadline) {
       text += ` Statutory cancellation deadline: ${deadline}.`;
@@ -504,13 +566,17 @@ export function formatAuditLogDescription(action: string, metadata: any): string
 
   if (act.includes("SUBSCRIPTION_ACTIVATED")) {
     const plan = formatPlanName(data.plan);
-    const price = data.totalPrice ? `$${Number(data.totalPrice).toFixed(2)}` : null;
+    const price = data.totalPrice
+      ? `$${Number(data.totalPrice).toFixed(2)}`
+      : null;
     const method = data.billingMethod
       ? data.billingMethod === "AUTOMATIC"
         ? "billed automatically"
         : data.billingMethod.replace(/_/g, " ").toLowerCase()
       : "billed automatically";
-    const invoice = data.invoiceNumber ? `Invoice #${data.invoiceNumber}` : null;
+    const invoice = data.invoiceNumber
+      ? `Invoice #${data.invoiceNumber}`
+      : null;
     const parts = [
       `${plan} plan subscription activated`,
       price ? `(${price} / ${method})` : null,
@@ -526,32 +592,50 @@ export function formatAuditLogDescription(action: string, metadata: any): string
   }
 
   if (act.includes("PAYMENT_PROCESSED") || act.includes("PAYMENT_SUCCEEDED")) {
-    const amount = data.amount || data.totalPrice ? `$${Number(data.amount || data.totalPrice).toFixed(2)}` : "Payment";
+    const amount =
+      data.amount || data.totalPrice
+        ? `$${Number(data.amount || data.totalPrice).toFixed(2)}`
+        : "Payment";
     const plan = data.plan ? ` for ${formatPlanName(data.plan)} plan` : "";
-    const invoice = data.invoiceNumber ? ` (Invoice #${data.invoiceNumber})` : "";
+    const invoice = data.invoiceNumber
+      ? ` (Invoice #${data.invoiceNumber})`
+      : "";
     return `${amount} processed successfully${plan}${invoice}.`;
   }
 
   if (act.includes("REPORT_UPLOADED")) {
     const title = data.title || "Visit Report";
-    const specialist = data.specialistName ? ` from ${data.specialistName}` : "";
+    const specialist = data.specialistName
+      ? ` from ${data.specialistName}`
+      : "";
     return `Official PDF report "${title}"${specialist} uploaded and published to member portal.`;
   }
 
-  if (act.includes("APPOINTMENT_SCHEDULED") || act.includes("VISIT_SCHEDULED")) {
+  if (
+    act.includes("APPOINTMENT_SCHEDULED") ||
+    act.includes("VISIT_SCHEDULED")
+  ) {
     const service = data.serviceType || "Visit";
     const date = data.date ? formatDate(data.date) : "scheduled date";
     const time = data.timeSlot ? ` (${data.timeSlot})` : "";
-    const specialist = data.technicianName ? ` with specialist ${data.technicianName}` : "";
+    const specialist = data.technicianName
+      ? ` with specialist ${data.technicianName}`
+      : "";
     return `${service} booked for ${date}${time}${specialist}.`;
   }
 
-  if (act.includes("APPOINTMENT_COMPLETED") || act.includes("VISIT_COMPLETED")) {
+  if (
+    act.includes("APPOINTMENT_COMPLETED") ||
+    act.includes("VISIT_COMPLETED")
+  ) {
     const service = data.serviceType || "Visit";
     return `${service} marked as completed.`;
   }
 
-  if (act.includes("APPOINTMENT_CANCELLED") || act.includes("VISIT_CANCELLED")) {
+  if (
+    act.includes("APPOINTMENT_CANCELLED") ||
+    act.includes("VISIT_CANCELLED")
+  ) {
     const reason = data.reason ? ` Reason: ${data.reason}` : "";
     return `Visit appointment was cancelled.${reason}`;
   }
@@ -637,7 +721,9 @@ export function formatClientDetail(client: any, auditLogs: any[] = []): any {
       welcomeSent: true,
       accountCreated: Boolean(client.user?.id),
       signerSelected: Boolean(client.signerRole),
-      emergencyContactAdded: Boolean(client.emergencyContactName && client.emergencyContactPhone),
+      emergencyContactAdded: Boolean(
+        client.emergencyContactName && client.emergencyContactPhone,
+      ),
       stateSelected: Boolean(client.state),
       agreementSent: Boolean(latestAgreement || isExecutedAgreement),
       agreementSigned: isExecutedAgreement,
@@ -694,8 +780,14 @@ export async function getAdminDashboardStats() {
     (prisma.client.findMany as any)({
       where: { isArchived: false },
       include: {
-        user: { select: { firstName: true, lastName: true, email: true, phone: true } },
-        subscriptions: { where: { status: "ACTIVE" }, take: 1, include: { plan: true } },
+        user: {
+          select: { firstName: true, lastName: true, email: true, phone: true },
+        },
+        subscriptions: {
+          where: { status: "ACTIVE" },
+          take: 1,
+          include: { plan: true },
+        },
         agreements: { orderBy: { createdAt: "desc" }, take: 1 },
       },
     }),
@@ -738,7 +830,13 @@ export async function getAdminDashboardStats() {
     }),
     (prisma.invoice.findMany as any)({
       where: { isArchived: false },
-      select: { id: true, status: true, amount: true, createdAt: true, paidAt: true },
+      select: {
+        id: true,
+        status: true,
+        amount: true,
+        createdAt: true,
+        paidAt: true,
+      },
     }),
     (prisma.subscription.findMany as any)({
       where: { status: "ACTIVE" },
@@ -777,58 +875,63 @@ export async function getAdminDashboardStats() {
     (c: any) =>
       c.onboardingStatus === "COMPLETED" ||
       c.subscriptions?.length > 0 ||
-      c.agreements?.[0]?.status === "EXECUTED"
+      c.agreements?.[0]?.status === "EXECUTED",
   );
   const pendingOnboarding = allClients.filter(
-    (c: any) => !activeClients.some((ac: any) => ac.id === c.id)
+    (c: any) => !activeClients.some((ac: any) => ac.id === c.id),
   );
   const newClientsThisMonth = allClients.filter(
-    (c: any) => new Date(c.createdAt) >= startOfMonth
+    (c: any) => new Date(c.createdAt) >= startOfMonth,
   ).length;
 
   // Appointment & Visit Metrics
-  const completedVisits = allAppointments.filter((a: any) => a.status === "COMPLETED");
+  const completedVisits = allAppointments.filter(
+    (a: any) => a.status === "COMPLETED",
+  );
   const upcomingVisitsCount = upcomingAppointments.length;
 
   // Report Metrics
   const uploadedReportApptIds = new Set(
-    allReports.map((r: any) => r.visit?.appointmentId).filter(Boolean)
+    allReports.map((r: any) => r.visit?.appointmentId).filter(Boolean),
   );
   const uploadedReportVisitIds = new Set(
-    allReports.map((r: any) => r.visitId || r.visit?.id).filter(Boolean)
+    allReports.map((r: any) => r.visitId || r.visit?.id).filter(Boolean),
   );
   const reportsPendingCount = completedVisits.filter(
     (a: any) =>
       !uploadedReportApptIds.has(a.id) &&
-      (!a.visit?.id || !uploadedReportVisitIds.has(a.visit.id))
+      (!a.visit?.id || !uploadedReportVisitIds.has(a.visit.id)),
   ).length;
 
   // Agreement Metrics
   const executedAgreementsCount = allAgreements.filter(
-    (a: any) => a.status === "EXECUTED" || a.status === "SIGNED" || Boolean(a.signedAt)
+    (a: any) =>
+      a.status === "EXECUTED" || a.status === "SIGNED" || Boolean(a.signedAt),
   ).length;
   const pendingAgreementsCount = allAgreements.filter(
-    (a: any) => a.status === "DRAFT" || a.status === "PENDING_SIGNATURE" || !a.signedAt
+    (a: any) =>
+      a.status === "DRAFT" || a.status === "PENDING_SIGNATURE" || !a.signedAt,
   ).length;
 
   // Billing & Invoices Metrics
   const paidInvoices = allInvoices.filter((i: any) => i.status === "PAID");
   const openInvoices = allInvoices.filter(
-    (i: any) => i.status === "OPEN" || i.status === "DRAFT"
+    (i: any) => i.status === "OPEN" || i.status === "DRAFT",
   );
   const totalRevenueCollected = paidInvoices.reduce(
     (sum: number, i: any) => sum + (i.amount || 0),
-    0
+    0,
   );
   const totalPendingInvoicesAmount = openInvoices.reduce(
     (sum: number, i: any) => sum + (i.amount || 0),
-    0
+    0,
   );
 
   // Plan Distribution Breakdown
   const planDistribution: Record<string, number> = {};
   allClients.forEach((c: any) => {
-    const planName = c.subscriptions?.[0]?.plan?.name || c.selectedPlan || "Guardian Plus";
+    const planName =
+      c.subscriptions?.[0]?.plan?.name || c.selectedPlan || "Guardian Plus";
     planDistribution[planName] = (planDistribution[planName] || 0) + 1;
   });
 
@@ -852,7 +955,8 @@ export async function getAdminDashboardStats() {
       id: "attn_agreements",
       type: "AGREEMENT",
       title: `${pendingAgreementsCount} Service Agreement${pendingAgreementsCount > 1 ? "s" : ""} Pending Signature`,
-      description: "Members have not executed their state service agreements yet.",
+      description:
+        "Members have not executed their state service agreements yet.",
       actionLabel: "View Agreements",
       actionHref: "/admin/agreements",
       urgency: "HIGH",
@@ -865,7 +969,8 @@ export async function getAdminDashboardStats() {
       id: "attn_reports",
       type: "REPORT",
       title: `${reportsPendingCount} Completed Visit${reportsPendingCount > 1 ? "s" : ""} Missing Reports`,
-      description: "Care specialists have finished home visits requiring official PDF report uploads.",
+      description:
+        "Safety specialists have finished home visits requiring official PDF report uploads.",
       actionLabel: "View Completed Visits",
       actionHref: "/admin/appointments?tab=COMPLETED",
       urgency: "HIGH",
@@ -891,7 +996,8 @@ export async function getAdminDashboardStats() {
       id: "attn_onboarding",
       type: "ONBOARDING",
       title: `${pendingOnboarding.length} Client${pendingOnboarding.length > 1 ? "s" : ""} Incomplete Onboarding`,
-      description: "New members currently completing intake questionnaire or credentials.",
+      description:
+        "New members currently completing intake questionnaire or credentials.",
       actionLabel: "View Clients",
       actionHref: "/admin/clients",
       urgency: "LOW",
@@ -936,8 +1042,10 @@ export async function getAdminDashboardStats() {
       name: `${c.user?.firstName || "Client"} ${c.user?.lastName || ""}`.trim(),
       email: c.user?.email || c.primaryContactEmail || "N/A",
       state: c.state || "RI",
-      planName: c.subscriptions?.[0]?.plan?.name || c.selectedPlan || "Guardian Plus",
-      status: c.onboardingStatus === "COMPLETED" ? "active" : "pending_onboarding",
+      planName:
+        c.subscriptions?.[0]?.plan?.name || c.selectedPlan || "Guardian Plus",
+      status:
+        c.onboardingStatus === "COMPLETED" ? "active" : "pending_onboarding",
       createdAt: safeFormatDate(c.createdAt) || "Recently",
     })),
     attentionItems,

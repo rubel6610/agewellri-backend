@@ -285,3 +285,38 @@ export async function handleUploadAuthorityDocument(
   }
 }
 
+/**
+ * DELETE /api/v1/agreements/admin/:id
+ * Admin delete agreement
+ */
+export async function handleDeleteAgreement(
+  req: AuthenticatedRequest,
+  res: Response,
+  _next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      sendResponse(res, {
+        statusCode: 403,
+        success: false,
+        message: "Access restricted to administrators.",
+      });
+      return;
+    }
+
+    const result = await agreementService.deleteAgreement(req.user.id, req.params.id as string);
+    sendResponse(res, {
+      statusCode: 200,
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (error: any) {
+    sendResponse(res, {
+      statusCode: 400,
+      success: false,
+      message: error.message || "Failed to delete service agreement.",
+    });
+  }
+}
+

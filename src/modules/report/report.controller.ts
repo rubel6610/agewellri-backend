@@ -8,6 +8,7 @@ import {
   getReportById,
   getMyReports,
   getAdminReports,
+  deleteReport,
 } from "./report.service";
 import { SubmitAssessmentInputSchema } from "./report.validation";
 
@@ -231,6 +232,36 @@ export async function handleGetAdminReports(req: Request, res: Response) {
     res.status(500).json({
       success: false,
       message: err.message || "Failed to retrieve reports.",
+    });
+  }
+}
+
+/**
+ * ADMIN: Delete Report
+ */
+export async function handleDeleteReport(req: Request, res: Response) {
+  try {
+    const actorUserId = (req as any).user?.id;
+    const actorRole = (req as any).user?.role;
+    if (actorRole !== "ADMIN") {
+      return res.status(403).json({
+        success: false,
+        message: "Forbidden: Admin privileges required.",
+      });
+    }
+
+    const reportId = String(req.params.id);
+    const result = await deleteReport(actorUserId, reportId);
+
+    res.status(200).json({
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (err: any) {
+    res.status(400).json({
+      success: false,
+      message: err.message || "Failed to delete report.",
     });
   }
 }

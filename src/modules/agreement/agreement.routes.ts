@@ -10,6 +10,7 @@ import {
   handleGetAdminAgreements,
   handleSendAgreementReminder,
   handleUploadAuthorityDocument,
+  handleDeleteAgreement,
 } from "./agreement.controller";
 import { handleAuthorityDocFileUpload } from "../../middlewares/upload.middleware";
 
@@ -67,7 +68,6 @@ router.get(
 router.get(
   "/admin/all",
   authenticate,
-  cacheResponse({ ttlSeconds: 300, tags: ["agreements"], isPrivate: true }),
   handleGetAdminAgreements
 );
 
@@ -76,6 +76,13 @@ router.post(
   authenticate,
   invalidateCacheTags("agreements"),
   handleSendAgreementReminder
+);
+
+router.delete(
+  "/admin/:id",
+  authenticate,
+  invalidateCacheTags("agreements", "clients"),
+  handleDeleteAgreement
 );
 
 export default router;

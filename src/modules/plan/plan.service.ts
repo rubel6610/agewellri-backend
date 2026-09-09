@@ -1173,7 +1173,7 @@ export async function seedInitialPlansAndServices() {
         name: "Safety Oversight",
         code: "SAFETY_OVERSIGHT",
         category: "SAFETY_OVERSIGHT",
-        description: "Quarterly or bi-weekly home safety audits, hazard checks and wellness reports.",
+        description: "Monthly home safety audits, hazard checks and wellness reports.",
         durationMinutes: 60,
         defaultPrice: 150,
         displayOrder: 1,
