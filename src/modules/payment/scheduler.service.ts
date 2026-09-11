@@ -59,9 +59,9 @@ export async function checkAndSendRenewalReminders() {
       }
 
       const clientUser = sub.client.user;
-      const clientName = `${clientUser.firstName || ""} ${clientUser.lastName || ""}`.trim() || "Valued Client";
-      const planName = sub.client?.selectedPlan || "Guardian Plus";
-      const contractedPrice = sub.contractedPrice ?? (planName.includes("Essential") ? 995 : 1892);
+      const clientName = clientUser ? `${clientUser.firstName || ""} ${clientUser.lastName || ""}`.trim() || "Valued Member" : "Valued Member";
+      const planName = (sub as any).planVersion?.name || sub.plan?.name || sub.client?.selectedPlan || "Service Plan";
+      const contractedPrice = sub.contractedPrice ?? sub.plan?.price ?? 0;
 
       // Determine recipients: Primary client and designated authorized contact
       const recipients: { email: string; role: string; name?: string }[] = [];

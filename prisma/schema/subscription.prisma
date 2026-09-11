@@ -11,7 +11,7 @@ model Subscription {
   contractedPrice         Float?
   currency                String             @default("USD")
   status                  SubscriptionStatus @default(PENDING)
-  billingInterval         BillingInterval    @default(QUARTERLY)
+  billingInterval         BillingInterval    @default(MONTHLY)
   billingMethod           BillingMethod      @default(AUTOMATIC)
   currentPeriodStart      DateTime
   currentPeriodEnd        DateTime

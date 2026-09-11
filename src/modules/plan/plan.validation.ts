@@ -2,7 +2,10 @@ import { z } from "zod";
 
 export const planServiceItemSchema = z.object({
   serviceTypeId: z.string().min(1, "Valid serviceTypeId is required"),
-  allocatedVisits: z.number().int().min(0, "Allocated visits must be 0 or more"),
+  allocatedVisits: z
+    .number()
+    .int()
+    .min(0, "Allocated visits must be 0 or more"),
   unit: z.string().default("visits").optional(),
   durationMinutes: z.number().int().positive().optional(),
 });
@@ -12,12 +15,17 @@ export const createPlanSchema = z.object({
   code: z
     .string()
     .min(2, "Plan code is required")
-    .regex(/^[A-Z0-9_-]+$/i, "Code must contain only letters, numbers, hyphens or underscores"),
+    .regex(
+      /^[A-Z0-9_-]+$/i,
+      "Code must contain only letters, numbers, hyphens or underscores",
+    ),
   shortDescription: z.string().optional(),
   fullDescription: z.string().optional(),
   price: z.number().positive("Price must be greater than zero"),
   currency: z.string().default("USD").optional(),
-  billingInterval: z.enum(["MONTHLY", "QUARTERLY", "ANNUAL", "ONE_TIME"]).default("MONTHLY"),
+  billingInterval: z
+    .enum(["MONTHLY", "MONTHLY", "ANNUAL", "ONE_TIME"])
+    .default("MONTHLY"),
   displayOrder: z.number().int().default(0).optional(),
   supportsAutomaticBilling: z.boolean().default(true).optional(),
   supportsInvoiceBilling: z.boolean().default(true).optional(),
@@ -34,7 +42,9 @@ export const updatePlanSchema = z.object({
   fullDescription: z.string().optional(),
   price: z.number().positive().optional(),
   currency: z.string().optional(),
-  billingInterval: z.enum(["MONTHLY", "QUARTERLY", "ANNUAL", "ONE_TIME"]).optional(),
+  billingInterval: z
+    .enum(["MONTHLY", "MONTHLY", "ANNUAL", "ONE_TIME"])
+    .optional(),
   displayOrder: z.number().int().optional(),
   supportsAutomaticBilling: z.boolean().optional(),
   supportsInvoiceBilling: z.boolean().optional(),
@@ -53,7 +63,9 @@ export const changePlanStatusSchema = z.object({
 export const createServiceSchema = z.object({
   name: z.string().min(2, "Service name is required"),
   code: z.string().optional(),
-  category: z.enum(["CLEANING", "SAFETY_OVERSIGHT", "ASSESSMENT", "WELLNESS", "OTHER"]).default("SAFETY_OVERSIGHT"),
+  category: z
+    .enum(["CLEANING", "SAFETY_OVERSIGHT", "ASSESSMENT", "WELLNESS", "OTHER"])
+    .default("SAFETY_OVERSIGHT"),
   description: z.string().optional(),
   durationMinutes: z.number().int().positive().default(60),
   defaultPrice: z.number().positive().optional(),
@@ -64,7 +76,9 @@ export const createServiceSchema = z.object({
 export const updateServiceSchema = z.object({
   name: z.string().min(2).optional(),
   code: z.string().optional(),
-  category: z.enum(["CLEANING", "SAFETY_OVERSIGHT", "ASSESSMENT", "WELLNESS", "OTHER"]).optional(),
+  category: z
+    .enum(["CLEANING", "SAFETY_OVERSIGHT", "ASSESSMENT", "WELLNESS", "OTHER"])
+    .optional(),
   description: z.string().optional(),
   durationMinutes: z.number().int().positive().optional(),
   defaultPrice: z.number().positive().optional(),
@@ -81,4 +95,6 @@ export type UpdatePlanInput = z.infer<typeof updatePlanSchema>;
 export type ChangePlanStatusInput = z.infer<typeof changePlanStatusSchema>;
 export type CreateServiceInput = z.infer<typeof createServiceSchema>;
 export type UpdateServiceInput = z.infer<typeof updateServiceSchema>;
-export type ChangeServiceStatusInput = z.infer<typeof changeServiceStatusSchema>;
+export type ChangeServiceStatusInput = z.infer<
+  typeof changeServiceStatusSchema
+>;

@@ -76,7 +76,7 @@ export async function sendWelcomeInvitation(
         invitationLink,
         expiresAt,
         state: input.state,
-        planName: input.planName,
+        planName: input.planName || undefined,
       });
     } catch (emailErr) {
       console.warn("[WARN] Invitation email delivery failed (link still generated):", emailErr);
@@ -377,7 +377,7 @@ export async function resendInvitation(adminUserId: string, invitationId: string
     email: oldInvitation.email,
     clientId: oldInvitation.clientId,
     state: "RI",
-    planName: "Guardian Plus",
+    planName: (oldInvitation as any).client?.selectedPlan || undefined,
     expiresInDays: 7,
   });
 }

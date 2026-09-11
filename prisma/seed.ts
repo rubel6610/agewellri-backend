@@ -54,9 +54,9 @@ async function main() {
   console.log(`🆔 ID:       ${adminUser.id}`);
   console.log("=======================================================\n");
 
-  console.log("📦 Seeding initial dynamic service plans & catalog...");
+  console.log("📦 Initializing service catalog types...");
   await seedInitialPlansAndServices();
-  console.log("✅ Service plans & services catalog ready!");
+  console.log("✅ Service types ready!");
 
   console.log("👷 Seeding default Rhode Island safety specialists...");
   await seedDefaultSpecialists();

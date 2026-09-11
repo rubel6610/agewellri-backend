@@ -14,7 +14,7 @@ export interface SendRenewalReminderEmailOptions {
   planName: string;
   renewalDate: Date;
   recurringPrice: number;
-  billingInterval: "MONTHLY" | "QUARTERLY" | "ANNUAL" | string;
+  billingInterval: "MONTHLY" | "MONTHLY" | "ANNUAL" | string;
   billingMethod: "AUTOMATIC" | "INVOICE" | string;
   cardBrand?: string;
   cardLast4?: string;
@@ -91,7 +91,7 @@ export interface SendPlanPurchaseConfirmationEmailOptions {
   hasCleaningAddon?: boolean;
   amount: number;
   currency?: string;
-  billingInterval?: "MONTHLY" | "QUARTERLY" | "ANNUAL" | "ONE_TIME" | string;
+  billingInterval?: "MONTHLY" | "MONTHLY" | "ANNUAL" | "ONE_TIME" | string;
   billingMethod?: "AUTOMATIC" | "INVOICE" | string;
   paymentStatus?: "PAID" | "PENDING_INVOICE" | string;
   cardBrand?: string;
@@ -282,8 +282,8 @@ export async function sendBillingRenewalReminderEmail(
   });
 
   const intervalLabel =
-    billingInterval === "QUARTERLY"
-      ? "Quarterly"
+    billingInterval === "MONTHLY"
+      ? "MONTHLY"
       : billingInterval === "ANNUAL"
         ? "Annual"
         : "Monthly";
@@ -293,8 +293,8 @@ export async function sendBillingRenewalReminderEmail(
   const subject =
     billingInterval === "ANNUAL"
       ? `Annual Service Renewal Notice: Your AgeWellRI Membership Plan`
-      : billingInterval === "QUARTERLY"
-        ? `Upcoming Renewal Notice: Your AgeWellRI Quarterly Service Contract`
+      : billingInterval === "MONTHLY"
+        ? `Upcoming Renewal Notice: Your AgeWellRI MONTHLY Service Contract`
         : `Upcoming Bill Notice: Your AgeWellRI Monthly Service Plan`;
 
   const content = `
@@ -738,8 +738,8 @@ export async function sendPlanPurchaseConfirmationEmail(
 
   const isPaid = paymentStatus === "PAID";
   const intervalLabel =
-    billingInterval === "QUARTERLY"
-      ? "Quarterly (Every 3 Months)"
+    billingInterval === "MONTHLY"
+      ? "MONTHLY (Every 3 Months)"
       : billingInterval === "ANNUAL"
         ? "Annual"
         : billingInterval === "ONE_TIME"
@@ -1395,7 +1395,7 @@ export async function sendReportAvailableEmail(
   return { success: true, mode: "console" };
 }
 
-export interface SendQuarterlyRenewalActiveEmailOptions {
+export interface SendMONTHLYRenewalActiveEmailOptions {
   to: string | string[];
   clientName: string;
   planName: string;
@@ -1414,8 +1414,8 @@ export interface SendQuarterlyRenewalActiveEmailOptions {
   supportEmail?: string;
 }
 
-export async function sendQuarterlyRenewalActiveEmail(
-  options: SendQuarterlyRenewalActiveEmailOptions,
+export async function sendMONTHLYRenewalActiveEmail(
+  options: SendMONTHLYRenewalActiveEmailOptions,
 ): Promise<{ success: boolean; messageId?: string; mode: string }> {
   const {
     to,
@@ -1432,8 +1432,8 @@ export async function sendQuarterlyRenewalActiveEmail(
     supportEmail = "support@agewellri.com",
   } = options;
 
-  const isQuarterly = billingInterval?.toUpperCase() === "QUARTERLY";
-  const intervalTitle = isQuarterly ? "Quarter" : "Monthly";
+  const isMONTHLY = billingInterval?.toUpperCase() === "MONTHLY";
+  const intervalTitle = isMONTHLY ? "Quarter" : "Monthly";
   const subject = `Your New AgeWellRI ${intervalTitle} Service Period is Active — Schedule Your Visits`;
 
   const formattedStart = periodStartDate.toLocaleDateString("en-US", {
@@ -1528,7 +1528,7 @@ export async function sendQuarterlyRenewalActiveEmail(
       return { success: true, messageId: info.messageId, mode: "smtp" };
     } catch (err: any) {
       console.warn(
-        `[EMAIL SERVICE] Quarterly renewal active SMTP error: ${err.message}`,
+        `[EMAIL SERVICE] MONTHLY renewal active SMTP error: ${err.message}`,
       );
       return { success: true, mode: "console" };
     }
@@ -1895,6 +1895,262 @@ export async function sendReportToFamilyRecipientEmail(
     } catch (err: any) {
       console.warn(
         `[EMAIL SERVICE] Report to family SMTP error: ${err.message}`,
+      );
+      return { success: true, mode: "console" };
+    }
+  }
+
+  return { success: true, mode: "console" };
+}
+
+export interface SendSubscriptionCancelledEmailOptions {
+  to: string | string[];
+  clientName: string;
+  planName: string;
+  serviceEndDate: Date | string;
+  portalUrl?: string;
+  supportPhone?: string;
+  supportEmail?: string;
+}
+
+/**
+ * Subscription Cancellation Confirmation Email
+ */
+export async function sendSubscriptionCancelledEmail(
+  options: SendSubscriptionCancelledEmailOptions,
+): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
+  const {
+    to,
+    clientName,
+    planName,
+    serviceEndDate,
+    portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
+    supportPhone = "(401) 712-3012",
+    supportEmail = "support@agewellri.com",
+  } = options;
+
+  const formattedEndDate =
+    typeof serviceEndDate === "string" && isNaN(Date.parse(serviceEndDate))
+      ? serviceEndDate
+      : new Date(serviceEndDate).toLocaleDateString("en-US", {
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        });
+
+  const subject = "Your AgeWellRI Plan Cancellation Has Been Received";
+
+  const content = `
+    <div class="greeting">Hello ${clientName},</div>
+    <div class="message" style="font-size: 15px; font-weight: 700; color: #243746; margin-bottom: 12px;">
+      Your cancellation has been received.
+    </div>
+    <div class="message" style="margin-bottom: 20px;">
+      Your service will end on <strong>${formattedEndDate}</strong>. You won't be charged again.
+    </div>
+
+    <div class="highlight-card" style="border-left: 4px solid #C28A3A; background: #FFFBEB;">
+      <div style="font-size: 13px; font-weight: 800; color: #92400E; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; border-bottom: 1px solid #FDE68A; padding-bottom: 6px;">
+        📋 Cancellation Details
+      </div>
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Client:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${clientName}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Plan:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${planName}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Service End Date:</td>
+          <td style="padding: 6px 0; color: #92400E; font-weight: 800; text-align: right;">${formattedEndDate}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Auto-Renewal Status:</td>
+          <td style="padding: 6px 0; color: #92400E; font-weight: 800; text-align: right;">Turned Off (No Future Charges)</td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="message" style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 16px;">
+      A confirmation of your cancellation has been recorded. Your scheduled safety visits and support continue through the end of your current paid period (<strong>${formattedEndDate}</strong>).
+    </div>
+
+    <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 13px; color: #294B68; line-height: 1.6; margin-bottom: 24px;">
+      <strong>We're sorry to see you go — you're always welcome back.</strong><br>
+      You can sign in again anytime to reactivate your plan or manage your care coordination services.
+    </div>
+
+    <div style="text-align: center; margin: 24px 0;">
+      <a href="${portalUrl}/dashboard/billing" class="btn-primary" style="display: inline-block; padding: 14px 28px; background: #294B68; color: #ffffff; text-decoration: none; font-weight: 800; font-size: 14px; border-radius: 12px;">
+        View Client Portal →
+      </a>
+    </div>
+
+    <div style="font-size: 12px; color: #64748B; line-height: 1.5; border-top: 1px solid #D9E4EC; padding-top: 16px;">
+      Questions or need assistance? Our local Rhode Island team is here for you at <strong>${supportPhone}</strong> or <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>.
+    </div>
+  `;
+
+  const htmlContent = wrapHtmlEmail(subject, content);
+  const recipientString = Array.isArray(to) ? to.join(", ") : to;
+
+  console.log(`\n======================================================`);
+  console.log(
+    `🛑 [EMAIL SERVICE] Cancellation Confirmation dispatched to: ${recipientString}`,
+  );
+  console.log(
+    `Client: ${clientName} | Plan: ${planName} | Service Ends: ${formattedEndDate}`,
+  );
+  console.log(`======================================================\n`);
+
+  const transporter = createTransporter();
+  if (transporter) {
+    try {
+      const info = await transporter.sendMail({
+        from: getDefaultFromAddress("AgeWellRI Billing Services"),
+        to: recipientString,
+        subject,
+        html: htmlContent,
+      });
+      return { success: true, messageId: info.messageId, mode: "smtp" };
+    } catch (err: any) {
+      console.warn(
+        `[EMAIL SERVICE] Subscription cancelled SMTP error: ${err.message}`,
+      );
+      return { success: true, mode: "console" };
+    }
+  }
+
+  return { success: true, mode: "console" };
+}
+
+export interface SendSubscriptionReactivatedEmailOptions {
+  to: string | string[];
+  clientName: string;
+  planName: string;
+  nextBillingDate?: Date | string | null;
+  recurringAmount?: number | string | null;
+  portalUrl?: string;
+  supportPhone?: string;
+  supportEmail?: string;
+}
+
+/**
+ * Subscription Reactivation Confirmation Email
+ */
+export async function sendSubscriptionReactivatedEmail(
+  options: SendSubscriptionReactivatedEmailOptions,
+): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
+  const {
+    to,
+    clientName,
+    planName,
+    nextBillingDate,
+    recurringAmount,
+    portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
+    supportPhone = "(401) 712-3012",
+    supportEmail = "support@agewellri.com",
+  } = options;
+
+  const formattedBillingDate = nextBillingDate
+    ? typeof nextBillingDate === "string" &&
+      isNaN(Date.parse(nextBillingDate))
+      ? nextBillingDate
+      : new Date(nextBillingDate).toLocaleDateString("en-US", {
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        })
+    : null;
+
+  const subject = "Your AgeWellRI Plan Has Been Reactivated";
+
+  const content = `
+    <div class="greeting">Hello ${clientName},</div>
+    <div class="message" style="font-size: 15px; font-weight: 700; color: #166534; margin-bottom: 12px;">
+      Your AgeWellRI plan has been successfully reactivated.
+    </div>
+
+    <div class="highlight-card" style="border-left: 4px solid #16A34A; background: #F0FDF4;">
+      <div style="font-size: 13px; font-weight: 800; color: #166534; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; border-bottom: 1px solid #BBF7D0; padding-bottom: 6px;">
+        🛡️ Reactivated Membership Plan
+      </div>
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Client:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${clientName}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Plan:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${planName}</td>
+        </tr>
+        ${
+          formattedBillingDate
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Next Billing Date:</td>
+                <td style="padding: 6px 0; color: #166534; font-weight: 800; text-align: right;">${formattedBillingDate}</td>
+              </tr>`
+            : ""
+        }
+        ${
+          recurringAmount
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Recurring Amount:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${typeof recurringAmount === "number" ? `$${recurringAmount.toFixed(2)} USD` : recurringAmount}</td>
+              </tr>`
+            : ""
+        }
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Auto-Renewal Status:</td>
+          <td style="padding: 6px 0; color: #166534; font-weight: 800; text-align: right;">Active (Auto-Pay)</td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="message" style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 16px;">
+      Your service will continue according to your active subscription.<br><br>
+      Auto-renewal is now turned back on, and your upcoming billing will proceed according to your subscription schedule.<br><br>
+      You can continue using your AgeWellRI services as scheduled.
+    </div>
+
+    <div style="text-align: center; margin: 24px 0;">
+      <a href="${portalUrl}/dashboard/billing" class="btn-primary" style="display: inline-block; padding: 14px 28px; background: #294B68; color: #ffffff; text-decoration: none; font-weight: 800; font-size: 14px; border-radius: 12px;">
+        Manage Subscription &amp; Visits →
+      </a>
+    </div>
+
+    <div style="font-size: 12px; color: #64748B; line-height: 1.5; border-top: 1px solid #D9E4EC; padding-top: 16px;">
+      Questions or need assistance? Our local team is here to help at <strong>${supportPhone}</strong> or <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>.
+    </div>
+  `;
+
+  const htmlContent = wrapHtmlEmail(subject, content);
+  const recipientString = Array.isArray(to) ? to.join(", ") : to;
+
+  console.log(`\n======================================================`);
+  console.log(
+    `✅ [EMAIL SERVICE] Reactivation Confirmation dispatched to: ${recipientString}`,
+  );
+  console.log(
+    `Client: ${clientName} | Plan: ${planName} | Next Billing: ${formattedBillingDate || "Scheduled"}`,
+  );
+  console.log(`======================================================\n`);
+
+  const transporter = createTransporter();
+  if (transporter) {
+    try {
+      const info = await transporter.sendMail({
+        from: getDefaultFromAddress("AgeWellRI Billing Services"),
+        to: recipientString,
+        subject,
+        html: htmlContent,
+      });
+      return { success: true, messageId: info.messageId, mode: "smtp" };
+    } catch (err: any) {
+      console.warn(
+        `[EMAIL SERVICE] Subscription reactivated SMTP error: ${err.message}`,
       );
       return { success: true, mode: "console" };
     }

@@ -22,7 +22,7 @@ import {
 export async function handleGetConfig(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     res.status(200).json({
@@ -44,18 +44,23 @@ export async function handleGetConfig(
 export async function handleCreateSetupIntent(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user) {
-      res.status(401).json({ success: false, message: "Authentication required." });
+      res
+        .status(401)
+        .json({ success: false, message: "Authentication required." });
       return;
     }
 
     const parseResult = createSetupIntentSchema.safeParse(req.body);
     const input = parseResult.success ? parseResult.data : undefined;
 
-    const setupIntentData = await paymentService.createSetupIntent(req.user.id, input);
+    const setupIntentData = await paymentService.createSetupIntent(
+      req.user.id,
+      input,
+    );
 
     res.status(200).json({
       success: true,
@@ -74,11 +79,13 @@ export async function handleCreateSetupIntent(
 export async function handleCreatePaymentIntent(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user) {
-      res.status(401).json({ success: false, message: "Authentication required." });
+      res
+        .status(401)
+        .json({ success: false, message: "Authentication required." });
       return;
     }
 
@@ -94,7 +101,7 @@ export async function handleCreatePaymentIntent(
 
     const paymentIntentData = await paymentService.createPaymentIntent(
       req.user.id,
-      parseResult.data
+      parseResult.data,
     );
 
     res.status(200).json({
@@ -114,11 +121,13 @@ export async function handleCreatePaymentIntent(
 export async function handleSavePaymentMethod(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user) {
-      res.status(401).json({ success: false, message: "Authentication required." });
+      res
+        .status(401)
+        .json({ success: false, message: "Authentication required." });
       return;
     }
 
@@ -135,7 +144,7 @@ export async function handleSavePaymentMethod(
     const result = await paymentService.savePaymentMethod(
       req.user.id,
       parseResult.data.paymentMethodId,
-      parseResult.data.setAsDefault
+      parseResult.data.setAsDefault,
     );
 
     res.status(200).json({
@@ -155,11 +164,13 @@ export async function handleSavePaymentMethod(
 export async function handleGetPaymentMethods(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user) {
-      res.status(401).json({ success: false, message: "Authentication required." });
+      res
+        .status(401)
+        .json({ success: false, message: "Authentication required." });
       return;
     }
 
@@ -182,15 +193,19 @@ export async function handleGetPaymentMethods(
 export async function handleGetBillingOverview(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user) {
-      res.status(401).json({ success: false, message: "Authentication required." });
+      res
+        .status(401)
+        .json({ success: false, message: "Authentication required." });
       return;
     }
 
-    const billingOverview = await paymentService.getBillingOverview(req.user.id);
+    const billingOverview = await paymentService.getBillingOverview(
+      req.user.id,
+    );
 
     res.status(200).json({
       success: true,
@@ -204,16 +219,18 @@ export async function handleGetBillingOverview(
 
 /**
  * POST /api/v1/payments/process-agreement-payment
- * Finalize agreement with Stripe payment method and activate quarterly membership.
+ * Finalize agreement with Stripe payment method and activate MONTHLY membership.
  */
 export async function handleProcessAgreementPayment(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user) {
-      res.status(401).json({ success: false, message: "Authentication required." });
+      res
+        .status(401)
+        .json({ success: false, message: "Authentication required." });
       return;
     }
 
@@ -229,7 +246,7 @@ export async function handleProcessAgreementPayment(
 
     const result = await paymentService.processAgreementPayment(
       req.user.id,
-      parseResult.data
+      parseResult.data,
     );
 
     res.status(200).json({
@@ -249,11 +266,13 @@ export async function handleProcessAgreementPayment(
 export async function handleCreateInvoicePayment(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user) {
-      res.status(401).json({ success: false, message: "Authentication required." });
+      res
+        .status(401)
+        .json({ success: false, message: "Authentication required." });
       return;
     }
 
@@ -267,7 +286,10 @@ export async function handleCreateInvoicePayment(
       return;
     }
 
-    const result = await paymentService.createInvoicePayment(req.user.id, parseResult.data);
+    const result = await paymentService.createInvoicePayment(
+      req.user.id,
+      parseResult.data,
+    );
 
     res.status(200).json({
       success: true,
@@ -286,18 +308,20 @@ export async function handleCreateInvoicePayment(
 export async function handleCancelRenewal(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user) {
-      res.status(401).json({ success: false, message: "Authentication required." });
+      res
+        .status(401)
+        .json({ success: false, message: "Authentication required." });
       return;
     }
 
     const parseResult = cancelRenewalSchema.safeParse(req.body);
     const result = await paymentService.cancelSubscriptionRenewal(
       req.user.id,
-      parseResult.success ? parseResult.data : undefined
+      parseResult.success ? parseResult.data : undefined,
     );
 
     res.status(200).json({
@@ -317,15 +341,19 @@ export async function handleCancelRenewal(
 export async function handleReactivateRenewal(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user) {
-      res.status(401).json({ success: false, message: "Authentication required." });
+      res
+        .status(401)
+        .json({ success: false, message: "Authentication required." });
       return;
     }
 
-    const result = await paymentService.reactivateSubscriptionRenewal(req.user.id);
+    const result = await paymentService.reactivateSubscriptionRenewal(
+      req.user.id,
+    );
 
     res.status(200).json({
       success: true,
@@ -344,11 +372,13 @@ export async function handleReactivateRenewal(
 export async function handleGetAdminOverview(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user || req.user.role !== "ADMIN") {
-      res.status(403).json({ success: false, message: "Admin authorization required." });
+      res
+        .status(403)
+        .json({ success: false, message: "Admin authorization required." });
       return;
     }
 
@@ -371,11 +401,13 @@ export async function handleGetAdminOverview(
 export async function handleGetAdminInvoices(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user || req.user.role !== "ADMIN") {
-      res.status(403).json({ success: false, message: "Admin authorization required." });
+      res
+        .status(403)
+        .json({ success: false, message: "Admin authorization required." });
       return;
     }
 
@@ -401,11 +433,13 @@ export async function handleGetAdminInvoices(
 export async function handleGetAdminSubscriptions(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user || req.user.role !== "ADMIN") {
-      res.status(403).json({ success: false, message: "Admin authorization required." });
+      res
+        .status(403)
+        .json({ success: false, message: "Admin authorization required." });
       return;
     }
 
@@ -431,11 +465,13 @@ export async function handleGetAdminSubscriptions(
 export async function handleAdminRetryCharge(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user || req.user.role !== "ADMIN") {
-      res.status(403).json({ success: false, message: "Admin authorization required." });
+      res
+        .status(403)
+        .json({ success: false, message: "Admin authorization required." });
       return;
     }
 
@@ -463,16 +499,18 @@ export async function handleAdminRetryCharge(
 
 /**
  * GET /api/v1/payments/admin/renewals
- * Admin upcoming quarterly & monthly renewals breakdown.
+ * Admin upcoming MONTHLY & monthly renewals breakdown.
  */
 export async function handleGetAdminUpcomingRenewals(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user || req.user.role !== "ADMIN") {
-      res.status(403).json({ success: false, message: "Admin authorization required." });
+      res
+        .status(403)
+        .json({ success: false, message: "Admin authorization required." });
       return;
     }
 
@@ -500,11 +538,13 @@ export async function handleGetAdminUpcomingRenewals(
 export async function handleAdminTriggerReminders(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user || req.user.role !== "ADMIN") {
-      res.status(403).json({ success: false, message: "Admin authorization required." });
+      res
+        .status(403)
+        .json({ success: false, message: "Admin authorization required." });
       return;
     }
 
@@ -527,12 +567,14 @@ export async function handleAdminTriggerReminders(
 export async function handleWebhook(
   req: any,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     const signature = req.headers["stripe-signature"] as string;
     if (!signature) {
-      res.status(400).json({ success: false, message: "Missing stripe-signature header." });
+      res
+        .status(400)
+        .json({ success: false, message: "Missing stripe-signature header." });
       return;
     }
 
@@ -555,15 +597,18 @@ export async function handleWebhook(
 export async function handleGetClientVisitEntitlements(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user) {
-      res.status(401).json({ success: false, message: "Authentication required." });
+      res
+        .status(401)
+        .json({ success: false, message: "Authentication required." });
       return;
     }
 
-    const { getClientVisitEntitlements } = await import("./visit-entitlement.service");
+    const { getClientVisitEntitlements } =
+      await import("./visit-entitlement.service");
     const data = await getClientVisitEntitlements(req.user.id);
 
     res.status(200).json({
@@ -583,16 +628,21 @@ export async function handleGetClientVisitEntitlements(
 export async function handleGetAdminClientVisitEntitlements(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user || req.user.role !== "ADMIN") {
-      res.status(403).json({ success: false, message: "Admin authorization required." });
+      res
+        .status(403)
+        .json({ success: false, message: "Admin authorization required." });
       return;
     }
 
-    const clientId = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id as string);
-    const { getAdminClientVisitEntitlements } = await import("./visit-entitlement.service");
+    const clientId = Array.isArray(req.params.id)
+      ? req.params.id[0]
+      : (req.params.id as string);
+    const { getAdminClientVisitEntitlements } =
+      await import("./visit-entitlement.service");
     const data = await getAdminClientVisitEntitlements(clientId);
 
     res.status(200).json({
@@ -612,11 +662,13 @@ export async function handleGetAdminClientVisitEntitlements(
 export async function handleAdminCancelSubscription(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user || req.user.role !== "ADMIN") {
-      res.status(403).json({ success: false, message: "Admin authorization required." });
+      res
+        .status(403)
+        .json({ success: false, message: "Admin authorization required." });
       return;
     }
 
@@ -627,7 +679,7 @@ export async function handleAdminCancelSubscription(
     const result = await paymentService.adminCancelSubscription(
       subscriptionId,
       input,
-      req.user.id
+      req.user.id,
     );
 
     res.status(200).json({
@@ -647,18 +699,20 @@ export async function handleAdminCancelSubscription(
 export async function handleAdminReactivateSubscription(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user || req.user.role !== "ADMIN") {
-      res.status(403).json({ success: false, message: "Admin authorization required." });
+      res
+        .status(403)
+        .json({ success: false, message: "Admin authorization required." });
       return;
     }
 
     const subscriptionId = req.params.id as string;
     const result = await paymentService.adminReactivateSubscription(
       subscriptionId,
-      req.user.id
+      req.user.id,
     );
 
     res.status(200).json({
@@ -678,11 +732,13 @@ export async function handleAdminReactivateSubscription(
 export async function handleAdminUpdateSubscriptionStatus(
   req: AuthenticatedRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     if (!req.user || req.user.role !== "ADMIN") {
-      res.status(403).json({ success: false, message: "Admin authorization required." });
+      res
+        .status(403)
+        .json({ success: false, message: "Admin authorization required." });
       return;
     }
 
@@ -700,7 +756,7 @@ export async function handleAdminUpdateSubscriptionStatus(
     const result = await paymentService.adminUpdateSubscriptionStatus(
       subscriptionId,
       parseResult.data as any,
-      req.user.id
+      req.user.id,
     );
 
     res.status(200).json({
@@ -712,6 +768,3 @@ export async function handleAdminUpdateSubscriptionStatus(
     next(error);
   }
 }
-
-
-

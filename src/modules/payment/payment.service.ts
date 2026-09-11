@@ -9,7 +9,11 @@ import {
   RenewalStatus,
 } from "@prisma/client";
 import prisma from "../../lib/prisma";
-import { stripe, STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET } from "../../config/stripe";
+import {
+  stripe,
+  STRIPE_PUBLISHABLE_KEY,
+  STRIPE_WEBHOOK_SECRET,
+} from "../../config/stripe";
 import {
   CreatePaymentIntentInput,
   CreateSetupIntentInput,
@@ -38,7 +42,11 @@ import {
   formatBillingDate,
 } from "../../utils/billing-dates.util";
 
-export type WebhookEventStatusType = "RECEIVED" | "PROCESSED" | "FAILED" | "IGNORED";
+export type WebhookEventStatusType =
+  | "RECEIVED"
+  | "PROCESSED"
+  | "FAILED"
+  | "IGNORED";
 
 /**
  * Helper to record audit logs for critical payment & billing events.
@@ -51,7 +59,9 @@ async function createBillingAuditLog(params: {
   metadata?: any;
 }) {
   try {
-    const validActorId = isValidObjectId(params.actorUserId) ? params.actorUserId : null;
+    const validActorId = isValidObjectId(params.actorUserId)
+      ? params.actorUserId
+      : null;
     await (prisma.auditLog.create as any)({
       data: {
         actorUserId: validActorId,
@@ -87,7 +97,9 @@ export async function getOrCreateStripeCustomer(userId: string) {
   }
 
   if (context && !context.isPrimary && !context.permissions.billingAccess) {
-    throw new Error("You do not have permission to access billing or make payments for this client.");
+    throw new Error(
+      "You do not have permission to access billing or make payments for this client.",
+    );
   }
 
   let client: any = context?.client || user.client;
@@ -108,7 +120,9 @@ export async function getOrCreateStripeCustomer(userId: string) {
 
   if (client.stripeCustomerId) {
     try {
-      const existingCustomer = await stripe.customers.retrieve(client.stripeCustomerId);
+      const existingCustomer = await stripe.customers.retrieve(
+        client.stripeCustomerId,
+      );
       if (!existingCustomer.deleted) {
         return {
           customer: existingCustomer,
@@ -123,7 +137,9 @@ export async function getOrCreateStripeCustomer(userId: string) {
 
   // Create new Customer in Stripe for the primary client
   const clientUser = context?.client?.user || user;
-  const fullName = `${clientUser.firstName} ${clientUser.lastName}`.trim() || "AgeWellRI Client";
+  const fullName =
+    `${clientUser.firstName} ${clientUser.lastName}`.trim() ||
+    "AgeWellRI Client";
   const customer = await stripe.customers.create({
     email: clientUser.email,
     name: fullName,
@@ -156,7 +172,7 @@ export async function getOrCreateStripeCustomer(userId: string) {
  */
 export async function resolvePlanPricingDynamic(
   planIdentifier?: string | null,
-  hasCleaningAddon: boolean = false
+  hasCleaningAddon: boolean = false,
 ) {
   const identifier = planIdentifier?.trim();
 
@@ -179,7 +195,11 @@ export async function resolvePlanPricingDynamic(
             orderBy: { versionNumber: "desc" },
             take: 1,
             include: {
-              prices: { where: { isActive: true }, orderBy: { createdAt: "desc" }, take: 1 },
+              prices: {
+                where: { isActive: true },
+                orderBy: { createdAt: "desc" },
+                take: 1,
+              },
               planServices: { include: { serviceType: true } },
             },
           },
@@ -201,7 +221,11 @@ export async function resolvePlanPricingDynamic(
           orderBy: { versionNumber: "desc" },
           take: 1,
           include: {
-            prices: { where: { isActive: true }, orderBy: { createdAt: "desc" }, take: 1 },
+            prices: {
+              where: { isActive: true },
+              orderBy: { createdAt: "desc" },
+              take: 1,
+            },
             planServices: { include: { serviceType: true } },
           },
         },
@@ -210,12 +234,15 @@ export async function resolvePlanPricingDynamic(
   }
 
   if (!plan) {
-    throw new Error(`No active service plans found in database. Please configure plans in the admin portal.`);
+    throw new Error(
+      `No active service plans found in database. Please configure plans in the admin portal.`,
+    );
   }
 
   const activeVersion = plan.versions?.[0];
   const activePrice = activeVersion?.prices?.[0];
-  const basePrice = activePrice?.amount ?? activeVersion?.price ?? plan.price ?? 0;
+  const basePrice =
+    activePrice?.amount ?? activeVersion?.price ?? plan.price ?? 0;
   const addonPrice = hasCleaningAddon ? 60 : 0;
   const totalPrice = basePrice + addonPrice;
 
@@ -236,7 +263,10 @@ export async function resolvePlanPricingDynamic(
   }));
 
   // If cleaning addon selected but no cleaning service in plan, dynamically fetch cleaning serviceType from DB
-  if (hasCleaningAddon && !services.some((s: any) => s.category === "CLEANING")) {
+  if (
+    hasCleaningAddon &&
+    !services.some((s: any) => s.category === "CLEANING")
+  ) {
     const cleaningService = await prisma.serviceType.findFirst({
       where: { category: "CLEANING", isActive: true },
     });
@@ -251,15 +281,18 @@ export async function resolvePlanPricingDynamic(
     }
   }
 
-  const totalVisits = services.reduce((sum: number, s: any) => sum + (s.allocatedVisits || 0), 0);
+  const totalVisits = services.reduce(
+    (sum: number, s: any) => sum + (s.allocatedVisits || 0),
+    0,
+  );
 
   const planMeta: any = plan.metadata || {};
   const features: string[] =
     activeVersion?.features && activeVersion.features.length > 0
       ? activeVersion.features
       : Array.isArray(planMeta.features) && planMeta.features.length > 0
-      ? planMeta.features
-      : [];
+        ? planMeta.features
+        : [];
 
   return {
     planId: plan.id,
@@ -267,7 +300,10 @@ export async function resolvePlanPricingDynamic(
     code: plan.code,
     planName: activeVersion?.name || plan.name,
     planDescription:
-      plan.shortDescription || plan.fullDescription || activeVersion?.description || "",
+      plan.shortDescription ||
+      plan.fullDescription ||
+      activeVersion?.description ||
+      "",
     features,
     basePrice,
     addonPrice,
@@ -277,7 +313,8 @@ export async function resolvePlanPricingDynamic(
       plan.billingInterval ||
       "MONTHLY") as BillingInterval,
     currency: activePrice?.currency || activeVersion?.currency || "USD",
-    stripePriceId: activePrice?.stripePriceId || activeVersion?.stripePriceId || null,
+    stripePriceId:
+      activePrice?.stripePriceId || activeVersion?.stripePriceId || null,
     services,
     totalVisits,
     isOneTime: plan.billingInterval === "ONE_TIME",
@@ -287,7 +324,10 @@ export async function resolvePlanPricingDynamic(
 /**
  * Create a Stripe SetupIntent for saving payment methods securely off-session.
  */
-export async function createSetupIntent(userId: string, input?: CreateSetupIntentInput) {
+export async function createSetupIntent(
+  userId: string,
+  input?: CreateSetupIntentInput,
+) {
   const { customerId, client } = await getOrCreateStripeCustomer(userId);
 
   const setupIntent = await stripe.setupIntents.create({
@@ -297,8 +337,10 @@ export async function createSetupIntent(userId: string, input?: CreateSetupInten
     metadata: {
       userId,
       clientId: client.id,
-      selectedPlan: input?.plan || client.selectedPlan || "GUARDIAN_PLUS",
-      hasCleaningAddon: String(input?.hasCleaningAddon ?? client.hasCleaningAddon),
+      selectedPlan: input?.plan || client.selectedPlan || undefined,
+      hasCleaningAddon: String(
+        input?.hasCleaningAddon ?? client.hasCleaningAddon,
+      ),
     },
   });
 
@@ -321,12 +363,15 @@ export async function createSetupIntent(userId: string, input?: CreateSetupInten
 /**
  * Create a Stripe PaymentIntent for direct payment / initial charge.
  */
-export async function createPaymentIntent(userId: string, input: CreatePaymentIntentInput) {
+export async function createPaymentIntent(
+  userId: string,
+  input: CreatePaymentIntentInput,
+) {
   const { customerId, client } = await getOrCreateStripeCustomer(userId);
 
   const pricing = await resolvePlanPricingDynamic(
     input.selectedPlan || client.selectedPlan,
-    input.hasCleaningAddon
+    input.hasCleaningAddon,
   );
   const amountInCents = Math.round(pricing.totalPrice * 100);
 
@@ -334,7 +379,8 @@ export async function createPaymentIntent(userId: string, input: CreatePaymentIn
     amount: amountInCents,
     currency: input.currency || "usd",
     customer: customerId,
-    description: input.description || `AgeWellRI ${pricing.planName} Membership`,
+    description:
+      input.description || `AgeWellRI ${pricing.planName} Membership`,
     automatic_payment_methods: { enabled: true },
     metadata: {
       userId,
@@ -367,27 +413,49 @@ export async function createPaymentIntent(userId: string, input: CreatePaymentIn
 export async function savePaymentMethod(
   userId: string,
   paymentMethodId: string,
-  setAsDefault: boolean = true
+  setAsDefault: boolean = true,
 ) {
   const { customerId, client } = await getOrCreateStripeCustomer(userId);
 
-  await stripe.paymentMethods.attach(paymentMethodId, {
-    customer: customerId,
-  });
+  // 1. Retrieve the payment method first to inspect its status & card details
+  const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
 
-  if (setAsDefault) {
-    await stripe.customers.update(customerId, {
-      invoice_settings: {
-        default_payment_method: paymentMethodId,
-      },
-    });
+  // 2. Attach only if not already attached to this customer
+  if (pm.customer !== customerId) {
+    try {
+      await stripe.paymentMethods.attach(paymentMethodId, {
+        customer: customerId,
+      });
+    } catch (attachErr: any) {
+      if (!attachErr.message?.includes("already been attached")) {
+        console.warn(
+          "⚠️ Stripe paymentMethod.attach notice:",
+          attachErr.message,
+        );
+      }
+    }
   }
 
-  const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
+  // 3. Set as default payment method on the customer
+  if (setAsDefault) {
+    try {
+      await stripe.customers.update(customerId, {
+        invoice_settings: {
+          default_payment_method: paymentMethodId,
+        },
+      });
+    } catch (custErr: any) {
+      console.warn(
+        "⚠️ Stripe customer invoice_settings update notice:",
+        custErr.message,
+      );
+    }
+  }
 
   const updatedClient: any = await (prisma.client.update as any)({
     where: { id: client.id },
     data: {
+      stripeCustomerId: customerId,
       stripePaymentMethodId: paymentMethodId,
       cardBrand: pm.card?.brand ? pm.card.brand.toUpperCase() : "CARD",
       cardLast4: pm.card?.last4 || "0000",
@@ -401,12 +469,16 @@ export async function savePaymentMethod(
     action: "PAYMENT_METHOD_UPDATED",
     entityType: "PaymentMethod",
     entityId: paymentMethodId,
-    metadata: { brand: updatedClient.cardBrand, last4: updatedClient.cardLast4 },
+    metadata: {
+      brand: updatedClient.cardBrand,
+      last4: updatedClient.cardLast4,
+    },
   });
 
   return {
     success: true,
     paymentMethodId,
+    customerId,
     card: {
       brand: updatedClient.cardBrand,
       last4: updatedClient.cardLast4,
@@ -446,7 +518,7 @@ export async function getPaymentMethods(userId: string) {
 /**
  * Process Agreement Payment & Provision Subscription, Periods, Invoices & Payments.
  * Accurately records PlanVersion and contracted terms for historical preservation.
- * 
+ *
  * CRITICAL LIFECYCLE RULE:
  * 1. NO CHARGE OCCURS AT SIGNUP.
  * 2. First billing date & service commencement date = 1st day of the NEXT calendar month.
@@ -456,7 +528,7 @@ export async function getPaymentMethods(userId: string) {
  */
 export async function processAgreementPayment(
   userId: string,
-  input: ProcessAgreementPaymentInput
+  input: ProcessAgreementPaymentInput,
 ) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -475,23 +547,54 @@ export async function processAgreementPayment(
   }
 
   const client: any = user.client;
-  const pricing = await resolvePlanPricingDynamic(input.selectedPlan, input.hasCleaningAddon);
+  const pricing = await resolvePlanPricingDynamic(
+    input.selectedPlan,
+    input.hasCleaningAddon,
+  );
 
-  const billingMethod = input.billingMethod === "INVOICE" ? BillingMethod.INVOICE : BillingMethod.AUTOMATIC;
+  const billingMethod =
+    input.billingMethod === "INVOICE"
+      ? BillingMethod.INVOICE
+      : BillingMethod.AUTOMATIC;
   const isInvoiceBilling = billingMethod === BillingMethod.INVOICE;
+
+  let stripeCustomerId = client.stripeCustomerId;
+  let stripePaymentMethodId = client.stripePaymentMethodId;
 
   if (input.paymentMethodId) {
     try {
-      await savePaymentMethod(userId, input.paymentMethodId, true);
-    } catch (pmErr) {
-      console.warn("⚠️ Could not attach payment method to Stripe customer:", pmErr);
+      const pmRes = await savePaymentMethod(
+        userId,
+        input.paymentMethodId,
+        true,
+      );
+      stripeCustomerId = pmRes.customerId;
+      stripePaymentMethodId = pmRes.paymentMethodId;
+    } catch (pmErr: any) {
+      console.warn(
+        "⚠️ Could not attach payment method to Stripe customer:",
+        pmErr.message,
+      );
     }
+  } else if (!stripeCustomerId) {
+    try {
+      const custRes = await getOrCreateStripeCustomer(userId);
+      stripeCustomerId = custRes.customerId;
+    } catch {}
   }
+
+  const effectivePmId =
+    input.paymentMethodId ||
+    stripePaymentMethodId ||
+    client.stripePaymentMethodId;
 
   const now = new Date();
   // Authoritative Calculation: First billing & service commencement date is strictly the 1st of the following calendar month
   const firstBillingDate = getFirstBillingDate(now);
-  const periodEndDate = calculatePeriodEndDate(firstBillingDate, pricing.billingInterval);
+  const periodEndDate = calculatePeriodEndDate(
+    firstBillingDate,
+    pricing.billingInterval,
+  );
 
   // 1. Resolve planId and versionId
   let planId = pricing.planId;
@@ -502,11 +605,36 @@ export async function processAgreementPayment(
 
   // 2. Create Stripe-Native Subscription with trial_end anchored to the 1st of next month (NO charge on signup day)
   let stripeSubscriptionId: string | null = null;
-  if (!isInvoiceBilling && client.stripeCustomerId && (input.paymentMethodId || client.stripePaymentMethodId)) {
+  if (!isInvoiceBilling && stripeCustomerId && effectivePmId) {
     try {
-      const pmId = input.paymentMethodId || client.stripePaymentMethodId;
-      const intervalCount = pricing.billingInterval === "QUARTERLY" ? 3 : (pricing.billingInterval === "ANNUAL" ? 12 : 1);
+      const intervalCount =
+        pricing.billingInterval === "MONTHLY"
+          ? 3
+          : pricing.billingInterval === "ANNUAL"
+            ? 12
+            : 1;
       const trialEndTimestamp = getStripeTrialEndTimestamp(now);
+
+      // Verify and guarantee the payment method is attached to this customer
+      try {
+        const pm = await stripe.paymentMethods.retrieve(effectivePmId);
+        if (pm.customer !== stripeCustomerId) {
+          await stripe.paymentMethods.attach(effectivePmId, {
+            customer: stripeCustomerId,
+          });
+        }
+      } catch (attachCheckErr: any) {
+        // If already attached, ignore
+      }
+
+      // Ensure customer's default payment method is updated
+      try {
+        await stripe.customers.update(stripeCustomerId, {
+          invoice_settings: {
+            default_payment_method: effectivePmId,
+          },
+        });
+      } catch {}
 
       let stripeProductId: string | undefined = undefined;
       try {
@@ -523,8 +651,8 @@ export async function processAgreementPayment(
       }
 
       const stripeSub = await (stripe.subscriptions.create as any)({
-        customer: client.stripeCustomerId,
-        default_payment_method: pmId,
+        customer: stripeCustomerId,
+        default_payment_method: effectivePmId,
         items: [
           {
             price_data: {
@@ -549,7 +677,10 @@ export async function processAgreementPayment(
       });
       stripeSubscriptionId = stripeSub.id;
     } catch (subErr: any) {
-      console.warn("⚠️ Stripe native subscription creation notice:", subErr.message);
+      console.warn(
+        "⚠️ Stripe native subscription creation notice:",
+        subErr.message,
+      );
     }
   }
 
@@ -590,14 +721,18 @@ export async function processAgreementPayment(
         contractedPrice: pricing.totalPrice,
         currency: pricing.currency,
         billingInterval: pricing.billingInterval,
-        status: subscription.status === SubscriptionStatus.ACTIVE ? SubscriptionStatus.ACTIVE : subscriptionStatus,
+        status:
+          subscription.status === SubscriptionStatus.ACTIVE
+            ? SubscriptionStatus.ACTIVE
+            : subscriptionStatus,
         billingMethod,
         currentPeriodStart: firstBillingDate,
         currentPeriodEnd: periodEndDate,
         nextRenewalDate: firstBillingDate,
         autoRenew: !pricing.isOneTime,
         cancelAtPeriodEnd: false,
-        stripeSubscriptionId: stripeSubscriptionId || subscription.stripeSubscriptionId,
+        stripeSubscriptionId:
+          stripeSubscriptionId || subscription.stripeSubscriptionId,
       },
     });
 
@@ -641,7 +776,9 @@ export async function processAgreementPayment(
 
     // Clean up any extra duplicate draft invoices created during previous plan toggles
     if (existingUnpaidInvoices.length > 1) {
-      const duplicateIds = existingUnpaidInvoices.slice(1).map((inv: any) => inv.id);
+      const duplicateIds = existingUnpaidInvoices
+        .slice(1)
+        .map((inv: any) => inv.id);
       await (prisma.invoice.deleteMany as any)({
         where: { id: { in: duplicateIds } },
       });
@@ -725,9 +862,11 @@ export async function processAgreementPayment(
     const recipientEmails = Array.from(
       new Set(
         [agreementProvidedEmail, client.primaryContactEmail, user.email]
-          .filter((e): e is string => Boolean(e && typeof e === "string" && e.includes("@")))
-          .map((e) => e.trim())
-      )
+          .filter((e): e is string =>
+            Boolean(e && typeof e === "string" && e.includes("@")),
+          )
+          .map((e) => e.trim()),
+      ),
     ).join(", ");
 
     const serviceAddress = [
@@ -739,7 +878,8 @@ export async function processAgreementPayment(
       .filter(Boolean)
       .join(", ");
 
-    const { sendPlanPurchaseConfirmationEmail } = await import("../../utils/email");
+    const { sendPlanPurchaseConfirmationEmail } =
+      await import("../../utils/email");
     await sendPlanPurchaseConfirmationEmail({
       to: recipientEmails,
       clientName: clientPrinted,
@@ -772,7 +912,10 @@ export async function processAgreementPayment(
       cancellationDeadlineRule: agreement?.cancellationDeadlineRule,
     });
   } catch (emailErr) {
-    console.warn("⚠️ Failed to dispatch plan purchase confirmation email:", emailErr);
+    console.warn(
+      "⚠️ Failed to dispatch plan purchase confirmation email:",
+      emailErr,
+    );
   }
 
   return {
@@ -794,7 +937,7 @@ export async function processAgreementPayment(
  */
 export async function createInvoicePayment(
   userId: string,
-  input: CreateInvoicePaymentInput
+  input: CreateInvoicePaymentInput,
 ) {
   return processAgreementPayment(userId, {
     selectedPlan: input.selectedPlan,
@@ -808,7 +951,7 @@ export async function createInvoicePayment(
  */
 export async function cancelSubscriptionRenewal(
   userId: string,
-  input?: CancelRenewalInput
+  input?: CancelRenewalInput,
 ) {
   let user = await prisma.user.findUnique({
     where: { id: userId },
@@ -820,6 +963,7 @@ export async function cancelSubscriptionRenewal(
             take: 1,
             include: {
               plan: true,
+              planVersion: true,
             },
           },
           agreements: {
@@ -836,17 +980,16 @@ export async function cancelSubscriptionRenewal(
   if (!client) {
     client = await prisma.client.findFirst({
       where: {
-        OR: [
-          { userId: userId },
-          { id: userId },
-        ],
+        OR: [{ userId: userId }, { id: userId }],
       },
       include: {
+        user: true,
         subscriptions: {
           orderBy: { createdAt: "desc" },
           take: 1,
           include: {
             plan: true,
+            planVersion: true,
           },
         },
         agreements: {
@@ -873,13 +1016,14 @@ export async function cancelSubscriptionRenewal(
 
   // If a subscription record exists
   if (activeSub) {
-    // If already cancelled or cancellation requested
+    // If already cancelled or cancellation requested (duplicate protection)
     if (
       activeSub.status === SubscriptionStatus.CANCELLED ||
       activeSub.cancelAtPeriodEnd === true ||
       activeSub.autoRenew === false
     ) {
-      const effectiveDate = activeSub.cancellationEffectiveAt || activeSub.currentPeriodEnd || now;
+      const effectiveDate =
+        activeSub.cancellationEffectiveAt || activeSub.currentPeriodEnd || now;
       return {
         success: true,
         message: `Automatic renewal is already cancelled. Your active coverage remains in effect until ${new Date(effectiveDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}.`,
@@ -889,7 +1033,8 @@ export async function cancelSubscriptionRenewal(
       };
     }
 
-    const upcomingBillingDate = activeSub.nextRenewalDate || activeSub.currentPeriodEnd || now;
+    const upcomingBillingDate =
+      activeSub.nextRenewalDate || activeSub.currentPeriodEnd || now;
     const isEligible = isWithinCancellationCutoff(now, upcomingBillingDate, 10);
 
     if (!isEligible) {
@@ -903,7 +1048,9 @@ export async function cancelSubscriptionRenewal(
       };
     }
 
-    const effectiveDate = activeSub.currentPeriodEnd || new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const effectiveDate =
+      activeSub.currentPeriodEnd ||
+      new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
     // Update Stripe Subscription to cancel at period end if exists
     if (activeSub.stripeSubscriptionId) {
@@ -912,7 +1059,10 @@ export async function cancelSubscriptionRenewal(
           cancel_at_period_end: true,
         });
       } catch (stripeErr: any) {
-        console.warn("⚠️ Could not set cancel_at_period_end on Stripe Subscription:", stripeErr.message);
+        console.warn(
+          "⚠️ Could not set cancel_at_period_end on Stripe Subscription:",
+          stripeErr.message,
+        );
       }
     }
 
@@ -923,7 +1073,8 @@ export async function cancelSubscriptionRenewal(
         cancelAtPeriodEnd: true,
         cancellationRequestedAt: now,
         cancellationEffectiveAt: effectiveDate,
-        cancellationReason: input?.reason || "Client requested cancellation of auto-renewal.",
+        cancellationReason:
+          input?.reason || "Client requested cancellation of auto-renewal.",
         status: SubscriptionStatus.CANCELLATION_REQUESTED,
       },
     });
@@ -935,6 +1086,37 @@ export async function cancelSubscriptionRenewal(
       entityId: activeSub.id,
       metadata: { effectiveDate, reason: input?.reason },
     });
+
+    // Dispatch Cancellation Confirmation Email
+    const clientUser = (client as any)?.user || user;
+    const recipientEmail = clientUser?.email || client.primaryContactEmail;
+    const clientFullName =
+      `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() ||
+      "Valued Member";
+    const planName =
+      activeSub.planVersion?.name ||
+      activeSub.plan?.name ||
+      (client as any)?.selectedPlan ||
+      "AgeWellRI Plan";
+
+    if (recipientEmail) {
+      try {
+        const { sendSubscriptionCancelledEmail } = await import(
+          "../../utils/email"
+        );
+        await sendSubscriptionCancelledEmail({
+          to: recipientEmail,
+          clientName: clientFullName,
+          planName,
+          serviceEndDate: effectiveDate,
+        });
+      } catch (mailErr: any) {
+        console.warn(
+          "⚠️ Failed to dispatch subscription cancellation email:",
+          mailErr.message,
+        );
+      }
+    }
 
     return {
       success: true,
@@ -953,9 +1135,36 @@ export async function cancelSubscriptionRenewal(
     },
   });
 
+  const clientUser = (client as any)?.user || user;
+  const recipientEmail = clientUser?.email || client.primaryContactEmail;
+  const clientFullName =
+    `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() ||
+    "Valued Member";
+  const planName = (client as any)?.selectedPlan || "AgeWellRI Plan";
+
+  if (recipientEmail) {
+    try {
+      const { sendSubscriptionCancelledEmail } = await import(
+        "../../utils/email"
+      );
+      await sendSubscriptionCancelledEmail({
+        to: recipientEmail,
+        clientName: clientFullName,
+        planName,
+        serviceEndDate: now,
+      });
+    } catch (mailErr: any) {
+      console.warn(
+        "⚠️ Failed to dispatch client cancellation email:",
+        mailErr.message,
+      );
+    }
+  }
+
   return {
     success: true,
-    message: "Your membership enrollment and renewal settings have been updated.",
+    message:
+      "Your membership enrollment and renewal settings have been updated.",
     cancellationEffectiveAt: now,
     autoRenew: false,
     cancelAtPeriodEnd: true,
@@ -974,6 +1183,10 @@ export async function reactivateSubscriptionRenewal(userId: string) {
           subscriptions: {
             orderBy: { createdAt: "desc" },
             take: 1,
+            include: {
+              plan: true,
+              planVersion: true,
+            },
           },
         },
       },
@@ -985,15 +1198,17 @@ export async function reactivateSubscriptionRenewal(userId: string) {
   if (!client) {
     client = await prisma.client.findFirst({
       where: {
-        OR: [
-          { userId: userId },
-          { id: userId },
-        ],
+        OR: [{ userId: userId }, { id: userId }],
       },
       include: {
+        user: true,
         subscriptions: {
           orderBy: { createdAt: "desc" },
           take: 1,
+          include: {
+            plan: true,
+            planVersion: true,
+          },
         },
       },
     });
@@ -1018,12 +1233,41 @@ export async function reactivateSubscriptionRenewal(userId: string) {
     };
   }
 
+  // Idempotency / Duplicate protection: If already active and autoRenew is true, do not send duplicate emails
+  if (
+    sub.autoRenew === true &&
+    sub.cancelAtPeriodEnd === false &&
+    sub.status === SubscriptionStatus.ACTIVE
+  ) {
+    return {
+      success: true,
+      message: "Automatic renewal is already active.",
+      autoRenew: true,
+      cancelAtPeriodEnd: false,
+    };
+  }
+
+  // Update Stripe Subscription to clear cancel_at_period_end if exists
+  if (sub.stripeSubscriptionId) {
+    try {
+      await stripe.subscriptions.update(sub.stripeSubscriptionId, {
+        cancel_at_period_end: false,
+      });
+    } catch (stripeErr: any) {
+      console.warn(
+        "⚠️ Could not clear cancel_at_period_end on Stripe Subscription:",
+        stripeErr.message,
+      );
+    }
+  }
+
   await (prisma.subscription.update as any)({
     where: { id: sub.id },
     data: {
       autoRenew: true,
       cancelAtPeriodEnd: false,
       cancellationRequestedAt: null,
+      cancellationEffectiveAt: null,
       cancellationReason: null,
       status: SubscriptionStatus.ACTIVE,
     },
@@ -1035,6 +1279,41 @@ export async function reactivateSubscriptionRenewal(userId: string) {
     entityType: "Subscription",
     entityId: sub.id,
   });
+
+  // Dispatch Reactivation Confirmation Email
+  const clientUser = (client as any)?.user || user;
+  const recipientEmail = clientUser?.email || client.primaryContactEmail;
+  const clientFullName =
+    `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() ||
+    "Valued Member";
+  const planName =
+    sub.planVersion?.name ||
+    sub.plan?.name ||
+    (client as any)?.selectedPlan ||
+    "AgeWellRI Plan";
+  const nextBillingDate = sub.nextRenewalDate || sub.currentPeriodEnd;
+  const recurringAmount =
+    sub.contractedPrice ?? sub.planVersion?.price ?? sub.plan?.price ?? null;
+
+  if (recipientEmail) {
+    try {
+      const { sendSubscriptionReactivatedEmail } = await import(
+        "../../utils/email"
+      );
+      await sendSubscriptionReactivatedEmail({
+        to: recipientEmail,
+        clientName: clientFullName,
+        planName,
+        nextBillingDate,
+        recurringAmount,
+      });
+    } catch (mailErr: any) {
+      console.warn(
+        "⚠️ Failed to dispatch subscription reactivation email:",
+        mailErr.message,
+      );
+    }
+  }
 
   return {
     success: true,
@@ -1051,7 +1330,9 @@ export async function reactivateSubscriptionRenewal(userId: string) {
 export async function getBillingOverview(userId: string) {
   const context = await resolveClientForUser(userId);
   if (context && !context.isPrimary && !context.permissions.billingAccess) {
-    throw new Error("You do not have permission to view billing information for this client.");
+    throw new Error(
+      "You do not have permission to view billing information for this client.",
+    );
   }
 
   const targetClientId = context?.client?.id;
@@ -1095,22 +1376,22 @@ export async function getBillingOverview(userId: string) {
 
   if (!client) {
     return {
-      currentPlanName: "Guardian Plus",
-      selectedPlanCode: "GUARDIAN_PLUS",
+      currentPlanName: "No Active Plan",
+      selectedPlanCode: "",
       hasCleaningAddon: false,
       billingFrequency: "Monthly",
       billingMethod: "AUTOMATIC",
-      subscriptionStatus: "ACTIVE",
-      autoPayEnabled: true,
+      subscriptionStatus: "INACTIVE",
+      autoPayEnabled: false,
       cancelAtPeriodEnd: false,
       cancellationEffectiveAt: null,
-      currentPeriod: "Active Cycle",
-      nextPaymentDate: "September 1, 2026",
-      nextPaymentAmount: "$495.00",
+      currentPeriod: "No Cycle",
+      nextPaymentDate: "N/A",
+      nextPaymentAmount: "$0.00",
       paymentMethod: {
-        brand: "VISA",
-        last4: "4242",
-        expiry: "12/28",
+        brand: "CARD",
+        last4: "0000",
+        expiry: "MM/YY",
       },
       invoices: [],
       payments: [],
@@ -1122,26 +1403,42 @@ export async function getBillingOverview(userId: string) {
 
   const now = new Date();
   const defaultFirstBilling = getFirstBillingDate(now);
-  const firstBillingDate = activeSub?.currentPeriodStart ? new Date(activeSub.currentPeriodStart) : defaultFirstBilling;
+  const firstBillingDate = activeSub?.currentPeriodStart
+    ? new Date(activeSub.currentPeriodStart)
+    : defaultFirstBilling;
   const serviceCommencementDate = firstBillingDate;
-  const targetRenewalDate = activeSub?.nextRenewalDate ? new Date(activeSub.nextRenewalDate) : firstBillingDate;
-  const cancellationCutoffDate = getCancellationCutoffDate(targetRenewalDate, 10);
-  const isPendingFirstBilling = activeSub?.status === SubscriptionStatus.PENDING;
+  const targetRenewalDate = activeSub?.nextRenewalDate
+    ? new Date(activeSub.nextRenewalDate)
+    : firstBillingDate;
+  const cancellationCutoffDate = getCancellationCutoffDate(
+    targetRenewalDate,
+    10,
+  );
+  const isPendingFirstBilling =
+    activeSub?.status === SubscriptionStatus.PENDING;
 
   // Contracted terms preservation
   const contractedPlanName =
-    activeSub?.planVersion?.name || activeSub?.plan?.name || "Guardian Plus";
+    activeSub?.planVersion?.name ||
+    activeSub?.plan?.name ||
+    (client as any)?.selectedPlan ||
+    "No Active Plan";
   const contractedPrice =
-    activeSub?.contractedPrice ?? activeSub?.planVersion?.price ?? activeSub?.plan?.price ?? 495;
+    activeSub?.contractedPrice ??
+    activeSub?.planVersion?.price ??
+    activeSub?.plan?.price ??
+    0;
   const billingInterval =
-    activeSub?.billingInterval || activeSub?.planVersion?.billingInterval || "MONTHLY";
+    activeSub?.billingInterval ||
+    activeSub?.planVersion?.billingInterval ||
+    "MONTHLY";
 
   const currentPeriod = activeSub?.periods?.[0];
   const currentPeriodFormatted = currentPeriod
     ? `${currentPeriod.startDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${currentPeriod.endDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
     : isPendingFirstBilling
-    ? `Commences ${formatBillingDate(serviceCommencementDate)}`
-    : "Active Cycle";
+      ? `Commences ${formatBillingDate(serviceCommencementDate)}`
+      : "Active Cycle";
 
   const nextRenewal = activeSub?.nextRenewalDate
     ? formatBillingDate(activeSub.nextRenewalDate)
@@ -1176,14 +1473,19 @@ export async function getBillingOverview(userId: string) {
 
   const visitEntitlements = formatPeriodEntitlements(
     currentPeriod,
-    client.appointments || []
+    client.appointments || [],
   );
 
   return {
     currentPlanName: contractedPlanName,
-    selectedPlanCode: activeSub?.plan?.code || client.selectedPlan || "GUARDIAN_PLUS",
+    selectedPlanCode: activeSub?.plan?.code || client.selectedPlan || "",
     hasCleaningAddon: client.hasCleaningAddon,
-    billingFrequency: billingInterval === "QUARTERLY" ? "Quarterly" : billingInterval === "ANNUAL" ? "Annual" : "Monthly",
+    billingFrequency:
+      billingInterval === "MONTHLY"
+        ? "MONTHLY"
+        : billingInterval === "ANNUAL"
+          ? "Annual"
+          : "Monthly",
     billingMethod: activeSub?.billingMethod || "AUTOMATIC",
     subscriptionStatus: activeSub?.status || "PENDING",
     autoPayEnabled: activeSub?.autoRenew ?? true,
@@ -1213,7 +1515,10 @@ export async function getBillingOverview(userId: string) {
 /**
  * Handle Stripe Webhook Events with strict idempotency and signature verification.
  */
-export async function handleStripeWebhook(signature: string, rawBody: string | Buffer) {
+export async function handleStripeWebhook(
+  signature: string,
+  rawBody: string | Buffer,
+) {
   if (!STRIPE_WEBHOOK_SECRET) {
     console.warn("⚠️ Stripe Webhook secret not configured.");
     return { received: true, warning: "Webhook secret missing" };
@@ -1221,7 +1526,11 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
 
   let event: any;
   try {
-    event = stripe.webhooks.constructEvent(rawBody, signature, STRIPE_WEBHOOK_SECRET);
+    event = stripe.webhooks.constructEvent(
+      rawBody,
+      signature,
+      STRIPE_WEBHOOK_SECRET,
+    );
   } catch (err: any) {
     throw new Error(`Webhook signature verification failed: ${err.message}`);
   }
@@ -1231,7 +1540,9 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
   });
 
   if (existingEvent) {
-    console.log(`ℹ️ Webhook event ${event.id} already processed. Skipping duplicate.`);
+    console.log(
+      `ℹ️ Webhook event ${event.id} already processed. Skipping duplicate.`,
+    );
     return { received: true, idempotent: true };
   }
 
@@ -1296,7 +1607,8 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
       case "payment_intent.payment_failed": {
         const paymentIntent = event.data.object;
         const paymentId = paymentIntent.id;
-        const failureReason = paymentIntent.last_payment_error?.message || "Payment declined";
+        const failureReason =
+          paymentIntent.last_payment_error?.message || "Payment declined";
 
         await (prisma.payment.updateMany as any)({
           where: { stripePaymentIntentId: paymentId },
@@ -1339,7 +1651,15 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
             include: {
               user: true,
               subscriptions: {
-                where: { status: { in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAYMENT_FAILED, SubscriptionStatus.PENDING] } },
+                where: {
+                  status: {
+                    in: [
+                      SubscriptionStatus.ACTIVE,
+                      SubscriptionStatus.PAYMENT_FAILED,
+                      SubscriptionStatus.PENDING,
+                    ],
+                  },
+                },
                 include: {
                   periods: { orderBy: { periodNumber: "desc" }, take: 1 },
                   plan: true,
@@ -1352,12 +1672,16 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
           const activeSub = client?.subscriptions?.[0];
           if (activeSub) {
             const latestPeriod = activeSub.periods?.[0];
-            const isFirstPeriod = !latestPeriod || activeSub.periods?.length === 0;
+            const isFirstPeriod =
+              !latestPeriod || activeSub.periods?.length === 0;
             const nextPeriodNumber = (latestPeriod?.periodNumber || 0) + 1;
             const newPeriodStart = latestPeriod
               ? new Date(latestPeriod.endDate)
               : new Date(activeSub.currentPeriodStart || new Date());
-            const newPeriodEnd = calculatePeriodEndDate(newPeriodStart, activeSub.billingInterval);
+            const newPeriodEnd = calculatePeriodEndDate(
+              newPeriodStart,
+              activeSub.billingInterval,
+            );
 
             // Create new Subscription Period
             const newPeriod = await (prisma.subscriptionPeriod.create as any)({
@@ -1387,7 +1711,7 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
               newPeriod.id,
               activeSub.planVersionId,
               activeSub.planId,
-              activeSub.client?.hasCleaningAddon
+              activeSub.client?.hasCleaningAddon,
             );
 
             // Update Subscription timestamps & status
@@ -1422,7 +1746,8 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
                 amount: amountPaid > 0 ? amountPaid : activeSub.contractedPrice,
                 currency: activeSub.currency || "USD",
                 status: PaymentStatus.PAID,
-                paymentMethod: activeSub.billingMethod || BillingMethod.AUTOMATIC,
+                paymentMethod:
+                  activeSub.billingMethod || BillingMethod.AUTOMATIC,
                 stripeCustomerId: customerId,
                 stripeInvoiceId,
                 paidAt: new Date(),
@@ -1444,20 +1769,33 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
                 },
               });
             } catch (renewalErr: any) {
-              console.warn("⚠️ Failed to record Renewal lifecycle entry:", renewalErr.message);
+              console.warn(
+                "⚠️ Failed to record Renewal lifecycle entry:",
+                renewalErr.message,
+              );
             }
 
             // Send Payment Confirmation Receipt Email & Service Active Notification
             if (client.user?.email) {
-              const planName = activeSub.planVersion?.name || activeSub.plan?.name || "Guardian Plus";
+              const planName =
+                activeSub.planVersion?.name ||
+                activeSub.plan?.name ||
+                (client as any)?.selectedPlan ||
+                "Service Plan";
               try {
-                const { sendPaymentSuccessEmail, sendQuarterlyRenewalActiveEmail } = await import("../../utils/email");
-                
+                const {
+                  sendPaymentSuccessEmail,
+                  sendMONTHLYRenewalActiveEmail,
+                } = await import("../../utils/email");
+
                 await sendPaymentSuccessEmail({
                   to: client.user.email,
-                  clientName: `${client.user.firstName || ""} ${client.user.lastName || ""}`.trim() || "Valued Client",
+                  clientName:
+                    `${client.user.firstName || ""} ${client.user.lastName || ""}`.trim() ||
+                    "Valued Client",
                   planName,
-                  amount: amountPaid > 0 ? amountPaid : activeSub.contractedPrice,
+                  amount:
+                    amountPaid > 0 ? amountPaid : activeSub.contractedPrice,
                   paidAt: new Date(),
                   billingPeriodStart: newPeriodStart,
                   billingPeriodEnd: newPeriodEnd,
@@ -1467,7 +1805,9 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
                 });
 
                 // Fetch new allocations for email breakdown
-                const periodWithAlloc = await (prisma.subscriptionPeriod.findUnique as any)({
+                const periodWithAlloc = await (
+                  prisma.subscriptionPeriod.findUnique as any
+                )({
                   where: { id: newPeriod.id },
                   include: {
                     allocations: {
@@ -1476,17 +1816,24 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
                   },
                 });
 
-                const allocatedVisits = (periodWithAlloc?.allocations || []).map((a: any) => ({
+                const allocatedVisits = (
+                  periodWithAlloc?.allocations || []
+                ).map((a: any) => ({
                   serviceName: a.serviceType?.name || "Care Visit",
                   count: a.allocatedCount || 6,
                   durationMinutes: a.serviceType?.durationMinutes || 60,
                 }));
 
-                const totalAllocVisits = allocatedVisits.reduce((sum: number, v: any) => sum + v.count, 0);
+                const totalAllocVisits = allocatedVisits.reduce(
+                  (sum: number, v: any) => sum + v.count,
+                  0,
+                );
 
-                await sendQuarterlyRenewalActiveEmail({
+                await sendMONTHLYRenewalActiveEmail({
                   to: client.user.email,
-                  clientName: `${client.user.firstName || ""} ${client.user.lastName || ""}`.trim() || "Valued Client",
+                  clientName:
+                    `${client.user.firstName || ""} ${client.user.lastName || ""}`.trim() ||
+                    "Valued Client",
                   planName,
                   periodStartDate: newPeriodStart,
                   periodEndDate: newPeriodEnd,
@@ -1500,7 +1847,9 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
             }
 
             await createBillingAuditLog({
-              action: isFirstPeriod ? "FIRST_PAYMENT_PROCESSED_ACTIVE" : "SUBSCRIPTION_RENEWED",
+              action: isFirstPeriod
+                ? "FIRST_PAYMENT_PROCESSED_ACTIVE"
+                : "SUBSCRIPTION_RENEWED",
               entityType: "Subscription",
               entityId: activeSub.id,
               metadata: {
@@ -1544,7 +1893,9 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
         const stripeInvoice = event.data.object;
         const stripeInvoiceId = stripeInvoice.id;
         const customerId = stripeInvoice.customer;
-        const failureReason = stripeInvoice.last_payment_error?.message || "Renewal charge declined";
+        const failureReason =
+          stripeInvoice.last_payment_error?.message ||
+          "Renewal charge declined";
 
         await (prisma.invoice.updateMany as any)({
           where: { stripeInvoiceId },
@@ -1558,7 +1909,13 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
             where: { stripeCustomerId: customerId },
             include: {
               user: true,
-              subscriptions: { where: { status: { in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.PENDING] } } },
+              subscriptions: {
+                where: {
+                  status: {
+                    in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.PENDING],
+                  },
+                },
+              },
             },
           });
 
@@ -1574,12 +1931,17 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
             // Dispatch Payment Failure Email
             if (client.user?.email) {
               try {
-                const { sendPaymentFailureEmail, sendAdminBillingAlertEmail } = await import("../../utils/email");
+                const { sendPaymentFailureEmail, sendAdminBillingAlertEmail } =
+                  await import("../../utils/email");
                 await sendPaymentFailureEmail({
                   to: client.user.email,
-                  clientName: `${client.user.firstName || ""} ${client.user.lastName || ""}`.trim() || "Valued Client",
+                  clientName:
+                    `${client.user.firstName || ""} ${client.user.lastName || ""}`.trim() ||
+                    "Valued Client",
                   planName: sub.plan?.name || "AgeWellRI Plan",
-                  amount: (stripeInvoice.amount_due || 0) / 100 || sub.contractedPrice,
+                  amount:
+                    (stripeInvoice.amount_due || 0) / 100 ||
+                    sub.contractedPrice,
                   failedAt: new Date(),
                   failureReason,
                 });
@@ -1589,11 +1951,16 @@ export async function handleStripeWebhook(signature: string, rawBody: string | B
                   clientName: `${client.user.firstName} ${client.user.lastName}`,
                   clientEmail: client.user.email,
                   planName: sub.plan?.name || "AgeWellRI Plan",
-                  amount: (stripeInvoice.amount_due || 0) / 100 || sub.contractedPrice,
+                  amount:
+                    (stripeInvoice.amount_due || 0) / 100 ||
+                    sub.contractedPrice,
                   details: failureReason,
                 });
               } catch (mailErr) {
-                console.warn("⚠️ Failed to dispatch failure email alert:", mailErr);
+                console.warn(
+                  "⚠️ Failed to dispatch failure email alert:",
+                  mailErr,
+                );
               }
             }
 
@@ -1658,7 +2025,10 @@ export async function getAdminBillingOverview() {
     prisma.payment.findMany({
       take: 10,
       orderBy: { createdAt: "desc" },
-      include: { client: { include: { user: true } }, subscription: { include: { plan: true } } },
+      include: {
+        client: { include: { user: true } },
+        subscription: { include: { plan: true } },
+      },
     }),
   ]);
 
@@ -1667,7 +2037,10 @@ export async function getAdminBillingOverview() {
     .reduce((sum, inv) => sum + inv.amount, 0);
 
   const pendingChargesTotal = allInvoices
-    .filter((inv) => inv.status === InvoiceStatus.OPEN || inv.status === InvoiceStatus.DRAFT)
+    .filter(
+      (inv) =>
+        inv.status === InvoiceStatus.OPEN || inv.status === InvoiceStatus.DRAFT,
+    )
     .reduce((sum, inv) => sum + inv.amount, 0);
 
   const failedAmountTotal = failedPaymentsCount * 995;
@@ -1692,12 +2065,18 @@ export async function getAdminBillingOverview() {
     upcomingRenewalsNext30Days: upcomingRenewalsCount,
     recentTransactions: recentPayments.map((pm: any) => ({
       id: pm.id,
-      clientName: pm.client?.user ? `${pm.client.user.firstName} ${pm.client.user.lastName}`.trim() : "Client",
+      clientName: pm.client?.user
+        ? `${pm.client.user.firstName} ${pm.client.user.lastName}`.trim()
+        : "Client",
       clientId: pm.clientId,
       planName: pm.subscription?.plan?.name || "Monthly Care",
       amount: `$${pm.amount.toFixed(2)}`,
       status: pm.status.toLowerCase(),
-      date: pm.createdAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+      date: pm.createdAt.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }),
     })),
   };
 }
@@ -1711,7 +2090,6 @@ export async function getAdminInvoices(query: AdminBillingFilterInput) {
   const skip = (page - 1) * limit;
 
   const where: any = { isArchived: false };
-
 
   const validInvoiceStatuses: string[] = [
     InvoiceStatus.DRAFT,
@@ -1742,8 +2120,14 @@ export async function getAdminInvoices(query: AdminBillingFilterInput) {
     where.OR = [
       { invoiceNumber: { contains: term, mode: "insensitive" } },
       { client: { clientNumber: { contains: term, mode: "insensitive" } } },
-      { client: { user: { firstName: { contains: term, mode: "insensitive" } } } },
-      { client: { user: { lastName: { contains: term, mode: "insensitive" } } } },
+      {
+        client: {
+          user: { firstName: { contains: term, mode: "insensitive" } },
+        },
+      },
+      {
+        client: { user: { lastName: { contains: term, mode: "insensitive" } } },
+      },
       { client: { user: { email: { contains: term, mode: "insensitive" } } } },
     ];
   }
@@ -1775,15 +2159,39 @@ export async function getAdminInvoices(query: AdminBillingFilterInput) {
       id: inv.id,
       invoiceNumber: inv.invoiceNumber,
       clientId: inv.clientId,
-      clientName: inv.client?.user ? `${inv.client.user.firstName} ${inv.client.user.lastName}`.trim() : "Client",
+      clientName: inv.client?.user
+        ? `${inv.client.user.firstName} ${inv.client.user.lastName}`.trim()
+        : "Client",
       clientNumber: inv.client?.clientNumber || "AW-0000",
-      planName: inv.subscription?.plan?.name || "Essential Guard",
-      billingFrequency: inv.subscription?.billingInterval === "ANNUAL" ? "Annual" : inv.subscription?.billingInterval === "QUARTERLY" ? "Quarterly" : "Monthly",
+      planName:
+        inv.subscription?.plan?.name ||
+        inv.subscription?.planVersion?.name ||
+        (inv.client as any)?.selectedPlan ||
+        "Service Plan",
+      billingFrequency:
+        inv.subscription?.billingInterval === "ANNUAL"
+          ? "Annual"
+          : inv.subscription?.billingInterval === "MONTHLY"
+            ? "MONTHLY"
+            : "Monthly",
       amount: `$${inv.amount.toFixed(2)}`,
-      paymentMethod: inv.billingMethod === "AUTOMATIC" ? "Credit Card (Auto)" : "Pay by Invoice",
+      paymentMethod:
+        inv.billingMethod === "AUTOMATIC"
+          ? "Credit Card (Auto)"
+          : "Pay by Invoice",
       status: inv.status.toLowerCase(),
-      dueDate: inv.dueDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
-      paidAt: inv.paidAt ? inv.paidAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null,
+      dueDate: inv.dueDate.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }),
+      paidAt: inv.paidAt
+        ? inv.paidAt.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          })
+        : null,
       pdfUrl: inv.invoiceUrl || inv.stripeHostedInvoiceUrl || "#",
     })),
     pagination: {
@@ -1821,13 +2229,16 @@ export async function getAdminSubscriptions(query: AdminBillingFilterInput) {
       where.status = SubscriptionStatus.ACTIVE;
     } else if (upperStatus === "OPEN" || upperStatus === "PENDING") {
       where.status = SubscriptionStatus.PENDING;
-    } else if (upperStatus === "OVERDUE" || upperStatus === "FAILED" || upperStatus === "PAYMENT_FAILED") {
+    } else if (
+      upperStatus === "OVERDUE" ||
+      upperStatus === "FAILED" ||
+      upperStatus === "PAYMENT_FAILED"
+    ) {
       where.status = SubscriptionStatus.PAYMENT_FAILED;
     } else if (validSubscriptionStatuses.includes(upperStatus)) {
       where.status = upperStatus as SubscriptionStatus;
     }
   }
-
 
   if (query.billingMethod && query.billingMethod !== "ALL") {
     const upperMethod = query.billingMethod.toUpperCase();
@@ -1840,8 +2251,14 @@ export async function getAdminSubscriptions(query: AdminBillingFilterInput) {
     const term = query.search.trim();
     where.OR = [
       { client: { clientNumber: { contains: term, mode: "insensitive" } } },
-      { client: { user: { firstName: { contains: term, mode: "insensitive" } } } },
-      { client: { user: { lastName: { contains: term, mode: "insensitive" } } } },
+      {
+        client: {
+          user: { firstName: { contains: term, mode: "insensitive" } },
+        },
+      },
+      {
+        client: { user: { lastName: { contains: term, mode: "insensitive" } } },
+      },
       { client: { user: { email: { contains: term, mode: "insensitive" } } } },
       { plan: { name: { contains: term, mode: "insensitive" } } },
     ];
@@ -1874,20 +2291,38 @@ export async function getAdminSubscriptions(query: AdminBillingFilterInput) {
     subscriptions: subscriptions.map((sub: any) => ({
       id: sub.id,
       clientId: sub.clientId,
-      clientName: sub.client?.user ? `${sub.client.user.firstName} ${sub.client.user.lastName}`.trim() : "Client",
+      clientName: sub.client?.user
+        ? `${sub.client.user.firstName} ${sub.client.user.lastName}`.trim()
+        : "Client",
       clientNumber: sub.client?.clientNumber || "AW-0000",
-      planName: sub.planVersion?.name || sub.plan?.name || "Guardian Plus",
-      planPrice: `$${(sub.contractedPrice || sub.planVersion?.price || sub.plan?.price || 495).toFixed(2)}`,
+      planName:
+        sub.planVersion?.name ||
+        sub.plan?.name ||
+        (sub.client as any)?.selectedPlan ||
+        "Service Plan",
+      planPrice: `$${(sub.contractedPrice ?? sub.planVersion?.price ?? sub.plan?.price ?? 0).toFixed(2)}`,
       status: sub.status,
       billingInterval: sub.billingInterval || "MONTHLY",
       billingMethod: sub.billingMethod,
       autoRenew: sub.autoRenew,
       cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
-      cancellationEffectiveAt: sub.cancellationEffectiveAt ? sub.cancellationEffectiveAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null,
+      cancellationEffectiveAt: sub.cancellationEffectiveAt
+        ? sub.cancellationEffectiveAt.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          })
+        : null,
       currentPeriod: sub.periods?.[0]
         ? `${sub.periods[0].startDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${sub.periods[0].endDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
         : "N/A",
-      nextRenewalDate: sub.nextRenewalDate ? sub.nextRenewalDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "N/A",
+      nextRenewalDate: sub.nextRenewalDate
+        ? sub.nextRenewalDate.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          })
+        : "N/A",
     })),
     pagination: {
       total,
@@ -1897,7 +2332,6 @@ export async function getAdminSubscriptions(query: AdminBillingFilterInput) {
     },
   };
 }
-
 
 /**
  * Admin Upcoming Renewals Detailed Table
@@ -1912,7 +2346,12 @@ export async function getAdminUpcomingRenewals(query?: {
   const maxDate = new Date(now.getTime() + maxDays * 24 * 60 * 60 * 1000);
 
   const where: any = {
-    status: { in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELLATION_REQUESTED] },
+    status: {
+      in: [
+        SubscriptionStatus.ACTIVE,
+        SubscriptionStatus.CANCELLATION_REQUESTED,
+      ],
+    },
     nextRenewalDate: {
       gte: now,
       lte: maxDate,
@@ -1945,19 +2384,31 @@ export async function getAdminUpcomingRenewals(query?: {
 
   return subscriptions.map((sub) => {
     const renewalDate = new Date(sub.nextRenewalDate);
-    const daysRemaining = Math.max(0, Math.ceil((renewalDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+    const daysRemaining = Math.max(
+      0,
+      Math.ceil(
+        (renewalDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
+      ),
+    );
     const clientUser = sub.client?.user;
 
     return {
       subscriptionId: sub.id,
       clientId: sub.clientId,
       clientNumber: sub.client?.clientNumber || "AW-0000",
-      clientName: clientUser ? `${clientUser.firstName} ${clientUser.lastName}`.trim() : "Valued Member",
+      clientName: clientUser
+        ? `${clientUser.firstName} ${clientUser.lastName}`.trim()
+        : "Valued Member",
       clientEmail: clientUser?.email || "",
       clientPhone: sub.client?.phone || clientUser?.phone || "",
       representativeEmail: sub.client?.primaryContactEmail || null,
-      planName: sub.planVersion?.name || sub.plan?.name || "Guardian Plus",
-      contractedPrice: sub.contractedPrice ?? sub.planVersion?.price ?? sub.plan?.price ?? 495,
+      planName:
+        sub.planVersion?.name ||
+        sub.plan?.name ||
+        (sub.client as any)?.selectedPlan ||
+        "Service Plan",
+      contractedPrice:
+        sub.contractedPrice ?? sub.planVersion?.price ?? sub.plan?.price ?? 0,
       billingInterval: sub.billingInterval || "MONTHLY",
       billingMethod: sub.billingMethod || "AUTOMATIC",
       autoRenew: sub.autoRenew ?? true,
@@ -2001,13 +2452,15 @@ export async function adminRetryCharge(input: AdminRetryChargeInput) {
   // Prevent premature charges prior to first billing date
   if (invoice.dueDate && !isChargeAllowed(invoice.dueDate)) {
     throw new Error(
-      `Cannot execute payment before the scheduled first billing date (${formatBillingDate(invoice.dueDate)}). Real Stripe payment will execute on the 1st of the month.`
+      `Cannot execute payment before the scheduled first billing date (${formatBillingDate(invoice.dueDate)}). Real Stripe payment will execute on the 1st of the month.`,
     );
   }
 
   const client: any = invoice.client;
   if (!client.stripeCustomerId || !client.stripePaymentMethodId) {
-    throw new Error("Client has no saved payment method attached for automatic charge retry.");
+    throw new Error(
+      "Client has no saved payment method attached for automatic charge retry.",
+    );
   }
 
   const paymentIntent = await stripe.paymentIntents.create({
@@ -2062,7 +2515,7 @@ export async function adminRetryCharge(input: AdminRetryChargeInput) {
 export async function adminCancelSubscription(
   subscriptionId: string,
   input: AdminCancelSubscriptionInput,
-  actorUserId?: string
+  actorUserId?: string,
 ) {
   const subscription = await (prisma.subscription.findUnique as any)({
     where: { id: subscriptionId },
@@ -2091,7 +2544,8 @@ export async function adminCancelSubscription(
         cancelledAt: now,
         cancellationRequestedAt: now,
         cancellationEffectiveAt: now,
-        cancellationReason: input.reason || "Immediate cancellation executed by Administrator.",
+        cancellationReason:
+          input.reason || "Immediate cancellation executed by Administrator.",
       },
     });
 
@@ -2111,7 +2565,10 @@ export async function adminCancelSubscription(
       try {
         await stripe.subscriptions.cancel(subscription.stripeSubscriptionId);
       } catch (stripeErr: any) {
-        console.warn("⚠️ Notice: Stripe subscription cancellation:", stripeErr.message);
+        console.warn(
+          "⚠️ Notice: Stripe subscription cancellation:",
+          stripeErr.message,
+        );
       }
     }
 
@@ -2137,6 +2594,34 @@ export async function adminCancelSubscription(
       metadata: { reason: input.reason, clientId: subscription.clientId },
     });
 
+    // Dispatch Cancellation Confirmation Email
+    const clientUser = subscription.client?.user;
+    const recipientEmail =
+      clientUser?.email || subscription.client?.primaryContactEmail;
+    if (recipientEmail) {
+      try {
+        const { sendSubscriptionCancelledEmail } = await import(
+          "../../utils/email"
+        );
+        await sendSubscriptionCancelledEmail({
+          to: recipientEmail,
+          clientName:
+            `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() ||
+            "Valued Member",
+          planName:
+            subscription.planVersion?.name ||
+            subscription.plan?.name ||
+            "AgeWellRI Plan",
+          serviceEndDate: now,
+        });
+      } catch (mailErr: any) {
+        console.warn(
+          "⚠️ Failed to dispatch admin cancellation email:",
+          mailErr.message,
+        );
+      }
+    }
+
     return {
       success: true,
       message: `Subscription for ${subscription.client?.user?.firstName || "Client"} has been cancelled immediately.`,
@@ -2144,7 +2629,8 @@ export async function adminCancelSubscription(
     };
   } else {
     // 2. Scheduled Cancellation: Cancel at period end
-    const effectiveDate = subscription.currentPeriodEnd || subscription.nextRenewalDate || now;
+    const effectiveDate =
+      subscription.currentPeriodEnd || subscription.nextRenewalDate || now;
     const updated = await (prisma.subscription.update as any)({
       where: { id: subscriptionId },
       data: {
@@ -2153,7 +2639,9 @@ export async function adminCancelSubscription(
         cancelAtPeriodEnd: true,
         cancellationRequestedAt: now,
         cancellationEffectiveAt: effectiveDate,
-        cancellationReason: input.reason || "Cancellation scheduled at period end by Administrator.",
+        cancellationReason:
+          input.reason ||
+          "Cancellation scheduled at period end by Administrator.",
       },
     });
 
@@ -2162,8 +2650,40 @@ export async function adminCancelSubscription(
       action: "ADMIN_SUBSCRIPTION_CANCEL_SCHEDULED",
       entityType: "Subscription",
       entityId: subscriptionId,
-      metadata: { reason: input.reason, effectiveDate, clientId: subscription.clientId },
+      metadata: {
+        reason: input.reason,
+        effectiveDate,
+        clientId: subscription.clientId,
+      },
     });
+
+    // Dispatch Cancellation Confirmation Email
+    const clientUser = subscription.client?.user;
+    const recipientEmail =
+      clientUser?.email || subscription.client?.primaryContactEmail;
+    if (recipientEmail) {
+      try {
+        const { sendSubscriptionCancelledEmail } = await import(
+          "../../utils/email"
+        );
+        await sendSubscriptionCancelledEmail({
+          to: recipientEmail,
+          clientName:
+            `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() ||
+            "Valued Member",
+          planName:
+            subscription.planVersion?.name ||
+            subscription.plan?.name ||
+            "AgeWellRI Plan",
+          serviceEndDate: effectiveDate,
+        });
+      } catch (mailErr: any) {
+        console.warn(
+          "⚠️ Failed to dispatch admin scheduled cancellation email:",
+          mailErr.message,
+        );
+      }
+    }
 
     return {
       success: true,
@@ -2178,15 +2698,33 @@ export async function adminCancelSubscription(
  */
 export async function adminReactivateSubscription(
   subscriptionId: string,
-  actorUserId?: string
+  actorUserId?: string,
 ) {
   const subscription = await (prisma.subscription.findUnique as any)({
     where: { id: subscriptionId },
-    include: { client: { include: { user: true } } },
+    include: {
+      client: { include: { user: true } },
+      plan: true,
+      planVersion: true,
+    },
   });
 
   if (!subscription) {
     throw new Error("Subscription not found.");
+  }
+
+  // Clear cancel_at_period_end on Stripe subscription if exists
+  if (subscription.stripeSubscriptionId) {
+    try {
+      await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
+        cancel_at_period_end: false,
+      });
+    } catch (stripeErr: any) {
+      console.warn(
+        "⚠️ Could not clear cancel_at_period_end on Stripe Subscription:",
+        stripeErr.message,
+      );
+    }
   }
 
   const updated = await (prisma.subscription.update as any)({
@@ -2224,6 +2762,40 @@ export async function adminReactivateSubscription(
     metadata: { clientId: subscription.clientId },
   });
 
+  // Dispatch Reactivation Confirmation Email
+  const clientUser = subscription.client?.user;
+  const recipientEmail =
+    clientUser?.email || subscription.client?.primaryContactEmail;
+  if (recipientEmail) {
+    try {
+      const { sendSubscriptionReactivatedEmail } = await import(
+        "../../utils/email"
+      );
+      await sendSubscriptionReactivatedEmail({
+        to: recipientEmail,
+        clientName:
+          `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() ||
+          "Valued Member",
+        planName:
+          subscription.planVersion?.name ||
+          subscription.plan?.name ||
+          "AgeWellRI Plan",
+        nextBillingDate:
+          subscription.nextRenewalDate || subscription.currentPeriodEnd,
+        recurringAmount:
+          subscription.contractedPrice ??
+          subscription.planVersion?.price ??
+          subscription.plan?.price ??
+          null,
+      });
+    } catch (mailErr: any) {
+      console.warn(
+        "⚠️ Failed to dispatch admin reactivation email:",
+        mailErr.message,
+      );
+    }
+  }
+
   return {
     success: true,
     message: `Subscription for ${subscription.client?.user?.firstName || "Client"} has been reactivated with auto-renewal enabled.`,
@@ -2237,7 +2809,7 @@ export async function adminReactivateSubscription(
 export async function adminUpdateSubscriptionStatus(
   subscriptionId: string,
   input: AdminUpdateSubscriptionStatusInput,
-  actorUserId?: string
+  actorUserId?: string,
 ) {
   const subscription = await (prisma.subscription.findUnique as any)({
     where: { id: subscriptionId },

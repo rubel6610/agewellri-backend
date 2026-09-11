@@ -354,7 +354,7 @@ const options: swaggerJSDoc.Options = {
                 schema: {
                   type: "object",
                   properties: {
-                    plan: { type: "string", enum: ["ESSENTIAL_GUARD", "GUARDIAN_PLUS"] },
+                    plan: { type: "string", example: "Home Safety Oversight" },
                     hasCleaningAddon: { type: "boolean" },
                   },
                 },
@@ -383,8 +383,8 @@ const options: swaggerJSDoc.Options = {
                   properties: {
                     amount: { type: "number", example: 99.0 },
                     currency: { type: "string", example: "usd" },
-                    description: { type: "string", example: "Quarterly Safety Membership" },
-                    selectedPlan: { type: "string", enum: ["ESSENTIAL_GUARD", "GUARDIAN_PLUS"] },
+                    description: { type: "string", example: "Monthly Safety Membership" },
+                    selectedPlan: { type: "string", example: "Home Safety Oversight" },
                   },
                 },
               },
@@ -453,7 +453,7 @@ const options: swaggerJSDoc.Options = {
         post: {
           tags: ["Payments & Stripe"],
           summary: "Process Agreement Payment & Activate Membership",
-          description: "Attaches Stripe payment method, provisions the client's quarterly subscription, visit allocations, and generates the initial invoice.",
+          description: "Attaches Stripe payment method, provisions the client's subscription, visit allocations, and generates the initial invoice.",
           security: [{ bearerAuth: [] }],
           requestBody: {
             content: {
@@ -463,7 +463,7 @@ const options: swaggerJSDoc.Options = {
                   properties: {
                     paymentMethodId: { type: "string", example: "pm_card_visa" },
                     setupIntentId: { type: "string", example: "seti_12345" },
-                    selectedPlan: { type: "string", enum: ["ESSENTIAL_GUARD", "GUARDIAN_PLUS"], default: "ESSENTIAL_GUARD" },
+                    selectedPlan: { type: "string", example: "Home Safety Oversight" },
                     hasCleaningAddon: { type: "boolean", default: false },
                   },
                 },

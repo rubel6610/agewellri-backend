@@ -1,7 +1,4 @@
-import {
-  BillingInterval,
-  ServiceTypeCategory,
-} from "@prisma/client";
+import { BillingInterval, ServiceTypeCategory } from "@prisma/client";
 import prisma from "../../lib/prisma";
 import { stripe } from "../../config/stripe";
 import {
@@ -52,7 +49,8 @@ async function createPlanAuditLog(params: {
  * Dynamically resolves current active PlanVersion, PlanPrice, features, and visit quotas.
  */
 export async function getActivePlans() {
-  let allPlans = await (prisma.servicePlan.findMany as any)({
+  const allPlans = await (prisma.servicePlan.findMany as any)({
+    where: { isActive: true, isArchived: false },
     include: {
       planServices: { include: { serviceType: true } },
       versions: {
@@ -62,32 +60,10 @@ export async function getActivePlans() {
     },
   });
 
-  let activePlans = (allPlans || []).filter(
-    (p: any) => p.isActive === true && p.isArchived !== true
-  );
-
-  if (!activePlans || activePlans.length === 0) {
-    await seedInitialPlansAndServices();
-    allPlans = await (prisma.servicePlan.findMany as any)({
-      include: {
-        planServices: { include: { serviceType: true } },
-        versions: {
-          orderBy: { versionNumber: "desc" },
-          include: { planServices: { include: { serviceType: true } } },
-        },
-      },
-    });
-    activePlans = (allPlans || []).filter(
-      (p: any) => p.isActive === true && p.isArchived !== true
-    );
-
-    if (activePlans.length === 0 && allPlans && allPlans.length > 0) {
-      activePlans = allPlans.filter((p: any) => p.isArchived !== true);
-    }
-  }
+  const activePlans = allPlans || [];
 
   const sortedPlans = activePlans.sort(
-    (a: any, b: any) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0)
+    (a: any, b: any) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0),
   );
 
   return sortedPlans.map((plan: any) => {
@@ -110,33 +86,24 @@ export async function getActivePlans() {
     const totalVisits =
       services.reduce(
         (sum: number, s: any) => sum + (s.allocatedVisits || 0),
-        0
-      ) || (plan.code === "GUARDIAN_PLUS" ? 4 : 2);
+        0,
+      ) ||
+      latestVersion?.allocatedVisits ||
+      0;
 
     const metadataFeatures = (plan.metadata as any)?.features;
     const versionFeatures = latestVersion?.features;
-    const defaultFeatures =
-      plan.code === "GUARDIAN_PLUS"
-        ? [
-            "2 Safety Oversight Visits / Month",
-            "2 Home Cleaning Visits / Month",
-            "HEPA Allergen Deep Vacuuming & Sanitization",
-            "Home Safety Hazard Mitigation",
-            "Direct Caregiver & Family Report Dispatch",
-          ]
-        : [
-            "2 Safety Oversight Visits / Month",
-            "Home Safety Score & Hazard Assessment",
-            "Family Portal Access with Live Reports",
-            "Dedicated Local Care Concierge",
-          ];
 
     const features =
-      metadataFeatures && Array.isArray(metadataFeatures) && metadataFeatures.length > 0
+      metadataFeatures &&
+      Array.isArray(metadataFeatures) &&
+      metadataFeatures.length > 0
         ? metadataFeatures
-        : versionFeatures && Array.isArray(versionFeatures) && versionFeatures.length > 0
-        ? versionFeatures
-        : defaultFeatures;
+        : versionFeatures &&
+            Array.isArray(versionFeatures) &&
+            versionFeatures.length > 0
+          ? versionFeatures
+          : [];
 
     return {
       id: plan.id,
@@ -179,7 +146,9 @@ export async function getAllAdminPlans() {
     },
   });
 
-  const sortedPlans = plans.sort((a: any, b: any) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+  const sortedPlans = plans.sort(
+    (a: any, b: any) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0),
+  );
 
   return sortedPlans.map((plan: any) => {
     const latestVersion = plan.versions?.[0];
@@ -199,31 +168,24 @@ export async function getAllAdminPlans() {
     const totalVisits =
       services.reduce(
         (sum: number, s: any) => sum + (s.allocatedVisits || 0),
-        0
-      ) || (plan.code === "GUARDIAN_PLUS" ? 12 : 6);
+        0,
+      ) ||
+      latestVersion?.allocatedVisits ||
+      0;
 
     const metadataFeatures = (plan.metadata as any)?.features;
     const versionFeatures = latestVersion?.features;
-    const defaultFeatures =
-      plan.code === "GUARDIAN_PLUS"
-        ? [
-            "2 Safety Oversight Visits / Month",
-            "2 Home Cleaning Visits / Month",
-            "HEPA Allergen Deep Vacuuming & Sanitization",
-            "Home Safety Hazard Mitigation",
-          ]
-        : [
-            "2 Safety Oversight Visits / Month",
-            "Home Safety Score & Hazard Assessment",
-            "Family Portal Access with Live Reports",
-          ];
 
     const features =
-      metadataFeatures && Array.isArray(metadataFeatures) && metadataFeatures.length > 0
+      metadataFeatures &&
+      Array.isArray(metadataFeatures) &&
+      metadataFeatures.length > 0
         ? metadataFeatures
-        : versionFeatures && Array.isArray(versionFeatures) && versionFeatures.length > 0
-        ? versionFeatures
-        : defaultFeatures;
+        : versionFeatures &&
+            Array.isArray(versionFeatures) &&
+            versionFeatures.length > 0
+          ? versionFeatures
+          : [];
 
     const versions =
       plan.versions && plan.versions.length > 0
@@ -235,8 +197,10 @@ export async function getAllAdminPlans() {
             status: ver.status || "ACTIVE",
             price: ver.price,
             currency: ver.currency || "USD",
-            billingInterval: ver.billingInterval || plan.billingInterval || "MONTHLY",
-            features: ver.features && ver.features.length > 0 ? ver.features : features,
+            billingInterval:
+              ver.billingInterval || plan.billingInterval || "MONTHLY",
+            features:
+              ver.features && ver.features.length > 0 ? ver.features : features,
             effectiveFrom: ver.effectiveFrom || ver.createdAt || plan.createdAt,
             effectiveTo: ver.effectiveTo || null,
             planServices:
@@ -326,24 +290,18 @@ export async function getAdminPlanById(planId: string) {
   }
 
   const metadataFeatures = (plan.metadata as any)?.features;
-  const defaultFeatures =
-    plan.code === "GUARDIAN_PLUS"
-      ? [
-          "2 Safety Oversight Visits / Month",
-          "2 Home Cleaning Visits / Month",
-          "HEPA Allergen Deep Vacuuming & Sanitization",
-          "Home Safety Hazard Mitigation",
-        ]
-      : [
-          "2 Safety Oversight Visits / Month",
-          "Home Safety Score & Hazard Assessment",
-          "Family Portal Access with Live Reports",
-        ];
+  const versionFeatures = plan.versions?.[0]?.features;
 
   const planFeatures =
-    metadataFeatures && Array.isArray(metadataFeatures) && metadataFeatures.length > 0
+    metadataFeatures &&
+    Array.isArray(metadataFeatures) &&
+    metadataFeatures.length > 0
       ? metadataFeatures
-      : defaultFeatures;
+      : versionFeatures &&
+          Array.isArray(versionFeatures) &&
+          versionFeatures.length > 0
+        ? versionFeatures
+        : [];
 
   const planServicesFormatted = (plan.planServices || []).map((ps: any) => ({
     serviceTypeId: ps.serviceTypeId,
@@ -364,8 +322,12 @@ export async function getAdminPlanById(planId: string) {
           status: ver.status || "ACTIVE",
           price: ver.price,
           currency: ver.currency || "USD",
-          billingInterval: ver.billingInterval || plan.billingInterval || "MONTHLY",
-          features: ver.features && ver.features.length > 0 ? ver.features : planFeatures,
+          billingInterval:
+            ver.billingInterval || plan.billingInterval || "MONTHLY",
+          features:
+            ver.features && ver.features.length > 0
+              ? ver.features
+              : planFeatures,
           effectiveFrom: ver.effectiveFrom || ver.createdAt || plan.createdAt,
           effectiveTo: ver.effectiveTo || null,
           planServices:
@@ -405,7 +367,11 @@ export async function getAdminPlanById(planId: string) {
     planVersionId: sub.planVersionId,
     client: {
       id: sub.client?.id,
-      clientNumber: sub.client?.clientNumber || (sub.client?.id ? `AW-${sub.client.id.slice(-5).toUpperCase()}` : "AW-MEM"),
+      clientNumber:
+        sub.client?.clientNumber ||
+        (sub.client?.id
+          ? `AW-${sub.client.id.slice(-5).toUpperCase()}`
+          : "AW-MEM"),
       firstName: sub.client?.user?.firstName || "Valued",
       lastName: sub.client?.user?.lastName || "Member",
       email: sub.client?.user?.email || "",
@@ -425,7 +391,9 @@ export async function getAdminPlanById(planId: string) {
 /**
  * Safely resolves a ServiceType MongoDB ObjectId by ID, code, name, or category.
  */
-async function resolveServiceTypeId(rawIdOrCode: string): Promise<string | null> {
+async function resolveServiceTypeId(
+  rawIdOrCode: string,
+): Promise<string | null> {
   if (!rawIdOrCode || typeof rawIdOrCode !== "string") return null;
 
   // 1. Check if it's already a valid 24-character hexadecimal ObjectId in DB
@@ -444,7 +412,12 @@ async function resolveServiceTypeId(rawIdOrCode: string): Promise<string | null>
       OR: [
         { code: { equals: rawIdOrCode, mode: "insensitive" } },
         { name: { equals: rawIdOrCode, mode: "insensitive" } },
-        { name: { contains: rawIdOrCode.replace(/srv_|_/g, " ").trim(), mode: "insensitive" } },
+        {
+          name: {
+            contains: rawIdOrCode.replace(/srv_|_/g, " ").trim(),
+            mode: "insensitive",
+          },
+        },
       ],
     },
     select: { id: true },
@@ -557,7 +530,9 @@ export async function createPlan(input: CreatePlanInput, actorUserId?: string) {
 
     if (input.services && input.services.length > 0) {
       for (const serviceItem of input.services) {
-        const resolvedId = await resolveServiceTypeId(serviceItem.serviceTypeId);
+        const resolvedId = await resolveServiceTypeId(
+          serviceItem.serviceTypeId,
+        );
         if (resolvedId) {
           await (prisma.planService.create as any)({
             data: {
@@ -598,7 +573,7 @@ export async function createPlan(input: CreatePlanInput, actorUserId?: string) {
 export async function updatePlan(
   planId: string,
   input: UpdatePlanInput,
-  actorUserId?: string
+  actorUserId?: string,
 ) {
   const existingPlan = await (prisma.servicePlan.findUnique as any)({
     where: { id: planId },
@@ -618,15 +593,22 @@ export async function updatePlan(
   // 1. Prepare ServicePlan update data with proper Prisma fields
   const updateData: any = {};
   if (input.name !== undefined) updateData.name = input.name;
-  if (input.shortDescription !== undefined) updateData.shortDescription = input.shortDescription;
-  if (input.fullDescription !== undefined) updateData.fullDescription = input.fullDescription;
+  if (input.shortDescription !== undefined)
+    updateData.shortDescription = input.shortDescription;
+  if (input.fullDescription !== undefined)
+    updateData.fullDescription = input.fullDescription;
   if (input.price !== undefined) updateData.price = input.price;
-  if (input.billingInterval !== undefined) updateData.billingInterval = input.billingInterval as BillingInterval;
-  if (input.displayOrder !== undefined) updateData.displayOrder = input.displayOrder;
+  if (input.billingInterval !== undefined)
+    updateData.billingInterval = input.billingInterval as BillingInterval;
+  if (input.displayOrder !== undefined)
+    updateData.displayOrder = input.displayOrder;
   if (input.isActive !== undefined) updateData.isActive = input.isActive;
-  if (input.supportsAutomaticBilling !== undefined) updateData.supportsAutomaticBilling = input.supportsAutomaticBilling;
-  if (input.supportsInvoiceBilling !== undefined) updateData.supportsInvoiceBilling = input.supportsInvoiceBilling;
-  if (input.autoRenewDefault !== undefined) updateData.autoRenewDefault = input.autoRenewDefault;
+  if (input.supportsAutomaticBilling !== undefined)
+    updateData.supportsAutomaticBilling = input.supportsAutomaticBilling;
+  if (input.supportsInvoiceBilling !== undefined)
+    updateData.supportsInvoiceBilling = input.supportsInvoiceBilling;
+  if (input.autoRenewDefault !== undefined)
+    updateData.autoRenewDefault = input.autoRenewDefault;
 
   if (input.features !== undefined) {
     const currentMeta = (existingPlan.metadata as any) || {};
@@ -665,8 +647,10 @@ export async function updatePlan(
   // 3. PlanVersion Management
   const latestVer = existingPlan.versions?.[0];
   const activeSubscribers = existingPlan.subscriptions?.length || 0;
-  const isPriceChanged = input.price !== undefined && latestVer && input.price !== latestVer.price;
-  const shouldCreateNewVersion = (isPriceChanged && activeSubscribers > 0) || input.forceNewVersion;
+  const isPriceChanged =
+    input.price !== undefined && latestVer && input.price !== latestVer.price;
+  const shouldCreateNewVersion =
+    (isPriceChanged && activeSubscribers > 0) || input.forceNewVersion;
 
   if (shouldCreateNewVersion) {
     const nextVerNumber = (latestVer?.versionNumber || 1) + 1;
@@ -686,17 +670,23 @@ export async function updatePlan(
         planId,
         versionNumber: nextVerNumber,
         name: input.name || existingPlan.name,
-        description: input.shortDescription || existingPlan.shortDescription || "",
+        description:
+          input.shortDescription || existingPlan.shortDescription || "",
         status: "ACTIVE",
         price: input.price !== undefined ? input.price : existingPlan.price,
-        billingInterval: (input.billingInterval || existingPlan.billingInterval) as BillingInterval,
+        billingInterval: (input.billingInterval ||
+          existingPlan.billingInterval) as BillingInterval,
         currency: input.currency || "USD",
-        features: input.features || (existingPlan.metadata as any)?.features || [],
+        features:
+          input.features || (existingPlan.metadata as any)?.features || [],
         effectiveFrom: new Date(),
       },
     });
 
-    const servicesToAttach = input.services !== undefined ? input.services : existingPlan.planServices || [];
+    const servicesToAttach =
+      input.services !== undefined
+        ? input.services
+        : existingPlan.planServices || [];
     for (const s of servicesToAttach) {
       const resolvedId = await resolveServiceTypeId(s.serviceTypeId);
       if (resolvedId) {
@@ -713,9 +703,11 @@ export async function updatePlan(
   } else if (latestVer) {
     const verUpdateData: any = {};
     if (input.name !== undefined) verUpdateData.name = input.name;
-    if (input.shortDescription !== undefined) verUpdateData.description = input.shortDescription;
+    if (input.shortDescription !== undefined)
+      verUpdateData.description = input.shortDescription;
     if (input.price !== undefined) verUpdateData.price = input.price;
-    if (input.billingInterval !== undefined) verUpdateData.billingInterval = input.billingInterval as BillingInterval;
+    if (input.billingInterval !== undefined)
+      verUpdateData.billingInterval = input.billingInterval as BillingInterval;
     if (input.features !== undefined) verUpdateData.features = input.features;
 
     await ((prisma as any).planVersion.update as any)({
@@ -728,7 +720,9 @@ export async function updatePlan(
         where: { planVersionId: latestVer.id },
       });
       for (const serviceItem of input.services) {
-        const resolvedId = await resolveServiceTypeId(serviceItem.serviceTypeId);
+        const resolvedId = await resolveServiceTypeId(
+          serviceItem.serviceTypeId,
+        );
         if (resolvedId) {
           await (prisma.planService.create as any)({
             data: {
@@ -749,12 +743,15 @@ export async function updatePlan(
           planId,
           versionNumber: 1,
           name: input.name || existingPlan.name,
-          description: input.shortDescription || existingPlan.shortDescription || "",
+          description:
+            input.shortDescription || existingPlan.shortDescription || "",
           status: "ACTIVE",
           price: input.price !== undefined ? input.price : existingPlan.price,
-          billingInterval: (input.billingInterval || existingPlan.billingInterval) as BillingInterval,
+          billingInterval: (input.billingInterval ||
+            existingPlan.billingInterval) as BillingInterval,
           currency: input.currency || "USD",
-          features: input.features || (existingPlan.metadata as any)?.features || [],
+          features:
+            input.features || (existingPlan.metadata as any)?.features || [],
           effectiveFrom: existingPlan.createdAt,
         },
       });
@@ -802,7 +799,7 @@ export async function updatePlan(
 export async function changePlanStatus(
   planId: string,
   input: ChangePlanStatusInput,
-  actorUserId?: string
+  actorUserId?: string,
 ) {
   const plan = await (prisma.servicePlan.findUnique as any)({
     where: { id: planId },
@@ -855,7 +852,7 @@ export async function deletePlan(planId: string, actorUserId?: string) {
   const activeSubscribersCount = plan.subscriptions?.length || 0;
   if (activeSubscribersCount > 0) {
     throw new Error(
-      `Cannot delete "${plan.name}" because it currently has ${activeSubscribersCount} active subscriber(s). Please reassign or cancel existing subscriptions before deleting.`
+      `Cannot delete "${plan.name}" because it currently has ${activeSubscribersCount} active subscriber(s). Please reassign or cancel existing subscriptions before deleting.`,
     );
   }
 
@@ -935,29 +932,18 @@ export async function getAllServices(query?: {
     ];
   }
 
-  let existing = await (prisma.serviceType.findMany as any)({
+  const existing = await (prisma.serviceType.findMany as any)({
     where,
     orderBy: { displayOrder: "asc" },
   });
 
-  if (existing && existing.length > 0) {
-    return existing;
-  }
-
-  // Auto seed default services if catalog is empty
-  const totalCount = await (prisma.serviceType.count as any)();
-  if (totalCount === 0) {
-    await seedInitialPlansAndServices();
-    existing = await (prisma.serviceType.findMany as any)({
-      where,
-      orderBy: { displayOrder: "asc" },
-    });
-  }
-
   return existing || [];
 }
 
-export async function createService(input: CreateServiceInput, actorUserId?: string) {
+export async function createService(
+  input: CreateServiceInput,
+  actorUserId?: string,
+) {
   const code =
     input.code ||
     input.name
@@ -993,16 +979,21 @@ export async function createService(input: CreateServiceInput, actorUserId?: str
 export async function updateService(
   serviceId: string,
   input: UpdateServiceInput,
-  actorUserId?: string
+  actorUserId?: string,
 ) {
   const updateData: any = {};
   if (input.name !== undefined) updateData.name = input.name;
   if (input.code !== undefined) updateData.code = input.code;
-  if (input.category !== undefined) updateData.category = input.category as ServiceTypeCategory;
-  if (input.description !== undefined) updateData.description = input.description;
-  if (input.durationMinutes !== undefined) updateData.durationMinutes = input.durationMinutes;
-  if (input.defaultPrice !== undefined) updateData.defaultPrice = input.defaultPrice;
-  if (input.displayOrder !== undefined) updateData.displayOrder = input.displayOrder;
+  if (input.category !== undefined)
+    updateData.category = input.category as ServiceTypeCategory;
+  if (input.description !== undefined)
+    updateData.description = input.description;
+  if (input.durationMinutes !== undefined)
+    updateData.durationMinutes = input.durationMinutes;
+  if (input.defaultPrice !== undefined)
+    updateData.defaultPrice = input.defaultPrice;
+  if (input.displayOrder !== undefined)
+    updateData.displayOrder = input.displayOrder;
   if (input.isActive !== undefined) updateData.isActive = input.isActive;
 
   const service = await (prisma.serviceType.update as any)({
@@ -1024,7 +1015,7 @@ export async function updateService(
 export async function changeServiceStatus(
   serviceId: string,
   isActive: boolean,
-  actorUserId?: string
+  actorUserId?: string,
 ) {
   const service = await (prisma.serviceType.update as any)({
     where: { id: serviceId },
@@ -1062,7 +1053,10 @@ export async function deleteService(serviceId: string, actorUserId?: string) {
       action: "SERVICE_DEACTIVATED",
       entityType: "ServiceType",
       entityId: serviceId,
-      newValues: { isActive: false, reason: "Deactivated due to existing references" },
+      newValues: {
+        isActive: false,
+        reason: "Deactivated due to existing references",
+      },
     });
 
     return {
@@ -1094,23 +1088,16 @@ export async function deleteService(serviceId: string, actorUserId?: string) {
 }
 
 export async function getServiceCatalogStats() {
-  let allServices = await (prisma.serviceType.findMany as any)({
+  const allServices = await (prisma.serviceType.findMany as any)({
     include: {
       planServices: true,
     },
   });
 
-  if (!allServices || allServices.length === 0) {
-    await seedInitialPlansAndServices();
-    allServices = await (prisma.serviceType.findMany as any)({
-      include: {
-        planServices: true,
-      },
-    });
-  }
-
   const totalServices = allServices?.length || 0;
-  const activeServices = (allServices || []).filter((s: any) => s.isActive !== false).length;
+  const activeServices = (allServices || []).filter(
+    (s: any) => s.isActive !== false,
+  ).length;
   const inactiveServices = totalServices - activeServices;
 
   const categoryCounts: Record<string, { total: number; active: number }> = {
@@ -1131,15 +1118,17 @@ export async function getServiceCatalogStats() {
   });
 
   const categoriesWithServices = Object.keys(categoryCounts).filter(
-    (k) => categoryCounts[k].total > 0
+    (k) => categoryCounts[k].total > 0,
   ).length;
 
   const totalPlanLinks = (allServices || []).reduce(
     (acc: number, s: any) => acc + (s.planServices?.length || 0),
-    0
+    0,
   );
 
-  const totalAppointments = await (prisma.appointment.count as any)().catch(() => 0);
+  const totalAppointments = await (prisma.appointment.count as any)().catch(
+    () => 0,
+  );
 
   return {
     totalServices,
@@ -1154,7 +1143,8 @@ export async function getServiceCatalogStats() {
 }
 
 /**
- * Seed approved dynamic service plans and services if database catalog is empty.
+ * Seed approved dynamic service types if database catalog is empty.
+ * Service plans are created dynamically by the admin.
  */
 export async function seedInitialPlansAndServices() {
   let safetyService = await (prisma.serviceType.findFirst as any)({
@@ -1173,7 +1163,8 @@ export async function seedInitialPlansAndServices() {
         name: "Safety Oversight",
         code: "SAFETY_OVERSIGHT",
         category: "SAFETY_OVERSIGHT",
-        description: "Monthly home safety audits, hazard checks and wellness reports.",
+        description:
+          "Monthly home safety audits, hazard checks and wellness reports.",
         durationMinutes: 60,
         defaultPrice: 150,
         displayOrder: 1,
@@ -1198,7 +1189,8 @@ export async function seedInitialPlansAndServices() {
         name: "Home Cleaning",
         code: "HOME_CLEANING",
         category: "CLEANING",
-        description: "HEPA allergen vacuuming, pathway clearing, kitchen & living area maintenance.",
+        description:
+          "HEPA allergen vacuuming, pathway clearing, kitchen & living area maintenance.",
         durationMinutes: 90,
         defaultPrice: 150,
         displayOrder: 2,
@@ -1207,106 +1199,21 @@ export async function seedInitialPlansAndServices() {
     });
   }
 
-  // 1. Seed / Sync "Essential Guard" Plan ($295/Monthly - 2 Safety Oversight Visits)
-  let essentialPlan = await (prisma.servicePlan.findFirst as any)({
-    where: { code: "ESSENTIAL_GUARD" },
-  });
-
-  if (!essentialPlan) {
-    essentialPlan = await createPlan({
-      name: "Essential Guard",
-      code: "ESSENTIAL_GUARD",
-      shortDescription: "Essential non-medical home safety oversight and hazard mitigation.",
-      fullDescription: "Comprehensive monthly non-medical home safety oversight and hazard mitigation designed to protect and support independent senior living.",
-      price: 295,
-      billingInterval: "MONTHLY",
-      displayOrder: 1,
-      features: [
-        "2 Safety Oversight Visits / Month",
-        "Home Safety Score & Hazard Assessment",
-        "Family Portal Access with Live Reports",
-      ],
-      services: [
-        {
-          serviceTypeId: safetyService.id,
-          allocatedVisits: 2,
-          unit: "visits",
-        },
-      ],
-      isActive: true,
-    });
-  } else {
-    essentialPlan = await (prisma.servicePlan.update as any)({
-      where: { id: essentialPlan.id },
-      data: {
-        isActive: true,
-        isArchived: false,
-        billingInterval: "MONTHLY",
-      },
-    });
-  }
-
-  // 2. Seed / Sync "Guardian Plus" Plan ($495/Monthly - 2 Safety + 2 Cleaning Visits)
-  let guardianPlan = await (prisma.servicePlan.findFirst as any)({
-    where: { code: "GUARDIAN_PLUS" },
-  });
-
-  if (!guardianPlan) {
-    guardianPlan = await createPlan({
-      name: "Guardian Plus",
-      code: "GUARDIAN_PLUS",
-      shortDescription: "Complete dual-protection safety oversight and specialized home cleaning.",
-      fullDescription: "Complete dual-protection monthly safety oversight and specialized environmental home cleaning. Includes 4 total visits per month.",
-      price: 495,
-      billingInterval: "MONTHLY",
-      displayOrder: 2,
-      features: [
-        "2 Safety Oversight Visits / Month",
-        "2 Home Cleaning Visits / Month",
-        "HEPA Allergen Deep Vacuuming & Sanitization",
-        "Home Safety Hazard Mitigation",
-        "Direct Caregiver & Family Report Dispatch",
-      ],
-      services: [
-        {
-          serviceTypeId: safetyService.id,
-          allocatedVisits: 2,
-          unit: "visits",
-        },
-        {
-          serviceTypeId: cleaningService.id,
-          allocatedVisits: 2,
-          unit: "visits",
-        },
-      ],
-      isActive: true,
-    });
-  } else {
-    guardianPlan = await (prisma.servicePlan.update as any)({
-      where: { id: guardianPlan.id },
-      data: {
-        isActive: true,
-        isArchived: false,
-        billingInterval: "MONTHLY",
-      },
-    });
-  }
-
-  // 3. Migrate any existing database plan versions & prices to MONTHLY
+  // Migrate any existing database plan versions & prices to MONTHLY
   try {
     await (prisma.planVersion.updateMany as any)({
-      where: { billingInterval: "QUARTERLY" },
+      where: { billingInterval: "MONTHLY" },
       data: { billingInterval: "MONTHLY" },
     });
     await (prisma.planPrice.updateMany as any)({
-      where: { billingInterval: "QUARTERLY" },
+      where: { billingInterval: "MONTHLY" },
       data: { billingInterval: "MONTHLY" },
     });
     await (prisma.subscription.updateMany as any)({
-      where: { billingInterval: "QUARTERLY" },
+      where: { billingInterval: "MONTHLY" },
       data: { billingInterval: "MONTHLY" },
     });
   } catch {}
 
-  return { safetyService, cleaningService, essentialPlan, guardianPlan };
+  return { safetyService, cleaningService };
 }

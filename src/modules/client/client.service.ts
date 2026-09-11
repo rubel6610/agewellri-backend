@@ -150,8 +150,8 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
       emergencyContactRelation: c.emergencyContactRelation,
       homeAccessType: c.homeAccessType,
       homeAccessInstructions: c.homeAccessInstructions,
-      planName: latestSub?.plan?.name || c.selectedPlan || "Guardian Plus",
-      planCode: latestSub?.plan?.code || c.selectedPlan || "GUARDIAN_PLUS",
+      planName: latestSub?.plan?.name || c.selectedPlan || "Unassigned",
+      planCode: latestSub?.plan?.code || c.selectedPlan || "",
       hasCleaningAddon: Boolean(c.hasCleaningAddon),
       onboardingStatus: c.onboardingStatus || "INVITED",
       onboardingStep: c.onboardingStep || 1,
@@ -384,8 +384,8 @@ export async function getAdminClientById(clientIdOrNumber: string) {
     homeAccessType: client.homeAccessType,
     homeAccessInstructions: client.homeAccessInstructions,
     homeAccessCode: client.homeAccessCode,
-    planName: latestSub?.plan?.name || client.selectedPlan || "Guardian Plus",
-    planCode: latestSub?.plan?.code || client.selectedPlan || "GUARDIAN_PLUS",
+    planName: latestSub?.plan?.name || client.selectedPlan || "Unassigned",
+    planCode: latestSub?.plan?.code || client.selectedPlan || "",
     hasCleaningAddon: client.hasCleaningAddon,
     onboardingStatus: client.onboardingStatus,
     onboardingStep: client.onboardingStep || 1,
@@ -931,7 +931,7 @@ export async function getAdminDashboardStats() {
   const planDistribution: Record<string, number> = {};
   allClients.forEach((c: any) => {
     const planName =
-      c.subscriptions?.[0]?.plan?.name || c.selectedPlan || "Guardian Plus";
+      c.subscriptions?.[0]?.plan?.name || c.selectedPlan || "Unassigned";
     planDistribution[planName] = (planDistribution[planName] || 0) + 1;
   });
 
@@ -1043,7 +1043,7 @@ export async function getAdminDashboardStats() {
       email: c.user?.email || c.primaryContactEmail || "N/A",
       state: c.state || "RI",
       planName:
-        c.subscriptions?.[0]?.plan?.name || c.selectedPlan || "Guardian Plus",
+        c.subscriptions?.[0]?.plan?.name || c.selectedPlan || "Unassigned",
       status:
         c.onboardingStatus === "COMPLETED" ? "active" : "pending_onboarding",
       createdAt: safeFormatDate(c.createdAt) || "Recently",

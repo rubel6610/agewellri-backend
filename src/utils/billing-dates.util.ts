@@ -5,7 +5,7 @@
  * 1. First Billing Date: ALWAYS the 1st day of the calendar month following signup.
  * 2. Service Commencement Date: ALWAYS the 1st day of the calendar month following signup (First Billing Date === Service Commencement Date).
  * 3. Stripe trial_end: Anchored to the 1st of the next month at 12:00:00 UTC (08:00 AM EDT / 07:00 AM EST), guaranteed to be the 1st of the month across all US timezones.
- * 4. Recurring Billing: 1st day of each subsequent month (or interval: Quarterly = +3 months, Annual = +1 year).
+ * 4. Recurring Billing: 1st day of each subsequent month (or interval: MONTHLY = +3 months, Annual = +1 year).
  * 5. Billing Reminder: Sent exactly 15 days before the upcoming billing date.
  * 6. Cancellation Cutoff: Client can cancel auto-renewal only if at least 10 days remain before upcoming renewal / month-end.
  *
@@ -15,7 +15,11 @@
 /**
  * Helper to get the year and month (1-indexed) in America/New_York timezone.
  */
-export function getEasternDateParts(date: Date = new Date()): { year: number; month: number; day: number } {
+export function getEasternDateParts(date: Date = new Date()): {
+  year: number;
+  month: number;
+  day: number;
+} {
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
     year: "numeric",
@@ -71,7 +75,9 @@ export function getFirstBillingDate(referenceDate: Date = new Date()): Date {
  * Service commencement date is strictly the 1st of the calendar month following signup.
  * First Payment Date === First Service Start Date
  */
-export function getServiceCommencementDate(signupDate: Date = new Date()): Date {
+export function getServiceCommencementDate(
+  signupDate: Date = new Date(),
+): Date {
   return getFirstBillingDate(signupDate);
 }
 
@@ -88,7 +94,9 @@ export function getServiceCommencementDate(signupDate: Date = new Date()): Date 
  * This mathematically prevents Stripe or any payment processor from evaluating the timestamp
  * as the 30th / 31st of the prior month, regardless of UTC offset or server/client timezone!
  */
-export function getStripeTrialEndTimestamp(referenceDate: Date = new Date()): number {
+export function getStripeTrialEndTimestamp(
+  referenceDate: Date = new Date(),
+): number {
   const firstBilling = getFirstBillingDate(referenceDate);
   return Math.floor(firstBilling.getTime() / 1000);
 }
@@ -97,13 +105,22 @@ export function getStripeTrialEndTimestamp(referenceDate: Date = new Date()): nu
  * Backend-level charge protection.
  * Verifies whether `now` has reached or passed the first billing date in Eastern Time.
  */
-export function isChargeAllowed(firstBillingDate: Date, now: Date = new Date()): boolean {
+export function isChargeAllowed(
+  firstBillingDate: Date,
+  now: Date = new Date(),
+): boolean {
   const nowParts = getEasternDateParts(now);
   const billParts = getEasternDateParts(firstBillingDate);
 
   if (nowParts.year < billParts.year) return false;
-  if (nowParts.year === billParts.year && nowParts.month < billParts.month) return false;
-  if (nowParts.year === billParts.year && nowParts.month === billParts.month && nowParts.day < billParts.day) return false;
+  if (nowParts.year === billParts.year && nowParts.month < billParts.month)
+    return false;
+  if (
+    nowParts.year === billParts.year &&
+    nowParts.month === billParts.month &&
+    nowParts.day < billParts.day
+  )
+    return false;
 
   return true;
 }
@@ -112,17 +129,17 @@ export function isChargeAllowed(firstBillingDate: Date, now: Date = new Date()):
  * Calculates the end date for a billing period starting on `startDate` with a given interval.
  *
  * - MONTHLY: 1st of the next month
- * - QUARTERLY: 1st of month + 3 months
+ * - MONTHLY: 1st of month + 3 months
  * - ANNUAL: 1st of month + 12 months
  */
 export function calculatePeriodEndDate(
   startDate: Date,
-  interval: "MONTHLY" | "QUARTERLY" | "ANNUAL" | "ONE_TIME" | string
+  interval: "MONTHLY" | "MONTHLY" | "ANNUAL" | "ONE_TIME" | string,
 ): Date {
   const { year, month } = getEasternDateParts(startDate);
 
   let addMonths = 1; // Default Monthly
-  if (interval === "QUARTERLY") {
+  if (interval === "MONTHLY") {
     addMonths = 3;
   } else if (interval === "ANNUAL") {
     addMonths = 12;
@@ -146,7 +163,10 @@ export function calculatePeriodEndDate(
  * Example: For 2026-10-01 billing date -> reminder date is 2026-09-16.
  * Example: For 2026-11-01 billing date -> reminder date is 2026-10-17.
  */
-export function getReminderDate(billingDate: Date, daysBefore: number = 15): Date {
+export function getReminderDate(
+  billingDate: Date,
+  daysBefore: number = 15,
+): Date {
   const d = new Date(billingDate);
   d.setDate(d.getDate() - daysBefore);
   return d;
@@ -158,7 +178,7 @@ export function getReminderDate(billingDate: Date, daysBefore: number = 15): Dat
  */
 export function getCancellationCutoffDate(
   renewalDate: Date,
-  cutoffDaysBefore: number = 10
+  cutoffDaysBefore: number = 10,
 ): Date {
   const d = new Date(renewalDate);
   d.setDate(d.getDate() - cutoffDaysBefore);
@@ -171,10 +191,13 @@ export function getCancellationCutoffDate(
 export function isWithinCancellationCutoff(
   now: Date = new Date(),
   upcomingRenewalDate: Date,
-  cutoffDaysBefore: number = 10
+  cutoffDaysBefore: number = 10,
 ): boolean {
   const nowParts = getEasternDateParts(now);
-  const cutoff = getCancellationCutoffDate(upcomingRenewalDate, cutoffDaysBefore);
+  const cutoff = getCancellationCutoffDate(
+    upcomingRenewalDate,
+    cutoffDaysBefore,
+  );
   const cutoffParts = getEasternDateParts(cutoff);
 
   if (nowParts.year < cutoffParts.year) return true;
@@ -187,7 +210,9 @@ export function isWithinCancellationCutoff(
 /**
  * Formats a Date consistently for UI / billing display (e.g., "October 1, 2026").
  */
-export function formatBillingDate(date: Date | string | null | undefined): string {
+export function formatBillingDate(
+  date: Date | string | null | undefined,
+): string {
   if (!date) return "Not Scheduled";
   const d = typeof date === "string" ? new Date(date) : date;
   return d.toLocaleDateString("en-US", {

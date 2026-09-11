@@ -7,7 +7,7 @@ export const createInvitationSchema = z.object({
   lastName: z.string().optional(),
   phone: z.string().optional(),
   state: z.string().optional().default("RI"),
-  planName: z.string().optional().default("Guardian Plus"),
+  planName: z.string().optional().nullable(),
   clientId: z.string().optional().nullable(),
   expiresInDays: z.number().min(1).max(90).optional().default(7),
   skipEmail: z.boolean().optional(),

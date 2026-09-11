@@ -94,7 +94,10 @@ async function createAppointmentAuditLog(params: {
 /**
  * Helper to parse a date string and timeSlot (e.g. "10:00 AM – 12:00 PM") into startAt and endAt Dates.
  */
-export function parseDateAndTimeSlot(dateStr: string, timeSlotStr: string): { startAt: Date; endAt: Date } {
+export function parseDateAndTimeSlot(
+  dateStr: string,
+  timeSlotStr: string,
+): { startAt: Date; endAt: Date } {
   const baseDate = new Date(dateStr);
   const year = baseDate.getFullYear();
   const month = baseDate.getMonth();
@@ -103,7 +106,9 @@ export function parseDateAndTimeSlot(dateStr: string, timeSlotStr: string): { st
   const timeMatches = timeSlotStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)/g);
 
   if (timeMatches && timeMatches.length >= 2) {
-    const parseTimePart = (timeStr: string): { hour: number; minute: number } => {
+    const parseTimePart = (
+      timeStr: string,
+    ): { hour: number; minute: number } => {
       const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)/i);
       if (!match) return { hour: 10, minute: 0 };
       let hour = parseInt(match[1], 10);
@@ -117,7 +122,14 @@ export function parseDateAndTimeSlot(dateStr: string, timeSlotStr: string): { st
     const startTime = parseTimePart(timeMatches[0]);
     const endTime = parseTimePart(timeMatches[1]);
 
-    const startAt = new Date(year, month, day, startTime.hour, startTime.minute, 0);
+    const startAt = new Date(
+      year,
+      month,
+      day,
+      startTime.hour,
+      startTime.minute,
+      0,
+    );
     const endAt = new Date(year, month, day, endTime.hour, endTime.minute, 0);
 
     return { startAt, endAt };
@@ -131,9 +143,14 @@ export function parseDateAndTimeSlot(dateStr: string, timeSlotStr: string): { st
 /**
  * Resolves a ServiceType from ID, name, or category string
  */
-async function resolveServiceType(serviceTypeId?: string, serviceName?: string) {
+async function resolveServiceType(
+  serviceTypeId?: string,
+  serviceName?: string,
+) {
   if (serviceTypeId && isValidObjectId(serviceTypeId)) {
-    const srv = await prisma.serviceType.findUnique({ where: { id: serviceTypeId } });
+    const srv = await prisma.serviceType.findUnique({
+      where: { id: serviceTypeId },
+    });
     if (srv) return srv;
   }
 
@@ -171,7 +188,7 @@ async function resolveServiceType(serviceTypeId?: string, serviceName?: string) 
 async function resolveTechnician(
   technicianId?: string,
   technicianName?: string,
-  serviceCategory?: string
+  serviceCategory?: string,
 ) {
   const allSpecialists = await getAllSpecialists();
 
@@ -182,7 +199,7 @@ async function resolveTechnician(
 
   if (technicianName) {
     const found = allSpecialists.find((s: any) =>
-      s.name.toLowerCase().includes(technicianName.toLowerCase())
+      s.name.toLowerCase().includes(technicianName.toLowerCase()),
     );
     if (found) return found;
   }
@@ -190,12 +207,16 @@ async function resolveTechnician(
   // Auto-assign active specialist matching specialty
   const matched = allSpecialists.find((s: any) => {
     if (serviceCategory === "CLEANING") {
-      return s.specialties?.some((sp: string) =>
-        sp.toLowerCase().includes("cleaning") || sp.toLowerCase().includes("support")
+      return s.specialties?.some(
+        (sp: string) =>
+          sp.toLowerCase().includes("cleaning") ||
+          sp.toLowerCase().includes("support"),
       );
     }
-    return s.specialties?.some((sp: string) =>
-      sp.toLowerCase().includes("safety") || sp.toLowerCase().includes("fall")
+    return s.specialties?.some(
+      (sp: string) =>
+        sp.toLowerCase().includes("safety") ||
+        sp.toLowerCase().includes("fall"),
     );
   });
 
@@ -207,7 +228,10 @@ async function resolveTechnician(
 /**
  * Formats appointment record for frontend consumption
  */
-export function formatAppointmentRecord(appt: any, specialistsList: any[] = []) {
+export function formatAppointmentRecord(
+  appt: any,
+  specialistsList: any[] = [],
+) {
   const st = appt.serviceType || {};
   let tech = appt.technician;
   if (!tech && appt.technicianId && specialistsList.length > 0) {
@@ -218,7 +242,9 @@ export function formatAppointmentRecord(appt: any, specialistsList: any[] = []) 
   const user = client.user || {};
 
   const start = appt.startAt ? new Date(appt.startAt) : new Date();
-  const end = appt.endAt ? new Date(appt.endAt) : new Date(start.getTime() + 2 * 60 * 60 * 1000);
+  const end = appt.endAt
+    ? new Date(appt.endAt)
+    : new Date(start.getTime() + 2 * 60 * 60 * 1000);
 
   const dateFormatted = start.toLocaleDateString("en-US", {
     month: "short",
@@ -234,16 +260,25 @@ export function formatAppointmentRecord(appt: any, specialistsList: any[] = []) 
     minute: "2-digit",
   })}`;
 
-  const clientName = `${user.firstName || client.primaryContactName || "Valued"} ${user.lastName || "Member"}`.trim();
+  const clientName =
+    `${user.firstName || client.primaryContactName || "Valued"} ${user.lastName || "Member"}`.trim();
 
   // Report resolution from linked visit
   const visit = appt.visit;
-  const activeReport = visit?.reports?.find((r: any) => !r.isArchived) || visit?.reports?.[0];
-  const hasReport = Boolean(activeReport && (activeReport.fileUrl || activeReport.status === "UPLOADED" || activeReport.status === "GENERATED"));
+  const activeReport =
+    visit?.reports?.find((r: any) => !r.isArchived) || visit?.reports?.[0];
+  const hasReport = Boolean(
+    activeReport &&
+    (activeReport.fileUrl ||
+      activeReport.status === "UPLOADED" ||
+      activeReport.status === "GENERATED"),
+  );
   const reportStatus = hasReport ? "uploaded" : "not_uploaded";
 
   const rawStatus = (appt.status || "SCHEDULED").toUpperCase();
-  const isRequested = rawStatus === "REQUESTED" || (!appt.technicianId && rawStatus !== "CANCELLED");
+  const isRequested =
+    rawStatus === "REQUESTED" ||
+    (!appt.technicianId && rawStatus !== "CANCELLED");
 
   return {
     id: appt.id,
@@ -256,35 +291,57 @@ export function formatAppointmentRecord(appt: any, specialistsList: any[] = []) 
     clientPhone: user.phone || client.primaryContactPhone || "",
     clientAddress: `${client.address || "100 Main St"}, ${client.city || "Providence"}, ${client.state || "RI"} ${client.postalCode || "02903"}`,
     serviceTypeId: appt.serviceTypeId,
-    serviceType: st.name || (st.category === "CLEANING" ? "Cleaning Visit" : "Safety Oversight Visit"),
+    serviceType:
+      st.name ||
+      (st.category === "CLEANING"
+        ? "Cleaning Visit"
+        : "Safety Oversight Visit"),
     serviceCategory: st.category || "OTHER",
     durationMinutes: st.durationMinutes || 60,
     subscriptionPeriodId: appt.subscriptionPeriodId,
     technicianId: appt.technicianId || null,
-    technicianName: appt.technicianId ? (tech.name || "Assigned Specialist") : "Unassigned Specialist",
-    technicianTitle: appt.technicianId ? (tech.title || (st.category === "CLEANING" ? "Senior Home Support Caregiver" : "Certified Home Safety Specialist")) : "Pending Admin Assignment",
+    technicianName: appt.technicianId
+      ? tech.name || "Assigned Specialist"
+      : "Unassigned Specialist",
+    technicianTitle: appt.technicianId
+      ? tech.title ||
+        (st.category === "CLEANING"
+          ? "Senior Home Support Caregiver"
+          : "Certified Home Safety Specialist")
+      : "Pending Admin Assignment",
     technicianPhone: tech.phone || null,
     technicianColor: tech.color || "#294B68",
-    startAt: appt.startAt?.toISOString?.() || new Date(appt.startAt).toISOString(),
+    startAt:
+      appt.startAt?.toISOString?.() || new Date(appt.startAt).toISOString(),
     endAt: appt.endAt?.toISOString?.() || new Date(appt.endAt).toISOString(),
     date: dateFormatted,
     timeSlot: timeSlotFormatted,
-    status: isRequested ? "requested" : appt.status?.toLowerCase() || "scheduled",
+    status: isRequested
+      ? "requested"
+      : appt.status?.toLowerCase() || "scheduled",
     isRequested,
     reportStatus,
     hasReport,
     reportId: activeReport?.id || null,
     reportTitle: activeReport?.title || null,
-    reportFileUrl: activeReport?.id ? `/api/v1/reports/${activeReport.id}/download` : null,
-    reportUploadedAt: activeReport?.uploadedAt ? new Date(activeReport.uploadedAt).toISOString() : null,
+    reportFileUrl: activeReport?.id
+      ? `/api/v1/reports/${activeReport.id}/download`
+      : null,
+    reportUploadedAt: activeReport?.uploadedAt
+      ? new Date(activeReport.uploadedAt).toISOString()
+      : null,
     location: appt.location || client.address || "Client Residence",
     notes: appt.notes || "",
     accessMethodTitle: appt.accessMethodTitle || null,
     accessMethodType: appt.accessMethodType || null,
     accessMethodInstructions: appt.accessMethodInstructions || null,
     accessMethodCode: appt.accessMethodCode || null,
-    bookedBy: appt.createdByUser ? `${appt.createdByUser.firstName} ${appt.createdByUser.lastName}`.trim() : "AgeWellRI Team",
-    createdAt: appt.createdAt ? new Date(appt.createdAt).toISOString() : new Date().toISOString(),
+    bookedBy: appt.createdByUser
+      ? `${appt.createdByUser.firstName} ${appt.createdByUser.lastName}`.trim()
+      : "AgeWellRI Team",
+    createdAt: appt.createdAt
+      ? new Date(appt.createdAt).toISOString()
+      : new Date().toISOString(),
   };
 }
 
@@ -314,7 +371,9 @@ interface ContractualSchedulingParams {
  * Client -> Executed Agreement -> Plan / PlanVersion -> Subscription -> Billing Period -> Visit Entitlement
  * and atomically creates the appointment inside a database transaction.
  */
-async function validateAndExecuteContractualScheduling(params: ContractualSchedulingParams) {
+async function validateAndExecuteContractualScheduling(
+  params: ContractualSchedulingParams,
+) {
   const { client, actorUserId, isAdmin } = params;
 
   // 1. CONTRACTUAL INTEGRITY: Validate Executed Service Agreement
@@ -339,16 +398,19 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
 
     if (anyAgreement?.status === "DRAFT" || anyAgreement?.status === "SENT") {
       throw new Error(
-        "Client agreement has not been signed and executed yet. A signed Client Service Agreement is required before scheduling visits."
+        "Client agreement has not been signed and executed yet. A signed Client Service Agreement is required before scheduling visits.",
       );
     }
-    if (anyAgreement?.status === "CANCELLED" || anyAgreement?.status === "EXPIRED") {
+    if (
+      anyAgreement?.status === "CANCELLED" ||
+      anyAgreement?.status === "EXPIRED"
+    ) {
       throw new Error(
-        `Client agreement is ${anyAgreement.status.toLowerCase()}. A valid, active agreement is required to schedule visits.`
+        `Client agreement is ${anyAgreement.status.toLowerCase()}. A valid, active agreement is required to schedule visits.`,
       );
     }
     throw new Error(
-      "Client does not have an active executed Service Agreement. An executed agreement is required before scheduling visits."
+      "Client does not have an active executed Service Agreement. An executed agreement is required before scheduling visits.",
     );
   }
 
@@ -356,7 +418,12 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
   const activeSubscription = await (prisma.subscription.findFirst as any)({
     where: {
       clientId: client.id,
-      status: { in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELLATION_REQUESTED] },
+      status: {
+        in: [
+          SubscriptionStatus.ACTIVE,
+          SubscriptionStatus.CANCELLATION_REQUESTED,
+        ],
+      },
       isArchived: false,
     },
     orderBy: { createdAt: "desc" },
@@ -385,39 +452,53 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
 
     if (anySub?.status === SubscriptionStatus.PENDING) {
       const startDateStr = anySub.currentPeriodStart
-        ? new Date(anySub.currentPeriodStart).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+        ? new Date(anySub.currentPeriodStart).toLocaleDateString("en-US", {
+            month: "long",
+            day: "numeric",
+            year: "numeric",
+          })
         : "the 1st of next month";
       throw new Error(
-        `Your membership coverage is scheduled to commence on ${startDateStr} (the 1st of the month following signup). Visits can be scheduled once your service period begins.`
+        `Your membership coverage is scheduled to commence on ${startDateStr} (the 1st of the month following signup). Visits can be scheduled once your service period begins.`,
       );
     }
     throw new Error(
-      "No active subscription found for client. An active paid membership plan is required before scheduling visits."
+      "No active subscription found for client. An active paid membership plan is required before scheduling visits.",
     );
   }
 
   // 3. CONTRACTUAL INTEGRITY: Validate Active Billing Period
   const activePeriod = activeSubscription.periods?.[0];
-  if (!activePeriod || activePeriod.status === "EXPIRED" || activePeriod.status === "CANCELLED") {
+  if (
+    !activePeriod ||
+    activePeriod.status === "EXPIRED" ||
+    activePeriod.status === "CANCELLED"
+  ) {
     throw new Error(
-      "No active billing period found for the client's subscription. Payment and enrollment must be completed first."
+      "No active billing period found for the client's subscription. Payment and enrollment must be completed first.",
     );
   }
 
   // Validate that requested appointment date is within or after the service period start date
-  const { startAt: requestedStart } = parseDateAndTimeSlot(params.date, params.timeSlot);
+  const { startAt: requestedStart } = parseDateAndTimeSlot(
+    params.date,
+    params.timeSlot,
+  );
   if (activePeriod && activePeriod.startDate) {
     const periodStart = new Date(activePeriod.startDate);
     periodStart.setHours(0, 0, 0, 0);
     if (requestedStart.getTime() < periodStart.getTime()) {
       throw new Error(
-        `Visits cannot be scheduled prior to your service commencement date (${periodStart.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}).`
+        `Visits cannot be scheduled prior to your service commencement date (${periodStart.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}).`,
       );
     }
   }
 
   // 4. Resolve Selected Service Type
-  const serviceType = await resolveServiceType(params.serviceTypeId, params.serviceType);
+  const serviceType = await resolveServiceType(
+    params.serviceTypeId,
+    params.serviceType,
+  );
   if (!serviceType) {
     throw new Error("Invalid or inactive service type selected.");
   }
@@ -428,7 +509,7 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
       activePeriod.id,
       activeSubscription.planVersionId || executedAgreement?.planVersionId,
       activeSubscription.planId || executedAgreement?.planId,
-      client.hasCleaningAddon || executedAgreement?.hasCleaningAddon
+      client.hasCleaningAddon || executedAgreement?.hasCleaningAddon,
     );
 
     const refreshed = await (prisma.subscriptionPeriod.findUnique as any)({
@@ -444,7 +525,7 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
   const matchingAlloc = (activePeriod.allocations || []).find(
     (a: any) =>
       a.serviceTypeId === serviceType.id ||
-      a.serviceType?.category === serviceType.category
+      a.serviceType?.category === serviceType.category,
   );
 
   if (!matchingAlloc) {
@@ -453,7 +534,7 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
       activeSubscription.plan?.name ||
       "contracted plan";
     throw new Error(
-      `The selected service "${serviceType.name}" is not included in the client's ${contractedPlanName}.`
+      `The selected service "${serviceType.name}" is not included in the client's ${contractedPlanName}.`,
     );
   }
 
@@ -467,45 +548,63 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
   });
 
   const scheduledCount = existingAppts.filter((a: any) =>
-    [AppointmentStatus.SCHEDULED, AppointmentStatus.CONFIRMED, AppointmentStatus.RESCHEDULED].includes(a.status)
+    [
+      AppointmentStatus.SCHEDULED,
+      AppointmentStatus.CONFIRMED,
+      AppointmentStatus.RESCHEDULED,
+    ].includes(a.status),
   ).length;
   const completedCount =
     matchingAlloc.usedCount > 0
       ? matchingAlloc.usedCount
-      : existingAppts.filter((a: any) => a.status === AppointmentStatus.COMPLETED).length;
+      : existingAppts.filter(
+          (a: any) => a.status === AppointmentStatus.COMPLETED,
+        ).length;
   const allocatedCount = matchingAlloc.allocatedCount || 0;
-  const remainingCount = Math.max(0, allocatedCount - (scheduledCount + completedCount));
+  const remainingCount = Math.max(
+    0,
+    allocatedCount - (scheduledCount + completedCount),
+  );
 
   if (remainingCount <= 0) {
     throw new Error(
-      `You have 0 remaining visits available for ${serviceType.name} in the current quarterly cycle (${allocatedCount} allocated, all scheduled/used).`
+      `You have 0 remaining visits available for ${serviceType.name} in the current MONTHLY cycle (${allocatedCount} allocated, all scheduled/used).`,
     );
   }
 
   // 7. Calculate startAt and endAt
-  const { startAt, endAt } = params.startAt && params.endAt
-    ? { startAt: new Date(params.startAt), endAt: new Date(params.endAt) }
-    : parseDateAndTimeSlot(params.date, params.timeSlot);
+  const { startAt, endAt } =
+    params.startAt && params.endAt
+      ? { startAt: new Date(params.startAt), endAt: new Date(params.endAt) }
+      : parseDateAndTimeSlot(params.date, params.timeSlot);
 
   // 8. Check client overlapping active appointments
   const clientConflict = await (prisma.appointment.findFirst as any)({
     where: {
       clientId: client.id,
-      status: { in: [AppointmentStatus.SCHEDULED, AppointmentStatus.CONFIRMED, AppointmentStatus.RESCHEDULED] },
+      status: {
+        in: [
+          AppointmentStatus.SCHEDULED,
+          AppointmentStatus.CONFIRMED,
+          AppointmentStatus.RESCHEDULED,
+        ],
+      },
       startAt: { lt: endAt },
       endAt: { gt: startAt },
     },
   });
 
   if (clientConflict) {
-    throw new Error("The client already has an active appointment scheduled during this time window.");
+    throw new Error(
+      "The client already has an active appointment scheduled during this time window.",
+    );
   }
 
   // 9. Resolve Specialist / Technician
   const technician = await resolveTechnician(
     params.technicianId,
     params.technicianName,
-    serviceType.category
+    serviceType.category,
   );
 
   const clientAddress = `${client.address || "100 Main St"}, ${client.city || "Providence"}, ${client.state || "RI"} ${client.postalCode || "02903"}`;
@@ -518,17 +617,26 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
         clientId: client.id,
         subscriptionPeriodId: activePeriod.id,
         serviceTypeId: matchingAlloc.serviceTypeId || serviceType.id,
-        status: { in: [AppointmentStatus.SCHEDULED, AppointmentStatus.CONFIRMED, AppointmentStatus.RESCHEDULED, AppointmentStatus.COMPLETED] },
+        status: {
+          in: [
+            AppointmentStatus.SCHEDULED,
+            AppointmentStatus.CONFIRMED,
+            AppointmentStatus.RESCHEDULED,
+            AppointmentStatus.COMPLETED,
+          ],
+        },
       },
     });
 
     if (currentActiveCount >= allocatedCount) {
       throw new Error(
-        `All visit entitlements for ${serviceType.name} have already been booked for this cycle.`
+        `All visit entitlements for ${serviceType.name} have already been booked for this cycle.`,
       );
     }
 
-    const initialStatus = isAdmin ? AppointmentStatus.SCHEDULED : ("REQUESTED" as any);
+    const initialStatus = isAdmin
+      ? AppointmentStatus.SCHEDULED
+      : ("REQUESTED" as any);
     const assignedTechId = isAdmin ? technician?.id || null : null;
 
     let accessMethodTitle = params.accessMethodTitle || null;
@@ -538,13 +646,17 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
 
     if (params.accessMethodId && client.accessMethods) {
       try {
-        const methods: any[] = typeof client.accessMethods === "string" ? JSON.parse(client.accessMethods) : (client.accessMethods as any);
+        const methods: any[] =
+          typeof client.accessMethods === "string"
+            ? JSON.parse(client.accessMethods)
+            : (client.accessMethods as any);
         const match = methods.find((m: any) => m.id === params.accessMethodId);
         if (match) {
           accessMethodTitle = match.title || accessMethodTitle;
           accessMethodType = match.type || accessMethodType;
           accessMethodCode = match.code || accessMethodCode;
-          accessMethodInstructions = match.instructions || accessMethodInstructions;
+          accessMethodInstructions =
+            match.instructions || accessMethodInstructions;
         }
       } catch {}
     }
@@ -552,13 +664,17 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
     if (!accessMethodType && client.homeAccessType) {
       accessMethodType = client.homeAccessType;
       accessMethodCode = accessMethodCode || client.homeAccessCode;
-      accessMethodInstructions = accessMethodInstructions || client.homeAccessInstructions;
-      accessMethodTitle = accessMethodTitle || (
-        client.homeAccessType === "LOCKBOX" ? "Primary Home Lockbox" :
-        client.homeAccessType === "DIGITAL_CODE" ? "Keypad Entry Code" :
-        client.homeAccessType === "OTHER" ? "Custom Entry Method" :
-        "Resident Answers Door"
-      );
+      accessMethodInstructions =
+        accessMethodInstructions || client.homeAccessInstructions;
+      accessMethodTitle =
+        accessMethodTitle ||
+        (client.homeAccessType === "LOCKBOX"
+          ? "Primary Home Lockbox"
+          : client.homeAccessType === "DIGITAL_CODE"
+            ? "Keypad Entry Code"
+            : client.homeAccessType === "OTHER"
+              ? "Custom Entry Method"
+              : "Resident Answers Door");
     }
 
     const createdAppt = await tx.appointment.create({
@@ -606,7 +722,9 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
   // 11. Audit Log
   await createAppointmentAuditLog({
     actorUserId,
-    action: isAdmin ? "ADMIN_DISPATCHED_VISIT" : "CLIENT_SUBMITTED_VISIT_REQUEST",
+    action: isAdmin
+      ? "ADMIN_DISPATCHED_VISIT"
+      : "CLIENT_SUBMITTED_VISIT_REQUEST",
     entityType: "Appointment",
     entityId: appointment.id,
     metadata: {
@@ -615,7 +733,9 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
       subscriptionId: activeSubscription.id,
       subscriptionPeriodId: activePeriod.id,
       serviceType: serviceType.name,
-      technicianName: isAdmin ? technician?.name : "Unassigned (Pending Admin Review)",
+      technicianName: isAdmin
+        ? technician?.name
+        : "Unassigned (Pending Admin Review)",
       startAt,
       endAt,
     },
@@ -629,7 +749,7 @@ async function validateAndExecuteContractualScheduling(params: ContractualSchedu
  */
 export async function scheduleClientAppointment(
   userId: string,
-  input: ScheduleAppointmentInput
+  input: ScheduleAppointmentInput,
 ) {
   // 1. Find client record safely
   const client = await (prisma.client.findFirst as any)({
@@ -672,7 +792,7 @@ export async function scheduleClientAppointment(
  */
 export async function scheduleAdminAppointment(
   actorUserId: string,
-  input: AdminScheduleAppointmentInput
+  input: AdminScheduleAppointmentInput,
 ) {
   // 1. Locate client safely by ID, clientNumber, or email
   const trimmedId = (input.clientId || "").trim();
@@ -687,7 +807,9 @@ export async function scheduleAdminAppointment(
   const digits = trimmedId.replace(/\D/g, "");
   if (digits.length >= 3) {
     orConditions.push({ clientNumber: `AW-${digits}` });
-    orConditions.push({ clientNumber: { contains: digits, mode: "insensitive" } });
+    orConditions.push({
+      clientNumber: { contains: digits, mode: "insensitive" },
+    });
   }
 
   if (isValidObjectId(trimmedId)) {
@@ -806,9 +928,21 @@ export async function getAdminAppointments(query: AdminAppointmentsQuery = {}) {
 
   if (query.search) {
     where.OR = [
-      { client: { user: { firstName: { contains: query.search, mode: "insensitive" } } } },
-      { client: { user: { lastName: { contains: query.search, mode: "insensitive" } } } },
-      { client: { clientNumber: { contains: query.search, mode: "insensitive" } } },
+      {
+        client: {
+          user: { firstName: { contains: query.search, mode: "insensitive" } },
+        },
+      },
+      {
+        client: {
+          user: { lastName: { contains: query.search, mode: "insensitive" } },
+        },
+      },
+      {
+        client: {
+          clientNumber: { contains: query.search, mode: "insensitive" },
+        },
+      },
     ];
   }
 
@@ -844,7 +978,7 @@ export async function getAdminAppointments(query: AdminAppointmentsQuery = {}) {
  */
 export async function getAppointmentById(
   id: string,
-  user: { id: string; role: string }
+  user: { id: string; role: string },
 ) {
   if (!isValidObjectId(id)) {
     throw new Error(`Appointment with ID ${id} not found.`);
@@ -872,7 +1006,11 @@ export async function getAppointmentById(
     throw new Error(`Appointment with ID ${id} not found.`);
   }
 
-  if (user.role !== "ADMIN" && appt.client?.userId !== user.id && appt.clientId !== user.id) {
+  if (
+    user.role !== "ADMIN" &&
+    appt.client?.userId !== user.id &&
+    appt.clientId !== user.id
+  ) {
     throw new Error("Access denied to appointment record.");
   }
 
@@ -887,7 +1025,7 @@ export async function rescheduleAppointment(
   appointmentId: string,
   actorUserId: string,
   isClient: boolean,
-  input: RescheduleAppointmentInput
+  input: RescheduleAppointmentInput,
 ) {
   if (!isValidObjectId(appointmentId)) {
     throw new Error(`Appointment with ID ${appointmentId} not found.`);
@@ -902,13 +1040,18 @@ export async function rescheduleAppointment(
     throw new Error(`Appointment with ID ${appointmentId} not found.`);
   }
 
-  if (isClient && appt.client?.userId !== actorUserId && appt.clientId !== actorUserId) {
+  if (
+    isClient &&
+    appt.client?.userId !== actorUserId &&
+    appt.clientId !== actorUserId
+  ) {
     throw new Error("You are not authorized to reschedule this appointment.");
   }
 
-  const { startAt, endAt } = input.startAt && input.endAt
-    ? { startAt: new Date(input.startAt), endAt: new Date(input.endAt) }
-    : parseDateAndTimeSlot(input.date, input.timeSlot);
+  const { startAt, endAt } =
+    input.startAt && input.endAt
+      ? { startAt: new Date(input.startAt), endAt: new Date(input.endAt) }
+      : parseDateAndTimeSlot(input.date, input.timeSlot);
 
   const technicianId = input.technicianId || appt.technicianId;
 
@@ -919,7 +1062,9 @@ export async function rescheduleAppointment(
       endAt,
       technicianId,
       status: AppointmentStatus.RESCHEDULED,
-      notes: input.reason ? `${appt.notes || ""}\nRescheduled: ${input.reason}`.trim() : appt.notes,
+      notes: input.reason
+        ? `${appt.notes || ""}\nRescheduled: ${input.reason}`.trim()
+        : appt.notes,
     },
     include: {
       serviceType: true,
@@ -949,7 +1094,7 @@ export async function cancelAppointment(
   appointmentId: string,
   actorUserId: string,
   isClient: boolean,
-  reason?: string
+  reason?: string,
 ) {
   if (!isValidObjectId(appointmentId)) {
     throw new Error(`Appointment with ID ${appointmentId} not found.`);
@@ -964,7 +1109,11 @@ export async function cancelAppointment(
     throw new Error(`Appointment with ID ${appointmentId} not found.`);
   }
 
-  if (isClient && appt.client?.userId !== actorUserId && appt.clientId !== actorUserId) {
+  if (
+    isClient &&
+    appt.client?.userId !== actorUserId &&
+    appt.clientId !== actorUserId
+  ) {
     throw new Error("You are not authorized to cancel this appointment.");
   }
 
@@ -972,7 +1121,9 @@ export async function cancelAppointment(
     where: { id: appointmentId },
     data: {
       status: AppointmentStatus.CANCELLED,
-      notes: reason ? `${appt.notes || ""}\nCancelled: ${reason}`.trim() : appt.notes,
+      notes: reason
+        ? `${appt.notes || ""}\nCancelled: ${reason}`.trim()
+        : appt.notes,
     },
     include: {
       serviceType: true,
@@ -1007,7 +1158,7 @@ export async function cancelAppointment(
 export async function updateAppointmentStatus(
   appointmentId: string,
   actorUserId: string,
-  input: UpdateAppointmentStatusInput
+  input: UpdateAppointmentStatusInput,
 ) {
   if (!isValidObjectId(appointmentId)) {
     throw new Error(`Appointment with ID ${appointmentId} not found.`);
@@ -1029,7 +1180,9 @@ export async function updateAppointmentStatus(
     where: { id: appointmentId },
     data: {
       status: input.status,
-      notes: input.notes ? `${appt.notes || ""}\n${input.notes}`.trim() : appt.notes,
+      notes: input.notes
+        ? `${appt.notes || ""}\n${input.notes}`.trim()
+        : appt.notes,
     },
     include: {
       serviceType: true,
@@ -1048,7 +1201,11 @@ export async function updateAppointmentStatus(
   });
 
   // If marked COMPLETED, update visit allocation usedCount if subscriptionPeriod exists
-  if (input.status === "COMPLETED" && appt.subscriptionPeriodId && appt.serviceTypeId) {
+  if (
+    input.status === "COMPLETED" &&
+    appt.subscriptionPeriodId &&
+    appt.serviceTypeId
+  ) {
     try {
       await (prisma.visitAllocation.updateMany as any)({
         where: {
@@ -1090,7 +1247,7 @@ export async function acceptVisitRequest(
     startAt?: string;
     endAt?: string;
     notes?: string;
-  }
+  },
 ) {
   if (!isValidObjectId(appointmentId)) {
     throw new Error(`Appointment with ID ${appointmentId} not found.`);
@@ -1116,11 +1273,13 @@ export async function acceptVisitRequest(
   const technician = await resolveTechnician(
     input.technicianId,
     input.technicianName,
-    appt.serviceType?.category
+    appt.serviceType?.category,
   );
 
   if (!technician) {
-    throw new Error("Please select a valid certified specialist to assign to this visit.");
+    throw new Error(
+      "Please select a valid certified specialist to assign to this visit.",
+    );
   }
 
   // Handle optional date/time adjustments
@@ -1193,7 +1352,11 @@ export async function acceptVisitRequest(
     entityType: "Appointment",
     entityId: appointmentId,
     previousValues: { status: appt.status, technicianId: appt.technicianId },
-    newValues: { status: AppointmentStatus.SCHEDULED, technicianId: technician.id, technicianName: technician.name },
+    newValues: {
+      status: AppointmentStatus.SCHEDULED,
+      technicianId: technician.id,
+      technicianName: technician.name,
+    },
     metadata: { technicianName: technician.name, notes: input.notes },
   });
 
@@ -1207,8 +1370,12 @@ export async function acceptVisitRequest(
 export async function declineVisitRequest(
   appointmentId: string,
   adminUserId: string,
-  reason?: string
+  reason?: string,
 ) {
-  return cancelAppointment(appointmentId, adminUserId, false, reason || "Visit request declined by administrator");
+  return cancelAppointment(
+    appointmentId,
+    adminUserId,
+    false,
+    reason || "Visit request declined by administrator",
+  );
 }
-

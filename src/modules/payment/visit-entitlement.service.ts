@@ -320,7 +320,7 @@ export async function getClientVisitEntitlements(
         newPeriod.id,
         activeSub?.planVersionId,
         activeSub?.planId,
-        client?.hasCleaningAddon || activeSub.plan?.code === "GUARDIAN_PLUS"
+        Boolean(client?.hasCleaningAddon)
       );
 
       const refreshedPeriod = await (prisma.subscriptionPeriod.findUnique as any)({
@@ -340,7 +340,7 @@ export async function getClientVisitEntitlements(
       currentPeriod.id,
       activeSub?.planVersionId,
       activeSub?.planId,
-      client?.hasCleaningAddon || activeSub?.plan?.code === "GUARDIAN_PLUS"
+      Boolean(client?.hasCleaningAddon)
     );
 
     // Re-fetch period allocations
@@ -360,11 +360,6 @@ export async function getClientVisitEntitlements(
   let entitlements = formatPeriodEntitlements(currentPeriod, client?.appointments || [], allServiceTypes);
 
   // Fallback defaults if entitlements array is empty (e.g. preview state)
-  const isGuardianPlus =
-    activeSub?.plan?.code === "GUARDIAN_PLUS" ||
-    client?.selectedPlan === "GUARDIAN_PLUS" ||
-    !client?.selectedPlan;
-
   if (entitlements.length === 0) {
     entitlements = [
       {
@@ -381,7 +376,7 @@ export async function getClientVisitEntitlements(
         unit: "visits",
         status: "ACTIVE",
       },
-      ...(isGuardianPlus
+      ...(client?.hasCleaningAddon
         ? [
             {
               id: "default-cleaning-quota",
@@ -408,18 +403,16 @@ export async function getClientVisitEntitlements(
   const totalRemaining = entitlements.reduce((sum, item) => sum + item.remaining, 0);
 
   const rawPlanName =
-    activeSub?.planVersion?.name || activeSub?.plan?.name || client?.selectedPlan || "Guardian Plus Plan";
+    activeSub?.planVersion?.name || activeSub?.plan?.name || (client as any)?.selectedPlan || "Service Plan";
   
   let formattedPlanName = rawPlanName;
-  if (rawPlanName === "GUARDIAN_PLUS" || rawPlanName.toLowerCase().includes("guardian")) {
-    formattedPlanName = "Guardian Plus Plan";
-  } else if (rawPlanName === "ESSENTIAL_GUARD" || rawPlanName.toLowerCase().includes("essential")) {
-    formattedPlanName = "Essential Guard Plan";
-  } else if (rawPlanName === "STANDALONE_CLEANING" || rawPlanName.toLowerCase().includes("clean")) {
-    formattedPlanName = "Home Care & Cleaning Plan";
+  if (formattedPlanName.includes("_") || formattedPlanName.includes("-")) {
+    formattedPlanName = formattedPlanName
+      .replace(/[-_]/g, " ")
+      .replace(/\b\w/g, (char: string) => char.toUpperCase());
   }
 
-  const planCode = activeSub?.plan?.code || client?.selectedPlan || "GUARDIAN_PLUS";
+  const planCode = activeSub?.plan?.code || (client as any)?.selectedPlan || "";
 
   return {
     subscriptionId: activeSub?.id || null,
@@ -512,8 +505,8 @@ export async function getAdminClientVisitEntitlements(
   const totalRemaining = entitlements.reduce((sum, item) => sum + item.remaining, 0);
 
   const planName =
-    activeSub?.planVersion?.name || activeSub?.plan?.name || client.selectedPlan || "Guardian Plus";
-  const planCode = activeSub?.plan?.code || client.selectedPlan || "GUARDIAN_PLUS";
+    activeSub?.planVersion?.name || activeSub?.plan?.name || (client as any)?.selectedPlan || "Service Plan";
+  const planCode = activeSub?.plan?.code || (client as any)?.selectedPlan || "";
 
   return {
     subscriptionId: activeSub?.id || null,

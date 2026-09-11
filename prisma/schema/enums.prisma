@@ -48,7 +48,6 @@ enum SubscriptionStatus {
 }
 
 enum BillingInterval {
-  QUARTERLY
   MONTHLY
   ANNUAL
   ONE_TIME

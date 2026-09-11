@@ -47,14 +47,14 @@ export function computeAgreementFlags(user: { role: UserRole; client?: any }) {
   const client = user.client;
   const hasCompleted = Boolean(
     client?.hasCompletedAgreement ||
-      client?.onboardingStatus === OnboardingStatus.AGREEMENT_SIGNED ||
-      client?.onboardingStatus === OnboardingStatus.ACTIVE ||
-      client?.onboardingStatus === OnboardingStatus.PAYMENT_PENDING ||
-      client?.onboardingStatus === OnboardingStatus.PAYMENT_COMPLETED ||
-      (client?.agreements &&
-        client.agreements.some(
-          (a: any) => a.status === "SIGNED" || a.status === "EXECUTED"
-        ))
+    client?.onboardingStatus === OnboardingStatus.AGREEMENT_SIGNED ||
+    client?.onboardingStatus === OnboardingStatus.ACTIVE ||
+    client?.onboardingStatus === OnboardingStatus.PAYMENT_PENDING ||
+    client?.onboardingStatus === OnboardingStatus.PAYMENT_COMPLETED ||
+    (client?.agreements &&
+      client.agreements.some(
+        (a: any) => a.status === "SIGNED" || a.status === "EXECUTED",
+      )),
   );
 
   return {
@@ -138,7 +138,10 @@ export async function loginUser(input: LoginInput) {
     throw new Error("Invalid email or password.");
   }
 
-  const isPasswordValid = await comparePassword(input.password, user.passwordHash);
+  const isPasswordValid = await comparePassword(
+    input.password,
+    user.passwordHash,
+  );
   if (!isPasswordValid) {
     throw new Error("Invalid email or password.");
   }
@@ -181,17 +184,25 @@ export async function requestSmsOtp(input: RequestSmsOtpInput) {
     },
   });
 
-  const user = users.find((u) => u.phone && u.phone.replace(/\D/g, "").includes(cleanPhone.slice(-10)));
+  const user = users.find(
+    (u) =>
+      u.phone && u.phone.replace(/\D/g, "").includes(cleanPhone.slice(-10)),
+  );
 
   if (!user) {
-    throw new Error("No registered account found with this phone number. Please sign in with email or register.");
+    throw new Error(
+      "No registered account found with this phone number. Please sign in with email or register.",
+    );
   }
 
   // Rate limit: 60s cooldown
   if (user.smsOtpLastSentAt) {
-    const elapsedSeconds = (Date.now() - new Date(user.smsOtpLastSentAt).getTime()) / 1000;
+    const elapsedSeconds =
+      (Date.now() - new Date(user.smsOtpLastSentAt).getTime()) / 1000;
     if (elapsedSeconds < 60) {
-      throw new Error(`Please wait ${Math.ceil(60 - elapsedSeconds)} seconds before requesting a new code.`);
+      throw new Error(
+        `Please wait ${Math.ceil(60 - elapsedSeconds)} seconds before requesting a new code.`,
+      );
     }
   }
 
@@ -233,18 +244,27 @@ export async function verifySmsOtp(input: VerifySmsOtpInput) {
     },
   });
 
-  const user = users.find((u) => u.phone && u.phone.replace(/\D/g, "").includes(cleanPhone.slice(-10)));
+  const user = users.find(
+    (u) =>
+      u.phone && u.phone.replace(/\D/g, "").includes(cleanPhone.slice(-10)),
+  );
 
   if (!user || !user.smsOtpHash || !user.smsOtpExpires) {
-    throw new Error("No active verification code found. Please request a new code.");
+    throw new Error(
+      "No active verification code found. Please request a new code.",
+    );
   }
 
   if (new Date() > new Date(user.smsOtpExpires)) {
-    throw new Error("Verification code has expired. Please request a new code.");
+    throw new Error(
+      "Verification code has expired. Please request a new code.",
+    );
   }
 
   if ((user.smsOtpAttempts || 0) >= 5) {
-    throw new Error("Too many failed attempts. Please request a new verification code.");
+    throw new Error(
+      "Too many failed attempts. Please request a new verification code.",
+    );
   }
 
   const isValid = await bcrypt.compare(input.otp.trim(), user.smsOtpHash);
@@ -253,7 +273,9 @@ export async function verifySmsOtp(input: VerifySmsOtpInput) {
       where: { id: user.id },
       data: { smsOtpAttempts: { increment: 1 } },
     });
-    throw new Error("Invalid verification code. Please check the code and try again.");
+    throw new Error(
+      "Invalid verification code. Please check the code and try again.",
+    );
   }
 
   await (prisma.user.update as any)({
@@ -287,7 +309,10 @@ import { submitServiceAgreement } from "../agreement/agreement.service";
 /**
  * Submit Client Service Agreement with dynamic plan resolution and state cancellation deadline.
  */
-export async function submitAgreement(userId: string, input: SubmitAgreementInput) {
+export async function submitAgreement(
+  userId: string,
+  input: SubmitAgreementInput,
+) {
   return submitServiceAgreement(userId, input);
 }
 
@@ -320,20 +345,31 @@ export async function getMyAgreement(userId: string) {
   return {
     id: latestAgreement?.id,
     templateVersion: latestAgreement?.templateVersion,
-    status: latestAgreement?.status || (client?.hasCompletedAgreement ? "SIGNED" : "DRAFT"),
+    status:
+      latestAgreement?.status ||
+      (client?.hasCompletedAgreement ? "SIGNED" : "DRAFT"),
     selectedPlan: latestAgreement?.selectedPlan || client?.selectedPlan || null,
     planPrice:
       latestAgreement?.planPrice ??
       client?.subscriptions?.[0]?.contractedPrice ??
       client?.plan?.price ??
       0,
-    hasCleaningAddon: latestAgreement?.hasCleaningAddon || client?.hasCleaningAddon || false,
+    hasCleaningAddon:
+      latestAgreement?.hasCleaningAddon || client?.hasCleaningAddon || false,
     clientFullName: fullName,
     clientPrintedName: latestAgreement?.clientPrintedName || fullName,
-    authorizedRepName: latestAgreement?.authorizedRepName || client?.primaryContactName || null,
-    relationshipToClient: latestAgreement?.relationshipToClient || client?.primaryContactRelation || null,
+    authorizedRepName:
+      latestAgreement?.authorizedRepName || client?.primaryContactName || null,
+    relationshipToClient:
+      latestAgreement?.relationshipToClient ||
+      client?.primaryContactRelation ||
+      null,
     clientSignature: latestAgreement?.clientSignature || null,
-    agreementDate: latestAgreement?.agreementDate || latestAgreement?.signedAt || latestAgreement?.createdAt || new Date(),
+    agreementDate:
+      latestAgreement?.agreementDate ||
+      latestAgreement?.signedAt ||
+      latestAgreement?.createdAt ||
+      new Date(),
     signedAt: latestAgreement?.signedAt || null,
     executedAt: latestAgreement?.executedAt || null,
     address: client?.address,
@@ -351,14 +387,15 @@ export async function getMyAgreement(userId: string) {
     emergencyContactPhone: client?.emergencyContactPhone,
     emergencyContactRelation: client?.emergencyContactRelation,
     clientNumber: client?.clientNumber,
-    stripePaymentMethodId: latestAgreement?.stripePaymentMethodId || client?.stripePaymentMethodId || null,
+    stripePaymentMethodId:
+      latestAgreement?.stripePaymentMethodId ||
+      client?.stripePaymentMethodId ||
+      null,
     stripeSetupIntentId: latestAgreement?.stripeSetupIntentId || null,
     cardBrand: client?.cardBrand || null,
     cardLast4: client?.cardLast4 || null,
   };
 }
-
-
 
 /**
  * Get full user profile including client, flags, and permissions.
@@ -494,7 +531,10 @@ export async function getUserProfile(userId: string) {
 /**
  * Update user and client profile.
  */
-export async function updateUserProfile(userId: string, input: UpdateProfileInput) {
+export async function updateUserProfile(
+  userId: string,
+  input: UpdateProfileInput,
+) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: { client: true },
@@ -521,12 +561,19 @@ export async function updateUserProfile(userId: string, input: UpdateProfileInpu
     if (input.address !== undefined) clientUpdateData.address = input.address;
     if (input.city !== undefined) clientUpdateData.city = input.city;
     if (input.state !== undefined) clientUpdateData.state = input.state;
-    if (input.postalCode !== undefined) clientUpdateData.postalCode = input.postalCode;
-    if (input.emergencyContactName !== undefined) clientUpdateData.emergencyContactName = input.emergencyContactName;
-    if (input.emergencyContactPhone !== undefined) clientUpdateData.emergencyContactPhone = input.emergencyContactPhone;
-    if (input.emergencyContactRelation !== undefined) clientUpdateData.emergencyContactRelation = input.emergencyContactRelation;
-    if (input.homeAccessType !== undefined) clientUpdateData.homeAccessType = input.homeAccessType;
-    if (input.homeAccessInstructions !== undefined) clientUpdateData.homeAccessInstructions = input.homeAccessInstructions;
+    if (input.postalCode !== undefined)
+      clientUpdateData.postalCode = input.postalCode;
+    if (input.emergencyContactName !== undefined)
+      clientUpdateData.emergencyContactName = input.emergencyContactName;
+    if (input.emergencyContactPhone !== undefined)
+      clientUpdateData.emergencyContactPhone = input.emergencyContactPhone;
+    if (input.emergencyContactRelation !== undefined)
+      clientUpdateData.emergencyContactRelation =
+        input.emergencyContactRelation;
+    if (input.homeAccessType !== undefined)
+      clientUpdateData.homeAccessType = input.homeAccessType;
+    if (input.homeAccessInstructions !== undefined)
+      clientUpdateData.homeAccessInstructions = input.homeAccessInstructions;
 
     if (Object.keys(clientUpdateData).length > 0) {
       await (prisma.client.update as any)({
@@ -542,7 +589,10 @@ export async function updateUserProfile(userId: string, input: UpdateProfileInpu
 /**
  * Change password for authenticated user.
  */
-export async function changeUserPassword(userId: string, input: ChangePasswordInput) {
+export async function changeUserPassword(
+  userId: string,
+  input: ChangePasswordInput,
+) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
   });
@@ -551,7 +601,10 @@ export async function changeUserPassword(userId: string, input: ChangePasswordIn
     throw new Error("User not found.");
   }
 
-  const isPasswordValid = await comparePassword(input.oldPassword, user.passwordHash);
+  const isPasswordValid = await comparePassword(
+    input.oldPassword,
+    user.passwordHash,
+  );
   if (!isPasswordValid) {
     throw new Error("Incorrect current password.");
   }
@@ -574,7 +627,10 @@ export async function forgotPassword(input: ForgotPasswordInput) {
   });
 
   if (!user) {
-    return { success: true, message: "If an account exists, a reset code has been sent." };
+    return {
+      success: true,
+      message: "If an account exists, a reset code has been sent.",
+    };
   }
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -599,7 +655,10 @@ export async function forgotPassword(input: ForgotPasswordInput) {
     console.warn("⚠️ Reset email error:", emailErr);
   }
 
-  return { success: true, message: "A verification code has been sent to your email." };
+  return {
+    success: true,
+    message: "A verification code has been sent to your email.",
+  };
 }
 
 /**
@@ -656,7 +715,10 @@ export async function resetPassword(input: ResetPasswordInput) {
     },
   });
 
-  return { success: true, message: "Password reset successfully. You may now sign in." };
+  return {
+    success: true,
+    message: "Password reset successfully. You may now sign in.",
+  };
 }
 
 /**

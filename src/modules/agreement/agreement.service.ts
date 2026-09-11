@@ -1,9 +1,16 @@
 import { UserRole, OnboardingStatus, NotificationType } from "@prisma/client";
 import prisma from "../../lib/prisma";
 import { CancellationDeadlineService } from "./cancellation-deadline.service";
-import { sendAgreementExecutedEmail, sendPlanPurchaseConfirmationEmail, sendWelcomeInvitationEmail } from "../../utils/email";
+import {
+  sendAgreementExecutedEmail,
+  sendPlanPurchaseConfirmationEmail,
+  sendWelcomeInvitationEmail,
+} from "../../utils/email";
 import { processAgreementPayment } from "../payment/payment.service";
-import { SubmitAgreementInput, CreateAgreementTemplateInput } from "./agreement.validation";
+import {
+  SubmitAgreementInput,
+  CreateAgreementTemplateInput,
+} from "./agreement.validation";
 import { resolveClientForUser } from "../family/family.service";
 
 /**
@@ -14,10 +21,12 @@ export async function seedDefaultAgreementTemplates() {
     {
       state: "RI",
       title: "Rhode Island Client Service Agreement",
-      description: "Official AgeWellRI home safety & care coordination membership contract for Rhode Island residents.",
+      description:
+        "Official AgeWellRI home safety & care coordination membership contract for Rhode Island residents.",
       versionNumber: "v2.0",
       statutoryReference: "Rhode Island General Laws § 6-28-3",
-      content: "Standard Rhode Island senior home safety & wellness coordination agreement with 3-business-day cancellation notice.",
+      content:
+        "Standard Rhode Island senior home safety & wellness coordination agreement with 3-business-day cancellation notice.",
     },
   ];
 
@@ -37,7 +46,9 @@ export async function seedDefaultAgreementTemplates() {
       });
     }
 
-    const existingVersion = await ((prisma as any).agreementVersion.findFirst as any)({
+    const existingVersion = await (
+      (prisma as any).agreementVersion.findFirst as any
+    )({
       where: {
         templateId: template.id,
         versionNumber: t.versionNumber,
@@ -118,22 +129,28 @@ export async function getAgreementTemplateByState(stateInput?: string) {
       (state === "CT"
         ? "Connecticut General Statutes § 42-134a"
         : state === "MA"
-        ? "Massachusetts General Laws ch. 93 § 48"
-        : "Rhode Island General Laws § 6-28-3"),
+          ? "Massachusetts General Laws ch. 93 § 48"
+          : "Rhode Island General Laws § 6-28-3"),
   };
 }
 
 /**
  * Calculate 3-Business-Day Cancellation Deadline
  */
-export async function calculateCancellationDeadline(state?: string, date?: string | Date) {
+export async function calculateCancellationDeadline(
+  state?: string,
+  date?: string | Date,
+) {
   return CancellationDeadlineService.calculateDeadline(state, date);
 }
 
 /**
  * Submit & Execute Service Agreement
  */
-export async function submitServiceAgreement(userId: string, input: SubmitAgreementInput) {
+export async function submitServiceAgreement(
+  userId: string,
+  input: SubmitAgreementInput,
+) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: {
@@ -158,7 +175,11 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
   const isRepresentative = signerRole !== "RESIDENT";
 
   const signerName = isRepresentative
-    ? (input.signerName || input.authorizedRepName || input.clientPrintedName).trim()
+    ? (
+        input.signerName ||
+        input.authorizedRepName ||
+        input.clientPrintedName
+      ).trim()
     : (input.clientPrintedName || input.clientFullName).trim();
 
   // 1. Resolve Dynamic Plan & PlanVersion
@@ -228,7 +249,7 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
   // 2. Server-side 3-Business-Day Cancellation Deadline Calculation
   const deadlineResult = CancellationDeadlineService.calculateDeadline(
     state,
-    input.agreementDate
+    input.agreementDate,
   );
 
   // 3. Resolve active Agreement Version for state
@@ -252,11 +273,13 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
     null;
   const emergencyContactRelation =
     input.emergencyContactRelation ||
-    (input.authorizedRecipients && input.authorizedRecipients[0]?.relationship) ||
+    (input.authorizedRecipients &&
+      input.authorizedRecipients[0]?.relationship) ||
     (isRepresentative ? "Authorized Signer" : "Primary Resident");
 
   const onboardingData = {
-    signingTrack: input.signingTrack || (isRepresentative ? "TRACK_B" : "TRACK_A"),
+    signingTrack:
+      input.signingTrack || (isRepresentative ? "TRACK_B" : "TRACK_A"),
     representativeCapacity: input.representativeCapacity || null,
     authorityDocumentUrl: input.authorityDocumentUrl || null,
     authorizedRecipients: input.authorizedRecipients || [],
@@ -283,11 +306,17 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
         dateOfBirth: input.dob || null,
         signerRole,
         legalAuthority: isRepresentative ? input.legalAuthority || null : null,
-        legalAuthorityOther: isRepresentative && input.legalAuthority === "OTHER" ? input.legalAuthorityOther || null : null,
+        legalAuthorityOther:
+          isRepresentative && input.legalAuthority === "OTHER"
+            ? input.legalAuthorityOther || null
+            : null,
         primaryContactName: input.primaryContactName || input.clientFullName,
         primaryContactPhone: input.primaryContactPhone || input.phone,
-        primaryContactEmail: input.primaryContactEmail || input.email || user.email,
-        primaryContactRelation: input.primaryContactRelation || (isRepresentative ? "Authorized Signer" : "Self"),
+        primaryContactEmail:
+          input.primaryContactEmail || input.email || user.email,
+        primaryContactRelation:
+          input.primaryContactRelation ||
+          (isRepresentative ? "Authorized Signer" : "Self"),
         emergencyContactName,
         emergencyContactPhone,
         emergencyContactEmail,
@@ -315,11 +344,17 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
         dateOfBirth: input.dob || null,
         signerRole,
         legalAuthority: isRepresentative ? input.legalAuthority || null : null,
-        legalAuthorityOther: isRepresentative && input.legalAuthority === "OTHER" ? input.legalAuthorityOther || null : null,
+        legalAuthorityOther:
+          isRepresentative && input.legalAuthority === "OTHER"
+            ? input.legalAuthorityOther || null
+            : null,
         primaryContactName: input.primaryContactName || input.clientFullName,
         primaryContactPhone: input.primaryContactPhone || input.phone,
-        primaryContactEmail: input.primaryContactEmail || input.email || user.email,
-        primaryContactRelation: input.primaryContactRelation || (isRepresentative ? "Authorized Signer" : "Self"),
+        primaryContactEmail:
+          input.primaryContactEmail || input.email || user.email,
+        primaryContactRelation:
+          input.primaryContactRelation ||
+          (isRepresentative ? "Authorized Signer" : "Self"),
         emergencyContactName,
         emergencyContactPhone,
         emergencyContactEmail,
@@ -338,7 +373,10 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
   }
 
   // 4b. Persist Authorized Recipients as FamilyMember records
-  if (Array.isArray(input.authorizedRecipients) && input.authorizedRecipients.length > 0) {
+  if (
+    Array.isArray(input.authorizedRecipients) &&
+    input.authorizedRecipients.length > 0
+  ) {
     for (const rec of input.authorizedRecipients) {
       if (rec && rec.name && rec.email) {
         try {
@@ -362,7 +400,10 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
             });
           }
         } catch (recErr) {
-          console.warn("⚠️ Error saving recipient during agreement execution:", recErr);
+          console.warn(
+            "⚠️ Error saving recipient during agreement execution:",
+            recErr,
+          );
         }
       }
     }
@@ -377,7 +418,10 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
     basePrice,
     addonPrice: input.hasCleaningAddon ? 60 : 0,
     totalPrice: finalPrice,
-    billingInterval: targetVersion?.billingInterval || targetPlan?.billingInterval || "QUARTERLY",
+    billingInterval:
+      targetVersion?.billingInterval ||
+      targetPlan?.billingInterval ||
+      "Monthly",
     features: targetVersion?.features || [],
     services: (targetVersion?.planServices || []).map((ps: any) => ({
       serviceName: ps.serviceType?.name,
@@ -396,11 +440,20 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
       state,
       signerRole,
       signerName,
-      signerEmail: input.signerEmail || (isRepresentative ? input.primaryBillingContact || null : null),
+      signerEmail:
+        input.signerEmail ||
+        (isRepresentative ? input.primaryBillingContact || null : null),
       signerPhone: input.signerPhone || null,
       legalAuthority: isRepresentative ? input.legalAuthority || null : null,
-      legalAuthorityOther: isRepresentative && input.legalAuthority === "OTHER" ? input.legalAuthorityOther || null : null,
-      primaryBillingContact: input.primaryBillingContact || input.primaryContactEmail || input.email || user.email,
+      legalAuthorityOther:
+        isRepresentative && input.legalAuthority === "OTHER"
+          ? input.legalAuthorityOther || null
+          : null,
+      primaryBillingContact:
+        input.primaryBillingContact ||
+        input.primaryContactEmail ||
+        input.email ||
+        user.email,
       cancellationDeadline: deadlineResult.deadlineDate,
       cancellationDeadlineRule: deadlineResult.ruleExplanation,
       planSnapshot,
@@ -411,7 +464,9 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
       hasCleaningAddon: input.hasCleaningAddon,
       clientPrintedName: input.clientPrintedName,
       authorizedRepName: isRepresentative ? signerName : null,
-      relationshipToClient: isRepresentative ? input.relationshipToClient || input.primaryContactRelation || null : "Self",
+      relationshipToClient: isRepresentative
+        ? input.relationshipToClient || input.primaryContactRelation || null
+        : "Self",
       emergencyContactName,
       emergencyContactPhone,
       emergencyContactEmail,
@@ -441,16 +496,25 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
         paymentMethodId: input.paymentMethodId || undefined,
         setupIntentId: input.setupIntentId || undefined,
         billingMethod: "AUTOMATIC",
-        selectedPlan: (targetPlan?.code as any) || (input.selectedPlan as any) || "GUARDIAN_PLUS",
+        selectedPlan:
+          (targetPlan?.code as any) ||
+          (input.selectedPlan as any),
         hasCleaningAddon: input.hasCleaningAddon,
       });
     } catch (paymentErr) {
-      console.warn("⚠️ Agreement Stripe payment provisioning notice:", paymentErr);
+      console.warn(
+        "⚠️ Agreement Stripe payment provisioning notice:",
+        paymentErr,
+      );
     }
   }
 
   // 8. Send Executed Agreement Email Confirmation (Nodemailer)
-  const recipientEmail = input.signerEmail || input.primaryBillingContact || input.email || user.email;
+  const recipientEmail =
+    input.signerEmail ||
+    input.primaryBillingContact ||
+    input.email ||
+    user.email;
   try {
     await sendAgreementExecutedEmail({
       to: recipientEmail,
@@ -470,7 +534,8 @@ export async function submitServiceAgreement(userId: string, input: SubmitAgreem
   }
 
   // 9. In-App Notifications for Client and Admin
-  const executedNotificationType = (NotificationType as any).AGREEMENT_EXECUTED || "AGREEMENT_EXECUTED";
+  const executedNotificationType =
+    (NotificationType as any).AGREEMENT_EXECUTED || "AGREEMENT_EXECUTED";
   try {
     await ((prisma as any).notification.create as any)({
       data: {
@@ -575,7 +640,11 @@ export async function getClientAgreement(userId: string) {
 /**
  * Get All Admin Agreements
  */
-export async function getAllAdminAgreements(query?: { state?: string; status?: string; search?: string }) {
+export async function getAllAdminAgreements(query?: {
+  state?: string;
+  status?: string;
+  search?: string;
+}) {
   const where: any = {};
 
   if (query?.state && query.state !== "ALL") {
@@ -610,13 +679,20 @@ export async function getAllAdminAgreements(query?: { state?: string; status?: s
 
   return agreements.map((agr: any) => {
     const clientUser = agr.client?.user;
-    const clientName = `${clientUser?.firstName || agr.clientPrintedName || "Client"} ${clientUser?.lastName || ""}`.trim();
+    const clientName =
+      `${clientUser?.firstName || agr.clientPrintedName || "Client"} ${clientUser?.lastName || ""}`.trim();
     const clientEmail = clientUser?.email || agr.primaryBillingContact || "";
     const title = `${agr.state} Client Service Agreement`;
     const primaryContactName = agr.client?.primaryContactName || clientName;
-    const primaryContactPhone = agr.client?.primaryContactPhone || clientUser?.phone || agr.signerPhone || null;
+    const primaryContactPhone =
+      agr.client?.primaryContactPhone ||
+      clientUser?.phone ||
+      agr.signerPhone ||
+      null;
     const primaryContactEmail = agr.client?.primaryContactEmail || clientEmail;
-    const primaryContactRelation = agr.client?.primaryContactRelation || (agr.signerRole === "RESIDENT" ? "Self" : "Representative");
+    const primaryContactRelation =
+      agr.client?.primaryContactRelation ||
+      (agr.signerRole === "RESIDENT" ? "Self" : "Representative");
 
     return {
       id: agr.id,
@@ -630,7 +706,8 @@ export async function getAllAdminAgreements(query?: { state?: string; status?: s
       primaryContactRelation,
       title,
       state: agr.state,
-      version: agr.templateVersion || agr.agreementVersion?.versionNumber || "v2.0",
+      version:
+        agr.templateVersion || agr.agreementVersion?.versionNumber || "v2.0",
       signerRole: agr.signerRole || "RESIDENT",
       signerName: agr.signerName || agr.clientPrintedName || clientName,
       legalAuthority: agr.legalAuthority,
@@ -663,7 +740,10 @@ export async function getAllAdminAgreements(query?: { state?: string; status?: s
 /**
  * Send Agreement Signature Reminder
  */
-export async function sendAgreementReminder(adminUserId: string, agreementId: string) {
+export async function sendAgreementReminder(
+  adminUserId: string,
+  agreementId: string,
+) {
   const agreement = await ((prisma as any).serviceAgreement.findUnique as any)({
     where: { id: agreementId },
     include: {
@@ -688,7 +768,9 @@ export async function sendAgreementReminder(adminUserId: string, agreementId: st
     throw new Error("Recipient email not found for this agreement.");
   }
 
-  const clientName = `${agreement.client?.user?.firstName || ""} ${agreement.client?.user?.lastName || ""}`.trim() || agreement.clientPrintedName;
+  const clientName =
+    `${agreement.client?.user?.firstName || ""} ${agreement.client?.user?.lastName || ""}`.trim() ||
+    agreement.clientPrintedName;
 
   try {
     const expiryDate = new Date();
@@ -728,7 +810,10 @@ export async function sendAgreementReminder(adminUserId: string, agreementId: st
 /**
  * Admin Delete Service Agreement
  */
-export async function deleteAgreement(adminUserId: string, agreementId: string) {
+export async function deleteAgreement(
+  adminUserId: string,
+  agreementId: string,
+) {
   const agreement = await ((prisma as any).serviceAgreement.findUnique as any)({
     where: { id: agreementId },
   });
@@ -746,7 +831,9 @@ export async function deleteAgreement(adminUserId: string, agreementId: string) 
   // Check if client has any other active/signed agreements remaining
   if (clientId) {
     try {
-      const remainingAgreements = await ((prisma as any).serviceAgreement.findMany as any)({
+      const remainingAgreements = await (
+        (prisma as any).serviceAgreement.findMany as any
+      )({
         where: {
           clientId,
           status: { in: ["SIGNED", "EXECUTED"] },
@@ -763,7 +850,10 @@ export async function deleteAgreement(adminUserId: string, agreementId: string) 
         });
       }
     } catch (clientSyncErr) {
-      console.warn("Client state sync error after agreement deletion:", clientSyncErr);
+      console.warn(
+        "Client state sync error after agreement deletion:",
+        clientSyncErr,
+      );
     }
   }
 
