@@ -12,6 +12,10 @@ import {
   CreateAgreementTemplateInput,
 } from "./agreement.validation";
 import { resolveClientForUser } from "../family/family.service";
+import {
+  notifyClientAndFamily,
+  notifyAdmins,
+} from "../notification/notification.service";
 
 /**
  * Seed Default State Agreement Template & Version (Rhode Island)
@@ -534,46 +538,41 @@ export async function submitServiceAgreement(
   }
 
   // 9. In-App Notifications for Client and Admin
-  const executedNotificationType =
-    (NotificationType as any).AGREEMENT_EXECUTED || "AGREEMENT_EXECUTED";
   try {
-    await ((prisma as any).notification.create as any)({
-      data: {
-        userId: user.id,
-        type: executedNotificationType,
-        title: "Agreement Executed Successfully",
-        message: `Your AgeWellRI Service Agreement (${state} - ${templateVersion}) has been signed and executed.`,
-        metadata: {
-          agreementId: agreement.id,
-          cancellationDeadline: deadlineResult.deadlineDate.toISOString(),
-        },
-      },
-    });
-
-    // Notify Admins
-    const admins = await prisma.user.findMany({
-      where: { role: UserRole.ADMIN, status: "ACTIVE" },
-      select: { id: true },
-    });
-
-    for (const admin of admins) {
-      await ((prisma as any).notification.create as any)({
-        data: {
-          userId: admin.id,
-          type: executedNotificationType,
-          title: "New Agreement Executed",
-          message: `${input.clientFullName} (${state}) signed service agreement (${templateVersion}).`,
+    const targetClientId = clientId || user.client?.id;
+    if (targetClientId) {
+      await notifyClientAndFamily(
+        targetClientId,
+        {
+          type: "AGREEMENT_EXECUTED",
+          title: "Agreement Executed Successfully",
+          message: `Your AgeWellRI Service Agreement (${state} - ${templateVersion}) has been signed and executed.`,
           metadata: {
-            clientId,
             agreementId: agreement.id,
-            signerName,
-            signerRole,
+            cancellationDeadline: deadlineResult.deadlineDate.toISOString(),
           },
         },
-      });
+        "portalAccess",
+      );
     }
 
-    // Audit Log
+    await notifyAdmins({
+      type: "AGREEMENT_EXECUTED",
+      title: "New Agreement Executed",
+      message: `${input.clientFullName} (${state}) signed service agreement (${templateVersion}).`,
+      metadata: {
+        clientId,
+        agreementId: agreement.id,
+        signerName,
+        signerRole,
+      },
+    });
+  } catch (notifErr) {
+    console.warn("⚠️ Agreement in-app notification dispatch notice:", notifErr);
+  }
+
+  // Audit Log
+  try {
     await ((prisma as any).auditLog.create as any)({
       data: {
         actorUserId: user.id,
@@ -589,8 +588,8 @@ export async function submitServiceAgreement(
         },
       },
     });
-  } catch (notifErr) {
-    console.warn("⚠️ In-app notification / audit notice:", notifErr);
+  } catch (auditErr) {
+    console.warn("⚠️ Audit log notice:", auditErr);
   }
 
   const updatedProfile: any = await prisma.user.findUnique({

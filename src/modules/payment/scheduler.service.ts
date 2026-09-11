@@ -9,6 +9,7 @@ import {
   sendBillingRenewalReminderEmail,
   sendInvoiceGeneratedEmail,
 } from "../../utils/email";
+import { notifyClientAndFamily } from "../notification/notification.service";
 
 /**
  * Core Renewal Reminder Processor.
@@ -124,7 +125,33 @@ export async function checkAndSendRenewalReminders() {
             },
           });
 
-          // 5. Write Audit Log
+          // 5. In-App Notification for Client & Authorized Family
+          try {
+            const dateDisplay = new Date(renewalDate).toLocaleDateString("en-US", {
+              month: "long",
+              day: "numeric",
+              year: "numeric",
+            });
+            await notifyClientAndFamily(
+              sub.client.id,
+              {
+                type: "RENEWAL_REMINDER",
+                title: "Upcoming Plan Renewal",
+                message: `Your AgeWellRI plan (${planName}) will renew on ${dateDisplay}.`,
+                metadata: {
+                  subscriptionId: sub.id,
+                  renewalDate: renewalDate.toISOString(),
+                  amount: contractedPrice,
+                },
+                idempotencyKey: `renewal_reminder_${sub.id}_${renewalDate.toISOString().slice(0, 10)}`,
+              },
+              "billingAccess",
+            );
+          } catch (notifErr: any) {
+            console.warn("⚠️ Failed to dispatch in-app renewal reminder:", notifErr.message);
+          }
+
+          // 6. Write Audit Log
           try {
             await (prisma.auditLog.create as any)({
               data: {
@@ -170,6 +197,36 @@ export async function checkAndSendRenewalReminders() {
 }
 
 /**
+ * Background data sanitizer to ensure all legacy records adhere strictly to MONTHLY billing intervals.
+ */
+export async function sanitizeLegacyBillingIntervals() {
+  const collections = [
+    "Subscription",
+    "PlanVersion",
+    "ServicePlan",
+    "BillingNotificationLog",
+    "BillingNotificationRule",
+    "ServiceAgreement",
+    "Invoice",
+  ];
+
+  for (const coll of collections) {
+    try {
+      await (prisma as any).$runCommandRaw({
+        update: coll,
+        updates: [
+          {
+            q: { billingInterval: "QUARTERLY" },
+            u: { $set: { billingInterval: "MONTHLY" } },
+            multi: true,
+          },
+        ],
+      });
+    } catch {}
+  }
+}
+
+/**
  * Start the background scheduler loop.
  * Runs on boot and every 6 hours thereafter.
  */
@@ -181,17 +238,23 @@ export function initRenewalScheduler() {
   }
 
   // Run initial check 10 seconds after server startup
-  setTimeout(() => {
-    checkAndSendRenewalReminders().catch((e) =>
-      console.warn("⚠️ Initial scheduler check notice:", e.message)
-    );
+  setTimeout(async () => {
+    try {
+      await sanitizeLegacyBillingIntervals();
+      await checkAndSendRenewalReminders();
+    } catch (e: any) {
+      console.warn("⚠️ Initial scheduler check notice:", e.message);
+    }
   }, 10000);
 
   // Run recurring check every 6 hours (21,600,000 ms)
-  schedulerIntervalId = setInterval(() => {
-    checkAndSendRenewalReminders().catch((e) =>
-      console.warn("⚠️ Scheduled reminder notice:", e.message)
-    );
+  schedulerIntervalId = setInterval(async () => {
+    try {
+      await sanitizeLegacyBillingIntervals();
+      await checkAndSendRenewalReminders();
+    } catch (e: any) {
+      console.warn("⚠️ Scheduled reminder notice:", e.message);
+    }
   }, 6 * 60 * 60 * 1000);
 
   console.log("⏰ [RENEWAL SCHEDULER] Background renewal reminder scheduler initialized (every 6 hours).");

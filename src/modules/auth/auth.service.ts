@@ -19,6 +19,10 @@ import {
   ResetPasswordInput,
   RefreshTokenInput,
 } from "./auth.validation";
+import {
+  createNotification,
+  notifyAdmins,
+} from "../notification/notification.service";
 
 export type SignerRoleType =
   | "RESIDENT"
@@ -117,6 +121,28 @@ export async function registerUser(input: RegisterInput) {
   });
 
   const fullUserProfile = await getUserProfile(user.id);
+
+  // Dispatch Welcome In-App Notification and Admin Alert
+  try {
+    if (user.role === UserRole.CLIENT) {
+      await createNotification({
+        userId: user.id,
+        type: "ACCOUNT_CREATED",
+        title: "Welcome to AgeWellRI",
+        message: "Your AgeWellRI account has been created successfully. Please complete your service agreement.",
+        metadata: { clientId: client?.id },
+      });
+
+      await notifyAdmins({
+        type: "ACCOUNT_CREATED",
+        title: "New Client Registration",
+        message: `New client registration received for ${input.firstName} ${input.lastName}.`,
+        metadata: { clientId: client?.id, email: user.email },
+      });
+    }
+  } catch (notifErr) {
+    console.warn("⚠️ Notification dispatch notice on registration:", notifErr);
+  }
 
   return {
     token: authTokens.token,

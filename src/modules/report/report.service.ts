@@ -15,6 +15,10 @@ import path from "path";
 import fs from "fs";
 import { sendReportAvailableEmail } from "../../utils/email";
 import { resolveClientForUser } from "../family/family.service";
+import {
+  notifyClientAndFamily,
+  notifyAdmins,
+} from "../notification/notification.service";
 
 function isValidObjectId(id?: string | null): boolean {
   if (!id || typeof id !== "string") return false;
@@ -639,6 +643,37 @@ export async function uploadVisitReport(
     }
   } catch (err) {
     console.warn("Automated family report notification error:", err);
+  }
+
+  // Dispatch In-App Notifications for Client/Family (with reportAccess) and Admins
+  try {
+    await notifyClientAndFamily(
+      clientId,
+      {
+        type: "REPORT_READY",
+        title: "Visit Report Ready",
+        message: `Your AgeWellRI visit report (${defaultTitle}) is now available to view.`,
+        metadata: {
+          reportId: report.id,
+          appointmentId: appointment.id,
+          serviceName,
+        },
+      },
+      "reportAccess",
+    );
+
+    await notifyAdmins({
+      type: "REPORT_READY",
+      title: "Visit Report Uploaded",
+      message: `${clientName}'s visit report (${defaultTitle}) has been uploaded.`,
+      metadata: {
+        clientId,
+        reportId: report.id,
+        appointmentId: appointment.id,
+      },
+    });
+  } catch (notifErr: any) {
+    console.warn("⚠️ Failed to dispatch report in-app notification:", notifErr.message);
   }
 
   // 8. Return formatted report detail

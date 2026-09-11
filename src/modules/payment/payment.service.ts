@@ -41,6 +41,11 @@ import {
   isWithinCancellationCutoff,
   formatBillingDate,
 } from "../../utils/billing-dates.util";
+import {
+  createNotification,
+  notifyClientAndFamily,
+  notifyAdmins,
+} from "../notification/notification.service";
 
 export type WebhookEventStatusType =
   | "RECEIVED"
@@ -1118,6 +1123,35 @@ export async function cancelSubscriptionRenewal(
       }
     }
 
+    // Dispatch In-App Notifications for Client/Family and Admins
+    try {
+      await notifyClientAndFamily(
+        client.id,
+        {
+          type: "SUBSCRIPTION_CANCELLED",
+          title: "Subscription Cancellation Received",
+          message: `Your AgeWellRI plan cancellation has been received. Your coverage remains in effect until ${formatBillingDate(effectiveDate)}.`,
+          metadata: {
+            subscriptionId: activeSub.id,
+            effectiveDate: effectiveDate.toISOString(),
+          },
+        },
+        "billingAccess",
+      );
+
+      await notifyAdmins({
+        type: "SUBSCRIPTION_CANCELLED",
+        title: "Subscription Cancellation Requested",
+        message: `${clientFullName} requested cancellation of their ${planName}. Coverage ends ${formatBillingDate(effectiveDate)}.`,
+        metadata: {
+          clientId: client.id,
+          subscriptionId: activeSub.id,
+        },
+      });
+    } catch (notifErr: any) {
+      console.warn("⚠️ Failed to dispatch cancellation in-app notifications:", notifErr.message);
+    }
+
     return {
       success: true,
       message: `Automatic renewal has been cancelled. Your active coverage remains in effect until ${formatBillingDate(effectiveDate)}.`,
@@ -1313,6 +1347,35 @@ export async function reactivateSubscriptionRenewal(userId: string) {
         mailErr.message,
       );
     }
+  }
+
+  // Dispatch In-App Notifications for Client/Family and Admins
+  try {
+    await notifyClientAndFamily(
+      client.id,
+      {
+        type: "SUBSCRIPTION_REACTIVATED",
+        title: "Subscription Reactivated",
+        message: `Your AgeWellRI plan (${planName}) has been reactivated. Next billing date: ${formatBillingDate(nextBillingDate)}.`,
+        metadata: {
+          subscriptionId: sub.id,
+          nextBillingDate: nextBillingDate ? new Date(nextBillingDate).toISOString() : null,
+        },
+      },
+      "billingAccess",
+    );
+
+    await notifyAdmins({
+      type: "SUBSCRIPTION_REACTIVATED",
+      title: "Subscription Reactivated",
+      message: `${clientFullName} reactivated their AgeWellRI plan (${planName}).`,
+      metadata: {
+        clientId: client.id,
+        subscriptionId: sub.id,
+      },
+    });
+  } catch (notifErr: any) {
+    console.warn("⚠️ Failed to dispatch reactivation in-app notifications:", notifErr.message);
   }
 
   return {
@@ -1805,13 +1868,14 @@ export async function handleStripeWebhook(
               );
             }
 
+            const planName =
+              activeSub.planVersion?.name ||
+              activeSub.plan?.name ||
+              (client as any)?.selectedPlan ||
+              "Service Plan";
+
             // Send Payment Confirmation Receipt Email & Service Active Notification
             if (client.user?.email) {
-              const planName =
-                activeSub.planVersion?.name ||
-                activeSub.plan?.name ||
-                (client as any)?.selectedPlan ||
-                "Service Plan";
               try {
                 const {
                   sendPaymentSuccessEmail,
@@ -1874,6 +1938,42 @@ export async function handleStripeWebhook(
               } catch (mailErr) {
                 console.warn("⚠️ Failed to dispatch renewal emails:", mailErr);
               }
+            }
+
+            // Dispatch In-App Notifications for Client/Family and Admins
+            try {
+              const paidAmount = amountPaid > 0 ? amountPaid : activeSub.contractedPrice;
+              await notifyClientAndFamily(
+                client.id,
+                {
+                  type: isFirstPeriod ? "PAYMENT_SUCCESS" : "SUBSCRIPTION_RENEWED",
+                  title: isFirstPeriod ? "Payment Successful — Service Active" : "Plan Renewed Successfully",
+                  message: isFirstPeriod
+                    ? `Your AgeWellRI payment of $${paidAmount} was successful. Your service is now active.`
+                    : `Your AgeWellRI plan (${planName}) has been renewed successfully for $${paidAmount}.`,
+                  metadata: {
+                    stripeInvoiceId,
+                    invoiceId: invoiceRecord?.id || null,
+                    amount: paidAmount,
+                  },
+                  idempotencyKey: `invoice_paid_${stripeInvoiceId}`,
+                },
+                "billingAccess",
+              );
+
+              await notifyAdmins({
+                type: "PAYMENT_SUCCESS",
+                title: "Payment Received",
+                message: `Payment of $${paidAmount} received for ${client.user?.firstName || ""} ${client.user?.lastName || ""} (${planName}).`,
+                metadata: {
+                  clientId: client.id,
+                  stripeInvoiceId,
+                  amount: paidAmount,
+                },
+                idempotencyKey: `admin_invoice_paid_${stripeInvoiceId}`,
+              });
+            } catch (notifErr: any) {
+              console.warn("⚠️ Failed to dispatch invoice.paid in-app notifications:", notifErr.message);
             }
 
             await createBillingAuditLog({
@@ -1992,6 +2092,41 @@ export async function handleStripeWebhook(
                   mailErr,
                 );
               }
+            }
+
+            // Dispatch In-App Notifications for Client/Family and Admins (CRITICAL Priority)
+            try {
+              const failAmount = (stripeInvoice.amount_due || 0) / 100 || sub.contractedPrice;
+              await notifyClientAndFamily(
+                client.id,
+                {
+                  type: "PAYMENT_FAILED",
+                  title: "Payment Could Not Be Processed",
+                  message: `Your payment of $${failAmount} could not be processed (${failureReason}). Please update your payment method.`,
+                  metadata: {
+                    stripeInvoiceId,
+                    failureReason,
+                    amount: failAmount,
+                  },
+                  idempotencyKey: `invoice_failed_${stripeInvoiceId}`,
+                },
+                "billingAccess",
+              );
+
+              await notifyAdmins({
+                type: "PAYMENT_FAILED",
+                title: "Client Payment Failed",
+                message: `Payment of $${failAmount} failed for ${client.user?.firstName || ""} ${client.user?.lastName || ""} (${sub.plan?.name || "AgeWellRI Plan"}). Reason: ${failureReason}.`,
+                metadata: {
+                  clientId: client.id,
+                  stripeInvoiceId,
+                  failureReason,
+                  amount: failAmount,
+                },
+                idempotencyKey: `admin_invoice_failed_${stripeInvoiceId}`,
+              });
+            } catch (notifErr: any) {
+              console.warn("⚠️ Failed to dispatch invoice.payment_failed in-app notifications:", notifErr.message);
             }
 
             await createBillingAuditLog({
@@ -2652,6 +2787,38 @@ export async function adminCancelSubscription(
       }
     }
 
+    // Dispatch In-App Notifications
+    try {
+      const clientName = `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() || "Client";
+      const planName = subscription.planVersion?.name || subscription.plan?.name || "AgeWellRI Plan";
+
+      await notifyClientAndFamily(
+        subscription.clientId,
+        {
+          type: "SUBSCRIPTION_CANCELLED",
+          title: "Subscription Cancelled",
+          message: `Your AgeWellRI subscription (${planName}) has been cancelled.`,
+          metadata: {
+            subscriptionId,
+            effectiveDate: now.toISOString(),
+          },
+        },
+        "billingAccess",
+      );
+
+      await notifyAdmins({
+        type: "SUBSCRIPTION_CANCELLED",
+        title: "Subscription Cancelled",
+        message: `Subscription for ${clientName} (${planName}) was cancelled immediately by admin.`,
+        metadata: {
+          clientId: subscription.clientId,
+          subscriptionId,
+        },
+      });
+    } catch (notifErr: any) {
+      console.warn("⚠️ Failed to dispatch admin cancellation in-app notification:", notifErr.message);
+    }
+
     return {
       success: true,
       message: `Subscription for ${subscription.client?.user?.firstName || "Client"} has been cancelled immediately.`,
@@ -2713,6 +2880,38 @@ export async function adminCancelSubscription(
           mailErr.message,
         );
       }
+    }
+
+    // Dispatch In-App Notifications
+    try {
+      const clientName = `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() || "Client";
+      const planName = subscription.planVersion?.name || subscription.plan?.name || "AgeWellRI Plan";
+
+      await notifyClientAndFamily(
+        subscription.clientId,
+        {
+          type: "SUBSCRIPTION_CANCELLED",
+          title: "Subscription Cancellation Scheduled",
+          message: `Your AgeWellRI subscription (${planName}) is scheduled to end on ${formatBillingDate(effectiveDate)}.`,
+          metadata: {
+            subscriptionId,
+            effectiveDate: effectiveDate.toISOString ? effectiveDate.toISOString() : effectiveDate,
+          },
+        },
+        "billingAccess",
+      );
+
+      await notifyAdmins({
+        type: "SUBSCRIPTION_CANCELLED",
+        title: "Subscription Cancellation Scheduled",
+        message: `Subscription for ${clientName} (${planName}) is scheduled to end on ${formatBillingDate(effectiveDate)}.`,
+        metadata: {
+          clientId: subscription.clientId,
+          subscriptionId,
+        },
+      });
+    } catch (notifErr: any) {
+      console.warn("⚠️ Failed to dispatch admin scheduled cancellation in-app notification:", notifErr.message);
     }
 
     return {
@@ -2824,6 +3023,39 @@ export async function adminReactivateSubscription(
         mailErr.message,
       );
     }
+  }
+
+  // Dispatch In-App Notifications
+  try {
+    const clientName = `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() || "Client";
+    const planName = subscription.planVersion?.name || subscription.plan?.name || "AgeWellRI Plan";
+    const nextBillingDate = subscription.nextRenewalDate || subscription.currentPeriodEnd;
+
+    await notifyClientAndFamily(
+      subscription.clientId,
+      {
+        type: "SUBSCRIPTION_REACTIVATED",
+        title: "Subscription Reactivated",
+        message: `Your AgeWellRI subscription (${planName}) has been reactivated. Next renewal: ${formatBillingDate(nextBillingDate)}.`,
+        metadata: {
+          subscriptionId,
+          nextBillingDate: nextBillingDate?.toISOString ? nextBillingDate.toISOString() : nextBillingDate,
+        },
+      },
+      "billingAccess",
+    );
+
+    await notifyAdmins({
+      type: "SUBSCRIPTION_REACTIVATED",
+      title: "Subscription Reactivated",
+      message: `Subscription for ${clientName} (${planName}) was reactivated by admin.`,
+      metadata: {
+        clientId: subscription.clientId,
+        subscriptionId,
+      },
+    });
+  } catch (notifErr: any) {
+    console.warn("⚠️ Failed to dispatch admin reactivation in-app notification:", notifErr.message);
   }
 
   return {

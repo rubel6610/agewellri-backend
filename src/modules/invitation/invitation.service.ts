@@ -9,6 +9,10 @@ import {
   AcceptInvitationInput,
   SaveOnboardingProgressInput,
 } from "./invitation.validation";
+import {
+  createNotification,
+  notifyAdmins,
+} from "../notification/notification.service";
 
 function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -267,13 +271,19 @@ export async function acceptInvitation(input: AcceptInvitationInput) {
 
   // Notifications & Audit Log
   try {
-    await (prisma.notification.create as any)({
-      data: {
-        userId: user.id,
-        type: NotificationType.ACCOUNT_CREATED,
-        title: "Welcome to AgeWellRI",
-        message: "Your member account was successfully created via welcome invitation. Please complete your service agreement.",
-      },
+    await createNotification({
+      userId: user.id,
+      type: "ACCOUNT_CREATED",
+      title: "Welcome to AgeWellRI",
+      message: "Your member account was successfully created via welcome invitation. Please complete your service agreement.",
+      metadata: { clientId: user.client?.id },
+    });
+
+    await notifyAdmins({
+      type: "ACCOUNT_CREATED",
+      title: "New Client Registration (Invitation Accepted)",
+      message: `New client registration received for ${input.firstName} ${input.lastName}.`,
+      metadata: { clientId: user.client?.id, email: user.email },
     });
 
     await (prisma.auditLog.create as any)({

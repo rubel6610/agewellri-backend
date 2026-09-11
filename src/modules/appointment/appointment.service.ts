@@ -18,6 +18,10 @@ import {
   formatPeriodEntitlements,
 } from "../payment/visit-entitlement.service";
 import { getAllSpecialists } from "../specialist/specialist.service";
+import {
+  notifyClientAndFamily,
+  notifyAdmins,
+} from "../notification/notification.service";
 
 export function isValidObjectId(id?: string | null): boolean {
   if (!id || typeof id !== "string") return false;
@@ -741,6 +745,45 @@ async function validateAndExecuteContractualScheduling(
     },
   });
 
+  // Dispatch In-App Notifications for Client/Family and Admins
+  try {
+    const formattedDate = new Date(startAt).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+
+    await notifyClientAndFamily(
+      client.id,
+      {
+        type: "APPOINTMENT_CREATED",
+        title: "Visit Scheduled",
+        message: `Your AgeWellRI visit (${serviceType.name}) has been scheduled for ${formattedDate} (${params.timeSlot}).`,
+        metadata: {
+          appointmentId: appointment.id,
+          serviceName: serviceType.name,
+          startAt: startAt.toISOString(),
+          timeSlot: params.timeSlot,
+        },
+      },
+      "portalAccess",
+    );
+
+    const clientDisplayName = `${client.user?.firstName || "Client"} ${client.user?.lastName || ""}`.trim();
+    await notifyAdmins({
+      type: "APPOINTMENT_CREATED",
+      title: "New Visit Booked",
+      message: `${clientDisplayName} booked a ${serviceType.name} visit for ${formattedDate}.`,
+      metadata: {
+        clientId: client.id,
+        appointmentId: appointment.id,
+        serviceName: serviceType.name,
+      },
+    });
+  } catch (notifErr: any) {
+    console.warn("⚠️ Failed to dispatch appointment creation in-app notification:", notifErr.message);
+  }
+
   return formatAppointmentRecord(appointment, technician ? [technician] : []);
 }
 
@@ -1083,6 +1126,44 @@ export async function rescheduleAppointment(
     metadata: { reason: input.reason },
   });
 
+  // Dispatch In-App Notifications for Client/Family and Admins
+  try {
+    const formattedDate = new Date(startAt).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+
+    if (updated.client?.id) {
+      await notifyClientAndFamily(
+        updated.client.id,
+        {
+          type: "APPOINTMENT_RESCHEDULED",
+          title: "Visit Rescheduled",
+          message: `Your AgeWellRI visit (${updated.serviceType?.name || "Visit"}) has been rescheduled to ${formattedDate}.`,
+          metadata: {
+            appointmentId,
+            startAt: startAt.toISOString(),
+          },
+        },
+        "portalAccess",
+      );
+
+      const clientName = `${updated.client.user?.firstName || "Client"} ${updated.client.user?.lastName || ""}`.trim();
+      await notifyAdmins({
+        type: "APPOINTMENT_RESCHEDULED",
+        title: "Visit Rescheduled",
+        message: `${clientName}'s ${updated.serviceType?.name || "visit"} was rescheduled to ${formattedDate}.`,
+        metadata: {
+          clientId: updated.client.id,
+          appointmentId,
+        },
+      });
+    }
+  } catch (notifErr: any) {
+    console.warn("⚠️ Failed to dispatch reschedule in-app notifications:", notifErr.message);
+  }
+
   const allSpecialists = await getAllSpecialists();
   return formatAppointmentRecord(updated, allSpecialists);
 }
@@ -1147,6 +1228,39 @@ export async function cancelAppointment(
     entityId: appointmentId,
     metadata: { reason },
   });
+
+  // Dispatch In-App Notifications for Client/Family and Admins
+  try {
+    if (updated.client?.id) {
+      await notifyClientAndFamily(
+        updated.client.id,
+        {
+          type: "APPOINTMENT_CANCELLED",
+          title: "Visit Cancelled",
+          message: `Your AgeWellRI visit (${updated.serviceType?.name || "Visit"}) has been cancelled.`,
+          metadata: {
+            appointmentId,
+            reason,
+          },
+        },
+        "portalAccess",
+      );
+
+      const clientName = `${updated.client.user?.firstName || "Client"} ${updated.client.user?.lastName || ""}`.trim();
+      await notifyAdmins({
+        type: "APPOINTMENT_CANCELLED",
+        title: "Visit Cancelled",
+        message: `${clientName}'s ${updated.serviceType?.name || "visit"} was cancelled.`,
+        metadata: {
+          clientId: updated.client.id,
+          appointmentId,
+          reason,
+        },
+      });
+    }
+  } catch (notifErr: any) {
+    console.warn("⚠️ Failed to dispatch cancel in-app notifications:", notifErr.message);
+  }
 
   const allSpecialists = await getAllSpecialists();
   return formatAppointmentRecord(updated, allSpecialists);
@@ -1228,6 +1342,26 @@ export async function updateAppointmentStatus(
     newValues: { status: input.status },
     metadata: { notes: input.notes },
   });
+
+  // Dispatch in-app notification if marked COMPLETED
+  if (input.status === "COMPLETED" && updated.client?.id) {
+    try {
+      await notifyClientAndFamily(
+        updated.client.id,
+        {
+          type: "VISIT_COMPLETED",
+          title: "Visit Completed",
+          message: `Your AgeWellRI visit (${updated.serviceType?.name || "Visit"}) has been completed.`,
+          metadata: {
+            appointmentId,
+          },
+        },
+        "portalAccess",
+      );
+    } catch (notifErr: any) {
+      console.warn("⚠️ Failed to dispatch visit completed notification:", notifErr.message);
+    }
+  }
 
   const allSpecialists = await getAllSpecialists();
   return formatAppointmentRecord(updated, allSpecialists);
@@ -1359,6 +1493,28 @@ export async function acceptVisitRequest(
     },
     metadata: { technicianName: technician.name, notes: input.notes },
   });
+
+  // Dispatch In-App Notification for Client/Family
+  if (updated.client?.id) {
+    try {
+      await notifyClientAndFamily(
+        updated.client.id,
+        {
+          type: "SPECIALIST_ASSIGNED",
+          title: "Specialist Assigned",
+          message: `Specialist ${technician.name} has been assigned to your AgeWellRI visit (${updated.serviceType?.name || "Visit"}).`,
+          metadata: {
+            appointmentId,
+            technicianId: technician.id,
+            technicianName: technician.name,
+          },
+        },
+        "portalAccess",
+      );
+    } catch (notifErr: any) {
+      console.warn("⚠️ Failed to dispatch specialist assigned notification:", notifErr.message);
+    }
+  }
 
   const allSpecialists = await getAllSpecialists();
   return formatAppointmentRecord(updated, allSpecialists);

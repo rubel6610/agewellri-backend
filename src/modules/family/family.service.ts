@@ -16,6 +16,7 @@ import {
   SendReportToFamilyInput,
   SendCredentialsInput,
 } from "./family.validation";
+import { createNotification } from "../notification/notification.service";
 
 function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -283,6 +284,24 @@ export async function createFamilyMember(userId: string, input: CreateFamilyMemb
     } catch (emailErr) {
       console.warn("⚠️ Family member credentials email notice:", emailErr);
     }
+  }
+
+  // In-App Notification for Primary Account Holder
+  try {
+    if (context.client?.userId) {
+      await createNotification({
+        userId: context.client.userId,
+        type: "FAMILY_MEMBER_ADDED",
+        title: "Family Member Added",
+        message: `${input.name.trim()} (${input.relationship.trim()}) has been added to your care circle.`,
+        metadata: {
+          familyMemberId: member.id,
+          clientId,
+        },
+      });
+    }
+  } catch (notifErr: any) {
+    console.warn("⚠️ Failed to dispatch family member in-app notification:", notifErr.message);
   }
 
   // Audit Log
