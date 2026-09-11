@@ -134,7 +134,7 @@ function getDefaultFromAddress(senderTitle = "AgeWellRI Care Coordination") {
   return (
     process.env.SMTP_FROM ||
     process.env.EMAIL_FROM ||
-    `"${senderTitle}" <${process.env.SMTP_USER || process.env.EMAIL_USER || "billing@agewellri.com"}>`
+    `"${senderTitle}" <${process.env.SMTP_USER || process.env.EMAIL_USER || "agewellri@gmail.com"}>`
   );
 }
 
@@ -181,7 +181,7 @@ function wrapHtmlEmail(title: string, contentHtml: string): string {
           <div class="footer">
             &copy; ${new Date().getFullYear()} AgeWellRI. Westerly, Rhode Island.<br>
             Protecting independence and safety for Rhode Island seniors.<br>
-            Questions? Contact Support: <a href="mailto:billing@agewellri.com">billing@agewellri.com</a> | (401) 555-0199
+            Questions? Contact Support: <a href="mailto:agewellri@gmail.com">agewellri@gmail.com</a> | (401) 212-3002
           </div>
         </div>
       </body>
@@ -271,8 +271,8 @@ export async function sendBillingRenewalReminderEmail(
     cardLast4,
     daysBeforeNotice,
     portalUrl = process.env.FRONTEND_URL || "0",
-    supportPhone = "(401) 555-0199",
-    supportEmail = "billing@agewellri.com",
+    supportPhone = "(401) 212-3002",
+    supportEmail = "agewellri@gmail.com",
   } = options;
 
   const formattedDate = new Date(renewalDate).toLocaleDateString("en-US", {
@@ -732,8 +732,8 @@ export async function sendPlanPurchaseConfirmationEmail(
     cancellationDeadline,
     cancellationDeadlineRule,
     portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
-    supportPhone = "(401) 555-0199",
-    supportEmail = "billing@agewellri.com",
+    supportPhone = "(401) 212-3002",
+    supportEmail = "agewellri@gmail.com",
   } = options;
 
   const isPaid = paymentStatus === "PAID";
@@ -1027,7 +1027,7 @@ export async function sendWelcomeInvitationEmail(
     expiresAt,
     planName,
     state = "RI",
-    supportPhone = "(401) 555-0199",
+    supportPhone = "(401) 212-3002",
     supportEmail = "support@agewellri.com",
   } = options;
 
@@ -1052,7 +1052,7 @@ export async function sendWelcomeInvitationEmail(
       <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
         <tr>
           <td style="padding: 6px 0; color: #64748B;">Service Region:</td>
-          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${state === "RI" ? "Rhode Island" : state === "CT" ? "Connecticut" : state === "MA" ? "Massachusetts" : state}</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${state === "RI" ? "Rhode Island" : ""}</td>
         </tr>
         ${
           planName
@@ -1149,8 +1149,8 @@ export async function sendAgreementExecutedEmail(
     cancellationDeadlineRule,
     selectedPlan = "AgeWellRI Membership",
     portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
-    supportPhone = "(401) 555-0199",
-    supportEmail = "billing@agewellri.com",
+    supportPhone = "(401) 212-3002",
+    supportEmail = "agewellri@gmail.com",
   } = options;
 
   const signedDateFormatted = new Date(signedDate).toLocaleDateString("en-US", {
@@ -1302,7 +1302,7 @@ export async function sendReportAvailableEmail(
     specialistName = "AgeWellRI Specialist",
     reportTitle = "Completed Visit Report",
     portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
-    supportPhone = "(401) 555-0199",
+    supportPhone = "(401) 212-3002",
     supportEmail = "support@agewellri.com",
   } = options;
 
@@ -2055,8 +2055,7 @@ export async function sendSubscriptionReactivatedEmail(
   } = options;
 
   const formattedBillingDate = nextBillingDate
-    ? typeof nextBillingDate === "string" &&
-      isNaN(Date.parse(nextBillingDate))
+    ? typeof nextBillingDate === "string" && isNaN(Date.parse(nextBillingDate))
       ? nextBillingDate
       : new Date(nextBillingDate).toLocaleDateString("en-US", {
           month: "long",

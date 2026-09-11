@@ -779,6 +779,7 @@ export async function getAdminDashboardStats() {
   ] = await Promise.all([
     (prisma.client.findMany as any)({
       where: { isArchived: false },
+      orderBy: { createdAt: "desc" },
       include: {
         user: {
           select: { firstName: true, lastName: true, email: true, phone: true },
@@ -1036,18 +1037,24 @@ export async function getAdminDashboardStats() {
       status: appt.status,
       address: appt.client?.address || "On File",
     })),
-    recentClients: allClients.slice(0, 6).map((c: any) => ({
-      id: c.clientNumber || c.id,
-      internalId: c.id,
-      name: `${c.user?.firstName || "Client"} ${c.user?.lastName || ""}`.trim(),
-      email: c.user?.email || c.primaryContactEmail || "N/A",
-      state: c.state || "RI",
-      planName:
-        c.subscriptions?.[0]?.plan?.name || c.selectedPlan || "Unassigned",
-      status:
-        c.onboardingStatus === "COMPLETED" ? "active" : "pending_onboarding",
-      createdAt: safeFormatDate(c.createdAt) || "Recently",
-    })),
+    recentClients: [...allClients]
+      .sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+      .slice(0, 6)
+      .map((c: any) => ({
+        id: c.clientNumber || c.id,
+        internalId: c.id,
+        name: `${c.user?.firstName || "Client"} ${c.user?.lastName || ""}`.trim(),
+        email: c.user?.email || c.primaryContactEmail || "N/A",
+        state: c.state || "RI",
+        planName: (c.subscriptions?.[0]?.plan?.name || c.selectedPlan || "Unassigned")
+          .replace(/\s*(Membership Statement|Manual Invoice)\s*$/i, "")
+          .trim(),
+        status:
+          c.onboardingStatus === "ACTIVE" || c.onboardingStatus === "COMPLETED"
+            ? "active"
+            : c.onboardingStatus?.toLowerCase() || "pending_onboarding",
+        createdAt: safeFormatDate(c.createdAt) || "Recently",
+      })),
     attentionItems,
     planDistribution,
     stateDistribution,

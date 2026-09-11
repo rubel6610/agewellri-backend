@@ -6,15 +6,15 @@ import {
   AppointmentStatus,
 } from "@prisma/client";
 import prisma from "../../lib/prisma";
-import { SubmitAssessmentInput, AssessmentResponseItem } from "./report.validation";
+import {
+  SubmitAssessmentInput,
+  AssessmentResponseItem,
+} from "./report.validation";
 import { getAllSpecialists } from "../specialist/specialist.service";
 import path from "path";
 import fs from "fs";
 import { sendReportAvailableEmail } from "../../utils/email";
 import { resolveClientForUser } from "../family/family.service";
-
-
-
 
 function isValidObjectId(id?: string | null): boolean {
   if (!id || typeof id !== "string") return false;
@@ -32,7 +32,9 @@ async function createReportAuditLog(params: {
   metadata?: any;
 }) {
   try {
-    const validActorId = isValidObjectId(params.actorUserId) ? params.actorUserId : null;
+    const validActorId = isValidObjectId(params.actorUserId)
+      ? params.actorUserId
+      : null;
     await (prisma.auditLog.create as any)({
       data: {
         actorUserId: validActorId,
@@ -71,8 +73,9 @@ export async function seedDefaultAssessmentTemplate() {
     });
   }
 
-
-  console.log("✅ Seeded Age Safe® Home Score™ Assessment Template & 25 Questions.");
+  console.log(
+    "✅ Seeded Age Safe® Home Score™ Assessment Template & 25 Questions.",
+  );
   return (prisma as any).assessmentTemplate.findUnique({
     where: { id: template.id },
     include: { questions: { orderBy: { order: "asc" } } },
@@ -102,7 +105,9 @@ export async function getAssessmentTemplate() {
 /**
  * Server-Side Authoritative 50-Point Score Engine
  */
-export function calculateAuthoritativeScore(responses: AssessmentResponseItem[]) {
+export function calculateAuthoritativeScore(
+  responses: AssessmentResponseItem[],
+) {
   const categoryScores: Record<
     string,
     { score: number; maxScore: number; count: number; items: any[] }
@@ -115,7 +120,9 @@ export function calculateAuthoritativeScore(responses: AssessmentResponseItem[])
   };
 
   let totalScore = 0;
-  const flaggedRisksCount = responses.filter((r) => r.flaggedRisk || r.scoreValue === 0).length;
+  const flaggedRisksCount = responses.filter(
+    (r) => r.flaggedRisk || r.scoreValue === 0,
+  ).length;
 
   for (const resp of responses) {
     const rawVal = Number(resp.scoreValue);
@@ -176,7 +183,7 @@ export function calculateAuthoritativeScore(responses: AssessmentResponseItem[])
  */
 export async function submitAssessment(
   actorUserId: string,
-  input: SubmitAssessmentInput
+  input: SubmitAssessmentInput,
 ) {
   const { appointmentId } = input;
 
@@ -222,7 +229,9 @@ export async function submitAssessment(
     }
 
     if (!technicianId) {
-      throw new Error("Cannot create visit: No specialist available to assign.");
+      throw new Error(
+        "Cannot create visit: No specialist available to assign.",
+      );
     }
 
     visit = await (prisma.visit.create as any)({
@@ -306,7 +315,9 @@ export async function submitAssessment(
           questionId: resp.questionId,
           scoreValue: Math.max(0, Math.min(2, Number(resp.scoreValue) || 0)),
           notes: resp.notes || null,
-          flaggedRisk: Boolean(resp.flaggedRisk || Number(resp.scoreValue) === 0),
+          flaggedRisk: Boolean(
+            resp.flaggedRisk || Number(resp.scoreValue) === 0,
+          ),
         },
       });
     }
@@ -366,7 +377,10 @@ export async function submitAssessment(
   });
 
   // 8. Return formatted report detail
-  return getReportByAppointmentId(appointmentId, { id: actorUserId, role: "ADMIN" });
+  return getReportByAppointmentId(appointmentId, {
+    id: actorUserId,
+    role: "ADMIN",
+  });
 }
 
 export interface UploadVisitReportInput {
@@ -382,7 +396,7 @@ export interface UploadVisitReportInput {
  */
 export async function uploadVisitReport(
   actorUserId: string,
-  input: UploadVisitReportInput
+  input: UploadVisitReportInput,
 ) {
   const { appointmentId, file, title, summary, notes } = input;
 
@@ -413,7 +427,7 @@ export async function uploadVisitReport(
   // 2. Validate Appointment is marked COMPLETED
   if (appointment.status !== AppointmentStatus.COMPLETED) {
     throw new Error(
-      `Cannot upload report: Appointment status is ${appointment.status}. Reports can only be uploaded for COMPLETED visits.`
+      `Cannot upload report: Appointment status is ${appointment.status}. Reports can only be uploaded for COMPLETED visits.`,
     );
   }
 
@@ -429,7 +443,9 @@ export async function uploadVisitReport(
     }
 
     if (!technicianId) {
-      throw new Error("Cannot associate visit: No specialist assigned or available.");
+      throw new Error(
+        "Cannot associate visit: No specialist assigned or available.",
+      );
     }
 
     visit = await (prisma.visit.create as any)({
@@ -480,12 +496,20 @@ export async function uploadVisitReport(
     // If replacing existing report file, safely delete old file from disk
     if (existingReport.fileUrl) {
       const oldFilename = path.basename(existingReport.fileUrl);
-      const oldFilePath = path.join(process.cwd(), "uploads", "reports", oldFilename);
+      const oldFilePath = path.join(
+        process.cwd(),
+        "uploads",
+        "reports",
+        oldFilename,
+      );
       if (fs.existsSync(oldFilePath) && oldFilename !== storageFilename) {
         try {
           fs.unlinkSync(oldFilePath);
         } catch (unlinkErr) {
-          console.warn("⚠️ Could not remove previous report file from disk:", unlinkErr);
+          console.warn(
+            "⚠️ Could not remove previous report file from disk:",
+            unlinkErr,
+          );
         }
       }
     }
@@ -554,9 +578,16 @@ export async function uploadVisitReport(
 
   // 7. Send Client and Authorized Family Notification Emails
   const clientUser = appointment.client?.user;
-  const primaryRecipientEmail = clientUser?.email || appointment.client?.primaryContactEmail;
-  const clientName = `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() || appointment.client?.primaryContactName || "Valued Member";
-  const specialistName = visit.technician?.name || appointment.technician?.name || "AgeWellRI Specialist";
+  const primaryRecipientEmail =
+    clientUser?.email || appointment.client?.primaryContactEmail;
+  const clientName =
+    `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() ||
+    appointment.client?.primaryContactName ||
+    "Valued Member";
+  const specialistName =
+    visit.technician?.name ||
+    appointment.technician?.name ||
+    "AgeWellRI Specialist";
 
   if (primaryRecipientEmail) {
     try {
@@ -569,13 +600,18 @@ export async function uploadVisitReport(
         reportTitle: defaultTitle,
       });
     } catch (emailErr) {
-      console.warn("⚠️ Could not send report availability email notification to primary client:", emailErr);
+      console.warn(
+        "⚠️ Could not send report availability email notification to primary client:",
+        emailErr,
+      );
     }
   }
 
   // Also dispatch automated report notification to all family members with reportAccess = true
   try {
-    const familyMembersWithReportAccess = await (prisma.familyMember.findMany as any)({
+    const familyMembersWithReportAccess = await (
+      prisma.familyMember.findMany as any
+    )({
       where: {
         clientId,
         reportAccess: true,
@@ -583,7 +619,10 @@ export async function uploadVisitReport(
     });
 
     for (const fam of familyMembersWithReportAccess) {
-      if (fam.email && fam.email.toLowerCase() !== primaryRecipientEmail?.toLowerCase()) {
+      if (
+        fam.email &&
+        fam.email.toLowerCase() !== primaryRecipientEmail?.toLowerCase()
+      ) {
         try {
           await sendReportAvailableEmail({
             to: fam.email,
@@ -612,7 +651,7 @@ export async function uploadVisitReport(
  */
 export async function getReportFileForDownload(
   reportId: string,
-  user: { id: string; role: string }
+  user: { id: string; role: string },
 ) {
   const report = await (prisma.report.findUnique as any)({
     where: { id: reportId },
@@ -633,7 +672,9 @@ export async function getReportFileForDownload(
     }
 
     if (!context.permissions.reportAccess) {
-      throw new Error("You do not have permission to view or download reports.");
+      throw new Error(
+        "You do not have permission to view or download reports.",
+      );
     }
   }
 
@@ -672,18 +713,23 @@ function formatReportDetail(report: any, allSpecialists: any[] = []) {
   const assessment = visit?.assessment;
 
   let spec = allSpecialists.find(
-    (s) => s.id === visit?.technicianId || s.id === appt?.technicianId
+    (s) => s.id === visit?.technicianId || s.id === appt?.technicianId,
   );
 
   const specialistName =
     spec?.name || visit?.technician?.name || "Home Safety Specialist";
   const specialistTitle =
-    spec?.title || visit?.technician?.title || "Certified Senior Safety Specialist";
+    spec?.title ||
+    visit?.technician?.title ||
+    "Certified Senior Safety Specialist";
 
   const totalScore = assessment?.score ?? report.score ?? null;
   const maxScore = assessment?.maxScore ?? 50;
-  const percentage = totalScore != null ? Math.round((totalScore / maxScore) * 100) : null;
-  const ratingTier = assessment?.ratingTier ?? (totalScore && totalScore >= 45 ? "EXCELLENT" : "GOOD");
+  const percentage =
+    totalScore != null ? Math.round((totalScore / maxScore) * 100) : null;
+  const ratingTier =
+    assessment?.ratingTier ??
+    (totalScore && totalScore >= 45 ? "EXCELLENT" : "GOOD");
 
   const formattedResponses = (assessment?.responses || []).map((r: any) => ({
     id: r.id,
@@ -696,11 +742,16 @@ function formatReportDetail(report: any, allSpecialists: any[] = []) {
     flaggedRisk: Boolean(r.flaggedRisk || r.scoreValue === 0),
   }));
 
-  const clientName = `${user?.firstName || ""} ${user?.lastName || ""}`.trim() || "Valued Client";
-  const clientNumber = client?.clientNumber || `AW-${client?.id?.slice(-4).toUpperCase() || "MEMBER"}`;
-  const address = [client?.address, client?.city, client?.state, client?.postalCode]
-    .filter(Boolean)
-    .join(", ") || "Client Residence, Rhode Island";
+  const clientName =
+    `${user?.firstName || ""} ${user?.lastName || ""}`.trim() ||
+    "Valued Client";
+  const clientNumber =
+    client?.clientNumber ||
+    `AW-${client?.id?.slice(-4).toUpperCase() || "MEMBER"}`;
+  const address =
+    [client?.address, client?.city, client?.state, client?.postalCode]
+      .filter(Boolean)
+      .join(", ") || "Client Residence, Rhode Island";
 
   const hasFile = Boolean(report.fileUrl);
   const downloadUrl = hasFile ? `/api/v1/reports/${report.id}/download` : null;
@@ -720,13 +771,22 @@ function formatReportDetail(report: any, allSpecialists: any[] = []) {
     clientAddress: address,
     serviceType: appt?.serviceType?.name || "Home Safety Oversight",
     visitDate: visit?.completedAt || appt?.startAt || report.createdAt,
-    formattedVisitDate: (visit?.completedAt || appt?.startAt || report.createdAt).toLocaleDateString(
-      "en-US",
-      { weekday: "short", month: "short", day: "numeric", year: "numeric" }
-    ),
+    formattedVisitDate: (
+      visit?.completedAt ||
+      appt?.startAt ||
+      report.createdAt
+    ).toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }),
     title: report.title || `${appt?.serviceType?.name || "Visit"} Report`,
     reportType: report.reportType,
-    status: report.status === "GENERATED" || report.status === "UPLOADED" ? "available" : "pending",
+    status:
+      report.status === "GENERATED" || report.status === "UPLOADED"
+        ? "available"
+        : "pending",
     reportStatus: report.status,
     score: totalScore,
     maxScore,
@@ -738,14 +798,12 @@ function formatReportDetail(report: any, allSpecialists: any[] = []) {
       `Visit report completed by ${specialistName}.`,
     findings: assessment?.findings || "",
     recommendations:
-      report.recommendations ||
-      assessment?.recommendations ||
-      "",
+      report.recommendations || assessment?.recommendations || "",
     categoryScores: assessment?.categoryScores || null,
     responses: formattedResponses,
     specialistName,
     specialistTitle,
-    specialistPhone: spec?.phone || "(401) 555-0199",
+    specialistPhone: spec?.phone || "(401) 212-3002",
     specialistColor: spec?.color || "#294B68",
     fileUrl: downloadUrl,
     downloadUrl,
@@ -762,7 +820,7 @@ function formatReportDetail(report: any, allSpecialists: any[] = []) {
  */
 export async function getReportByAppointmentId(
   appointmentId: string,
-  user: { id: string; role: string }
+  user: { id: string; role: string },
 ) {
   const appt = await (prisma.appointment.findUnique as any)({
     where: { id: appointmentId },
@@ -795,7 +853,11 @@ export async function getReportByAppointmentId(
   }
 
   // Ownership verification for CLIENT role
-  if (user.role === "CLIENT" && appt.client?.userId !== user.id && appt.clientId !== user.id) {
+  if (
+    user.role === "CLIENT" &&
+    appt.client?.userId !== user.id &&
+    appt.clientId !== user.id
+  ) {
     throw new Error("You are not authorized to view this report.");
   }
 
@@ -819,8 +881,10 @@ export async function getReportByAppointmentId(
     status: ReportStatus.GENERATED,
     title: `${appt.serviceType?.name || "Home Safety"} Assessment Report`,
     score: visit.assessment?.score ?? 45,
-    summary: visit.assessment?.summary || "Comprehensive home safety evaluation.",
-    recommendations: visit.assessment?.recommendations || "Maintain clear walkways.",
+    summary:
+      visit.assessment?.summary || "Comprehensive home safety evaluation.",
+    recommendations:
+      visit.assessment?.recommendations || "Maintain clear walkways.",
     fileUrl: null,
     generatedAt: visit.assessment?.completedAt || new Date(),
     createdAt: visit.assessment?.createdAt || new Date(),
@@ -835,7 +899,9 @@ export async function getReportByAppointmentId(
 async function hydrateReports(rawReports: any[]) {
   if (!rawReports || rawReports.length === 0) return [];
 
-  const visitIds = Array.from(new Set(rawReports.map((r) => r.visitId).filter(Boolean)));
+  const visitIds = Array.from(
+    new Set(rawReports.map((r) => r.visitId).filter(Boolean)),
+  );
 
   // Parallel fetch specialists, visits, and assessments
   const [allSpecialists, visits, assessments] = await Promise.all([
@@ -859,10 +925,14 @@ async function hydrateReports(rawReports: any[]) {
   ]);
 
   const visitMap = new Map<string, any>(visits.map((v: any) => [v.id, v]));
-  const assessmentMap = new Map<string, any>(assessments.map((a: any) => [a.visitId, a]));
+  const assessmentMap = new Map<string, any>(
+    assessments.map((a: any) => [a.visitId, a]),
+  );
 
   // Fetch appointments for these visits
-  const apptIds = Array.from(new Set(visits.map((v: any) => v.appointmentId).filter(Boolean)));
+  const apptIds = Array.from(
+    new Set(visits.map((v: any) => v.appointmentId).filter(Boolean)),
+  );
   const appointments =
     apptIds.length > 0
       ? await (prisma.appointment.findMany as any)({
@@ -879,7 +949,8 @@ async function hydrateReports(rawReports: any[]) {
 
     if (populatedVisit) {
       if (populatedVisit.appointmentId) {
-        populatedVisit.appointment = apptMap.get(populatedVisit.appointmentId) || null;
+        populatedVisit.appointment =
+          apptMap.get(populatedVisit.appointmentId) || null;
       }
       populatedVisit.assessment = assessmentMap.get(populatedVisit.id) || null;
     }
@@ -902,7 +973,10 @@ async function hydrateSingleReport(rawReport: any) {
 /**
  * Get Single Report by ID
  */
-export async function getReportById(reportId: string, user: { id: string; role: string }) {
+export async function getReportById(
+  reportId: string,
+  user: { id: string; role: string },
+) {
   const report = await (prisma.report.findUnique as any)({
     where: { id: reportId },
     include: {
@@ -957,13 +1031,15 @@ export async function getMyReports(userId: string) {
 /**
  * ADMIN: Get All Client Reports with Search and Filter
  */
-export async function getAdminReports(query: {
-  search?: string;
-  status?: string;
-  clientId?: string;
-  page?: number;
-  limit?: number;
-} = {}) {
+export async function getAdminReports(
+  query: {
+    search?: string;
+    status?: string;
+    clientId?: string;
+    page?: number;
+    limit?: number;
+  } = {},
+) {
   const where: any = { isArchived: false };
 
   if (query.status && query.status !== "ALL") {
@@ -978,8 +1054,14 @@ export async function getAdminReports(query: {
     const term = query.search.trim();
     where.OR = [
       { client: { clientNumber: { contains: term, mode: "insensitive" } } },
-      { client: { user: { firstName: { contains: term, mode: "insensitive" } } } },
-      { client: { user: { lastName: { contains: term, mode: "insensitive" } } } },
+      {
+        client: {
+          user: { firstName: { contains: term, mode: "insensitive" } },
+        },
+      },
+      {
+        client: { user: { lastName: { contains: term, mode: "insensitive" } } },
+      },
       { title: { contains: term, mode: "insensitive" } },
     ];
   }

@@ -1346,6 +1346,7 @@ export async function getBillingOverview(userId: string) {
       ],
     },
     include: {
+      user: true,
       subscriptions: {
         include: {
           plan: true,
@@ -1376,6 +1377,9 @@ export async function getBillingOverview(userId: string) {
 
   if (!client) {
     return {
+      clientName: "Valued Client",
+      clientNumber: "AW-0000",
+      clientEmail: "",
       currentPlanName: "No Active Plan",
       selectedPlanCode: "",
       hasCleaningAddon: false,
@@ -1433,6 +1437,15 @@ export async function getBillingOverview(userId: string) {
     activeSub?.planVersion?.billingInterval ||
     "MONTHLY";
 
+  const clientUser = client.user;
+  const userFullName = clientUser
+    ? `${clientUser.firstName || ""} ${clientUser.lastName || ""}`.trim()
+    : "";
+  const clientFullName =
+    userFullName || client.primaryContactName || "Valued Client";
+  const clientNumber = client.clientNumber || "AW-0000";
+  const clientEmail = clientUser?.email || client.primaryContactEmail || "";
+
   const currentPeriod = activeSub?.periods?.[0];
   const currentPeriodFormatted = currentPeriod
     ? `${currentPeriod.startDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${currentPeriod.endDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
@@ -1447,12 +1460,26 @@ export async function getBillingOverview(userId: string) {
   const formattedInvoices = (client.invoices || []).map((inv: any) => ({
     id: inv.id,
     invoiceNumber: inv.invoiceNumber,
+    clientName: clientFullName,
+    clientNumber,
+    clientEmail,
+    planName: contractedPlanName,
+    billingFrequency:
+      billingInterval === "MONTHLY"
+        ? "Monthly"
+        : billingInterval === "ANNUAL"
+          ? "Annual"
+          : "Monthly",
+    paymentMethod:
+      activeSub?.billingMethod === "INVOICE"
+        ? "Pay by Invoice"
+        : "Credit Card (Auto-Pay)",
     date: inv.createdAt.toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
       year: "numeric",
     }),
-    description: `${contractedPlanName} ${inv.billingMethod === "INVOICE" ? "Manual Invoice" : "Membership Statement"}`,
+    description: contractedPlanName,
     amount: `$${inv.amount.toFixed(2)}`,
     status: inv.status.toLowerCase(),
     pdfUrl: inv.invoiceUrl || inv.stripeHostedInvoiceUrl || "#",
@@ -1477,6 +1504,9 @@ export async function getBillingOverview(userId: string) {
   );
 
   return {
+    clientName: clientFullName,
+    clientNumber,
+    clientEmail,
     currentPlanName: contractedPlanName,
     selectedPlanCode: activeSub?.plan?.code || client.selectedPlan || "",
     hasCleaningAddon: client.hasCleaningAddon,
