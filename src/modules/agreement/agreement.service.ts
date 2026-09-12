@@ -541,15 +541,31 @@ export async function submitServiceAgreement(
   try {
     const targetClientId = clientId || user.client?.id;
     if (targetClientId) {
+      const now = new Date();
+      const nextMonthFirst = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const commencementDateFormatted = nextMonthFirst.toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      });
+
+      const planDisplay = targetVersion?.name || targetPlan?.name || input.selectedPlan || "AgeWellRI Membership";
+      const priceDisplay = `$${finalPrice}/month`;
+
+      const notificationMessage = `Your service agreement is complete and your subscription is active.\n• Your plan: ${planDisplay} — ${priceDisplay}\n• Service begins: ${commencementDateFormatted}\n• First billing: ${commencementDateFormatted} — you won't be charged today\n• A copy of your signed agreement has been emailed to you for your records.\nWe'll be in touch shortly to schedule your first visit. Questions? Call us anytime at (401) 212-3002.`;
+
       await notifyClientAndFamily(
         targetClientId,
         {
           type: "AGREEMENT_EXECUTED",
-          title: "Agreement Executed Successfully",
-          message: `Your AgeWellRI Service Agreement (${state} - ${templateVersion}) has been signed and executed.`,
+          title: "Agreement Signed — Welcome to AgeWellRI!",
+          message: notificationMessage,
           metadata: {
             agreementId: agreement.id,
             cancellationDeadline: deadlineResult.deadlineDate.toISOString(),
+            planName: planDisplay,
+            planPrice: finalPrice,
+            commencementDate: commencementDateFormatted,
           },
         },
         "portalAccess",
