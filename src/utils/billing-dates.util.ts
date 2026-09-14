@@ -5,7 +5,7 @@
  * 1. First Billing Date: ALWAYS the 1st day of the calendar month following signup.
  * 2. Service Commencement Date: ALWAYS the 1st day of the calendar month following signup (First Billing Date === Service Commencement Date).
  * 3. Stripe trial_end: Anchored to the 1st of the next month at 12:00:00 UTC (08:00 AM EDT / 07:00 AM EST), guaranteed to be the 1st of the month across all US timezones.
- * 4. Recurring Billing: 1st day of each subsequent month (or interval: MONTHLY = +3 months, Annual = +1 year).
+ * 4. Recurring Billing: 1st day of each subsequent month (strictly Monthly interval).
  * 5. Billing Reminder: Sent exactly 15 days before the upcoming billing date.
  * 6. Cancellation Cutoff: Client can cancel auto-renewal only if at least 10 days remain before upcoming renewal / month-end.
  *
@@ -128,22 +128,17 @@ export function isChargeAllowed(
 /**
  * Calculates the end date for a billing period starting on `startDate` with a given interval.
  *
- * - MONTHLY: 1st of the next month
- * - MONTHLY: 1st of month + 3 months
- * - ANNUAL: 1st of month + 12 months
+ * - MONTHLY (Default): 1st of the next month (+1 month)
+ * - ONE_TIME: Same month (0 extra months)
  */
 export function calculatePeriodEndDate(
   startDate: Date,
-  interval: "MONTHLY" | "MONTHLY" | "ANNUAL" | "ONE_TIME" | string,
+  interval: "MONTHLY" | "ONE_TIME" | string = "MONTHLY",
 ): Date {
   const { year, month } = getEasternDateParts(startDate);
 
-  let addMonths = 1; // Default Monthly
-  if (interval === "MONTHLY") {
-    addMonths = 3;
-  } else if (interval === "ANNUAL") {
-    addMonths = 12;
-  } else if (interval === "ONE_TIME") {
+  let addMonths = 1; // Strictly 1 Month for Monthly billing
+  if (interval === "ONE_TIME") {
     addMonths = 0;
   }
 

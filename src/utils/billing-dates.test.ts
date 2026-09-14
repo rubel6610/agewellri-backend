@@ -193,7 +193,7 @@ function runTests() {
     false,
   );
 
-  // TEST 15: Period end calculation for Monthly default (Oct 1 -> Nov 1)
+  // TEST 15: Period end calculation for Monthly interval (Oct 1, 2026 -> Nov 1, 2026)
   const periodEndM = calculatePeriodEndDate(firstBilling1, "MONTHLY");
   const periodPartsM = getEasternDateParts(periodEndM);
   assert(
@@ -205,15 +205,16 @@ function runTests() {
     "November 1, 2026",
   );
 
-  // TEST 16: Period end calculation for MONTHLY (Oct 1 -> Jan 1)
-  const periodEndQ = calculatePeriodEndDate(firstBilling1, "MONTHLY");
-  const periodPartsQ = getEasternDateParts(periodEndQ);
+  // TEST 16: Period end calculation for year boundary (Dec 1, 2026 -> Jan 1, 2027)
+  const decDate = new Date("2026-12-01T12:00:00.000Z");
+  const periodEndDec = calculatePeriodEndDate(decDate, "MONTHLY");
+  const periodPartsDec = getEasternDateParts(periodEndDec);
   assert(
-    periodPartsQ.year === 2027 &&
-      periodPartsQ.month === 1 &&
-      periodPartsQ.day === 1,
-    "TEST 16: MONTHLY period end for Oct 1, 2026 -> Jan 1, 2027",
-    formatBillingDate(periodEndQ),
+    periodPartsDec.year === 2027 &&
+      periodPartsDec.month === 1 &&
+      periodPartsDec.day === 1,
+    "TEST 16: Monthly period end for Dec 1, 2026 -> Jan 1, 2027",
+    formatBillingDate(periodEndDec),
     "January 1, 2027",
   );
 

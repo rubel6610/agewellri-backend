@@ -216,7 +216,7 @@ export async function sanitizeLegacyBillingIntervals() {
         update: coll,
         updates: [
           {
-            q: { billingInterval: "QUARTERLY" },
+            q: { billingInterval: { $in: ["QUARTERLY", "ANNUAL", "THREE_MONTHS", "YEARLY"] } },
             u: { $set: { billingInterval: "MONTHLY" } },
             multi: true,
           },

@@ -612,12 +612,7 @@ export async function processAgreementPayment(
   let stripeSubscriptionId: string | null = null;
   if (!isInvoiceBilling && stripeCustomerId && effectivePmId) {
     try {
-      const intervalCount =
-        pricing.billingInterval === "MONTHLY"
-          ? 3
-          : pricing.billingInterval === "ANNUAL"
-            ? 12
-            : 1;
+      const intervalCount = 1; // Strictly 1 month recurring
       const trialEndTimestamp = getStripeTrialEndTimestamp(now);
 
       // Verify and guarantee the payment method is attached to this customer
@@ -1527,12 +1522,7 @@ export async function getBillingOverview(userId: string) {
     clientNumber,
     clientEmail,
     planName: contractedPlanName,
-    billingFrequency:
-      billingInterval === "MONTHLY"
-        ? "Monthly"
-        : billingInterval === "ANNUAL"
-          ? "Annual"
-          : "Monthly",
+    billingFrequency: "Monthly",
     paymentMethod:
       activeSub?.billingMethod === "INVOICE"
         ? "Pay by Invoice"
@@ -1573,12 +1563,7 @@ export async function getBillingOverview(userId: string) {
     currentPlanName: contractedPlanName,
     selectedPlanCode: activeSub?.plan?.code || client.selectedPlan || "",
     hasCleaningAddon: client.hasCleaningAddon,
-    billingFrequency:
-      billingInterval === "MONTHLY"
-        ? "MONTHLY"
-        : billingInterval === "ANNUAL"
-          ? "Annual"
-          : "Monthly",
+    billingFrequency: "Monthly",
     billingMethod: activeSub?.billingMethod || "AUTOMATIC",
     subscriptionStatus: activeSub?.status || "PENDING",
     autoPayEnabled: activeSub?.autoRenew ?? true,
@@ -2333,12 +2318,7 @@ export async function getAdminInvoices(query: AdminBillingFilterInput) {
         inv.subscription?.planVersion?.name ||
         (inv.client as any)?.selectedPlan ||
         "Service Plan",
-      billingFrequency:
-        inv.subscription?.billingInterval === "ANNUAL"
-          ? "Annual"
-          : inv.subscription?.billingInterval === "MONTHLY"
-            ? "MONTHLY"
-            : "Monthly",
+      billingFrequency: "Monthly",
       amount: `$${inv.amount.toFixed(2)}`,
       paymentMethod:
         inv.billingMethod === "AUTOMATIC"

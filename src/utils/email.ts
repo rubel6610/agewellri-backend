@@ -14,7 +14,7 @@ export interface SendRenewalReminderEmailOptions {
   planName: string;
   renewalDate: Date;
   recurringPrice: number;
-  billingInterval: "MONTHLY" | "MONTHLY" | "ANNUAL" | string;
+  billingInterval: "MONTHLY" | "ONE_TIME" | string;
   billingMethod: "AUTOMATIC" | "INVOICE" | string;
   cardBrand?: string;
   cardLast4?: string;
@@ -91,7 +91,7 @@ export interface SendPlanPurchaseConfirmationEmailOptions {
   hasCleaningAddon?: boolean;
   amount: number;
   currency?: string;
-  billingInterval?: "MONTHLY" | "MONTHLY" | "ANNUAL" | "ONE_TIME" | string;
+  billingInterval?: "MONTHLY" | "ONE_TIME" | string;
   billingMethod?: "AUTOMATIC" | "INVOICE" | string;
   paymentStatus?: "PAID" | "PENDING_INVOICE" | string;
   cardBrand?: string;
@@ -282,20 +282,14 @@ export async function sendBillingRenewalReminderEmail(
   });
 
   const intervalLabel =
-    billingInterval === "MONTHLY"
-      ? "MONTHLY"
-      : billingInterval === "ANNUAL"
-        ? "Annual"
-        : "Monthly";
+    billingInterval === "ONE_TIME" ? "One-Time Service" : "Monthly";
 
   const isAuto = billingMethod === "AUTOMATIC";
 
   const subject =
-    billingInterval === "ANNUAL"
-      ? `Annual Service Renewal Notice: Your AgeWellRI Membership Plan`
-      : billingInterval === "MONTHLY"
-        ? `Upcoming Renewal Notice: Your AgeWellRI MONTHLY Service Contract`
-        : `Upcoming Bill Notice: Your AgeWellRI Monthly Service Plan`;
+    billingInterval === "ONE_TIME"
+      ? `AgeWellRI One-Time Service Confirmation`
+      : `Upcoming Renewal Notice: Your AgeWellRI Monthly Service Contract`;
 
   const content = `
     <div class="greeting">Hello ${representativeName ? `${representativeName} (on behalf of ${clientName})` : clientName},</div>
@@ -738,13 +732,7 @@ export async function sendPlanPurchaseConfirmationEmail(
 
   const isPaid = paymentStatus === "PAID";
   const intervalLabel =
-    billingInterval === "MONTHLY"
-      ? "MONTHLY (Every 3 Months)"
-      : billingInterval === "ANNUAL"
-        ? "Annual"
-        : billingInterval === "ONE_TIME"
-          ? "One-Time Service"
-          : "Monthly";
+    billingInterval === "ONE_TIME" ? "One-Time Service" : "Monthly";
 
   const paidDateFormatted = paidAt
     ? new Date(paidAt).toLocaleDateString("en-US", {
@@ -1028,7 +1016,7 @@ export async function sendWelcomeInvitationEmail(
     planName,
     state = "RI",
     supportPhone = "(401) 212-3002",
-    supportEmail = "support@agewellri.com",
+    supportEmail = "agewellri@gmail.com",
   } = options;
 
   const formattedExpiry = new Date(expiresAt).toLocaleDateString("en-US", {
@@ -1303,7 +1291,7 @@ export async function sendReportAvailableEmail(
     reportTitle = "Completed Visit Report",
     portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
     supportPhone = "(401) 212-3002",
-    supportEmail = "support@agewellri.com",
+    supportEmail = "agewellri@gmail.com",
   } = options;
 
   const formattedDate = new Date(visitDate).toLocaleDateString("en-US", {
@@ -1429,12 +1417,11 @@ export async function sendMONTHLYRenewalActiveEmail(
     totalVisits = 4,
     portalUrl = process.env.FRONTEND_URL || "https://agewellri.com",
     supportPhone = "(401) 555-CARE",
-    supportEmail = "support@agewellri.com",
+    supportEmail = "agewellri@gmail.com",
   } = options;
 
-  const isMONTHLY = billingInterval?.toUpperCase() === "MONTHLY";
-  const intervalTitle = isMONTHLY ? "Quarter" : "Monthly";
-  const subject = `Your New AgeWellRI ${intervalTitle} Service Period is Active — Schedule Your Visits`;
+  const intervalTitle = "Monthly";
+  const subject = `Your New AgeWellRI Monthly Service Period is Active — Schedule Your Visits`;
 
   const formattedStart = periodStartDate.toLocaleDateString("en-US", {
     month: "short",
@@ -1687,7 +1674,7 @@ export async function sendFamilyMemberInvitationEmail(
     expiresAt,
     permissions,
     supportPhone = "(401) 712-3012",
-    supportEmail = "support@agewellri.com",
+    supportEmail = "agewellri@gmail.com",
   } = options;
 
   const formattedExpiry = new Date(expiresAt).toLocaleDateString("en-US", {
@@ -1804,7 +1791,7 @@ export async function sendReportToFamilyRecipientEmail(
     reportId,
     portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
     supportPhone = "(401) 712-3012",
-    supportEmail = "support@agewellri.com",
+    supportEmail = "agewellri@gmail.com",
   } = options;
 
   const formattedDate = new Date(visitDate).toLocaleDateString("en-US", {
@@ -1926,7 +1913,7 @@ export async function sendSubscriptionCancelledEmail(
     serviceEndDate,
     portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
     supportPhone = "(401) 712-3012",
-    supportEmail = "support@agewellri.com",
+    supportEmail = "agewellri@gmail.com",
   } = options;
 
   const formattedEndDate =
@@ -2051,7 +2038,7 @@ export async function sendSubscriptionReactivatedEmail(
     recurringAmount,
     portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
     supportPhone = "(401) 712-3012",
-    supportEmail = "support@agewellri.com",
+    supportEmail = "agewellri@gmail.com",
   } = options;
 
   const formattedBillingDate = nextBillingDate
