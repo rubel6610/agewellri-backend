@@ -56,7 +56,13 @@ export async function getAllSpecialists(_forceRefresh = true) {
       email: doc.email || null,
       phone: doc.phone || null,
       title: doc.title || "Home Safety Specialist",
-      specialties: doc.specialties || ["Safety Oversight", "Fall Hazard Mitigation"],
+      specialties: doc.specialties || [],
+      shssCertified: Boolean(doc.shssCertified),
+      shssRenewalDate: doc.shssRenewalDate || null,
+      cprCertified: Boolean(doc.cprCertified),
+      aedCertified: Boolean(doc.aedCertified),
+      backgroundChecked: Boolean(doc.backgroundChecked),
+      bilingualSpanish: Boolean(doc.bilingualSpanish),
       color: doc.color || "#294B68",
       status: doc.status || "ACTIVE",
       notes: doc.notes || null,
@@ -91,7 +97,13 @@ export async function createSpecialist(input: CreateSpecialistInput, actorUserId
     email: input.email || null,
     phone: input.phone || null,
     title: input.title || "Home Safety Specialist",
-    specialties: input.specialties || ["Home Safety Checks", "Fall Prevention"],
+    specialties: input.specialties || [],
+    shssCertified: Boolean(input.shssCertified),
+    shssRenewalDate: input.shssRenewalDate || null,
+    cprCertified: Boolean(input.cprCertified),
+    aedCertified: Boolean(input.aedCertified),
+    backgroundChecked: Boolean(input.backgroundChecked),
+    bilingualSpanish: Boolean(input.bilingualSpanish),
     color: input.color || "#294B68",
     status: input.status || "ACTIVE",
     notes: input.notes || null,
@@ -132,6 +144,12 @@ export async function updateSpecialist(
   if (input.phone !== undefined) updateFields.phone = input.phone;
   if (input.title !== undefined) updateFields.title = input.title;
   if (input.specialties !== undefined) updateFields.specialties = input.specialties;
+  if (input.shssCertified !== undefined) updateFields.shssCertified = input.shssCertified;
+  if (input.shssRenewalDate !== undefined) updateFields.shssRenewalDate = input.shssRenewalDate;
+  if (input.cprCertified !== undefined) updateFields.cprCertified = input.cprCertified;
+  if (input.aedCertified !== undefined) updateFields.aedCertified = input.aedCertified;
+  if (input.backgroundChecked !== undefined) updateFields.backgroundChecked = input.backgroundChecked;
+  if (input.bilingualSpanish !== undefined) updateFields.bilingualSpanish = input.bilingualSpanish;
   if (input.color !== undefined) updateFields.color = input.color;
   if (input.status !== undefined) updateFields.status = input.status;
   if (input.notes !== undefined) updateFields.notes = input.notes;

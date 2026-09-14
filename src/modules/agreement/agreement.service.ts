@@ -174,14 +174,34 @@ export async function submitServiceAgreement(
   }
 
   const state = (input.state || "RI").toUpperCase().trim();
-  const signerRole = input.signerRole || "RESIDENT";
-  const isRepresentative = signerRole !== "RESIDENT";
+  const signingTrack =
+    input.signingTrack ||
+    (input.signerRole && input.signerRole !== "RESIDENT"
+      ? "TRACK_B"
+      : "TRACK_A");
+  const isRepresentative =
+    signingTrack === "TRACK_B" ||
+    (input.signerRole && input.signerRole !== "RESIDENT");
+  const signerRole = isRepresentative
+    ? input.signerRole || "AUTHORIZED_REPRESENTATIVE"
+    : "RESIDENT";
+  const representativeCapacity = isRepresentative
+    ? input.representativeCapacity || input.legalAuthority || null
+    : null;
+  const relationshipToClient = isRepresentative
+    ? input.repRelationship ||
+      input.relationshipToClient ||
+      input.primaryContactRelation ||
+      "Authorized Representative"
+    : "Self";
 
   const signerName = isRepresentative
     ? (
+        input.repFullName ||
         input.signerName ||
         input.authorizedRepName ||
-        input.clientPrintedName
+        input.clientPrintedName ||
+        ""
       ).trim()
     : (input.clientPrintedName || input.clientFullName).trim();
 
@@ -281,9 +301,10 @@ export async function submitServiceAgreement(
     (isRepresentative ? "Authorized Signer" : "Primary Resident");
 
   const onboardingData = {
-    signingTrack:
-      input.signingTrack || (isRepresentative ? "TRACK_B" : "TRACK_A"),
-    representativeCapacity: input.representativeCapacity || null,
+    signingTrack,
+    representativeCapacity,
+    repFullName: isRepresentative ? signerName : null,
+    repRelationship: isRepresentative ? relationshipToClient : null,
     authorityDocumentUrl: input.authorityDocumentUrl || null,
     authorizedRecipients: input.authorizedRecipients || [],
     homeAccessAuthorized: input.homeAccessAuthorized ?? true,
@@ -447,9 +468,9 @@ export async function submitServiceAgreement(
         input.signerEmail ||
         (isRepresentative ? input.primaryBillingContact || null : null),
       signerPhone: input.signerPhone || null,
-      legalAuthority: isRepresentative ? input.legalAuthority || null : null,
+      legalAuthority: isRepresentative ? representativeCapacity : null,
       legalAuthorityOther:
-        isRepresentative && input.legalAuthority === "OTHER"
+        isRepresentative && representativeCapacity === "OTHER"
           ? input.legalAuthorityOther || null
           : null,
       primaryBillingContact:
@@ -467,9 +488,7 @@ export async function submitServiceAgreement(
       hasCleaningAddon: input.hasCleaningAddon,
       clientPrintedName: input.clientPrintedName,
       authorizedRepName: isRepresentative ? signerName : null,
-      relationshipToClient: isRepresentative
-        ? input.relationshipToClient || input.primaryContactRelation || null
-        : "Self",
+      relationshipToClient,
       emergencyContactName,
       emergencyContactPhone,
       emergencyContactEmail,
@@ -707,7 +726,9 @@ export async function getClientAgreement(userId: string) {
     return null;
   }
 
-  const clientId = context.client.id;
+  const client = context.client;
+  const clientId = client.id;
+
   const agreement = await ((prisma as any).serviceAgreement.findFirst as any)({
     where: { clientId },
     orderBy: { createdAt: "desc" },
@@ -718,7 +739,200 @@ export async function getClientAgreement(userId: string) {
     },
   });
 
-  return agreement;
+  const fullClient = await ((prisma as any).client.findUnique as any)({
+    where: { id: clientId },
+    include: {
+      user: true,
+      familyMembers: true,
+      subscriptions: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+      },
+    },
+  });
+
+  if (!agreement && !fullClient?.hasCompletedAgreement) {
+    return null;
+  }
+
+  const clientUser = fullClient?.user;
+  const fullName =
+    `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() ||
+    agreement?.clientPrintedName ||
+    "Client Member";
+  const onboardingData = (fullClient?.onboardingData as any) || {};
+  const isRepresentative =
+    (agreement?.signerRole && agreement.signerRole !== "RESIDENT") ||
+    fullClient?.signerRole !== "RESIDENT";
+
+  const authorizedRecipients =
+    Array.isArray(onboardingData?.authorizedRecipients) &&
+    onboardingData.authorizedRecipients.length > 0
+      ? onboardingData.authorizedRecipients
+      : (fullClient?.familyMembers || []).map((fm: any) => ({
+          name: fm.name,
+          relationship: fm.relationship,
+          email: fm.email,
+          phone: fm.phone || null,
+        }));
+
+  return {
+    id: agreement?.id || `AW-AG-${fullClient?.clientNumber || "NEW"}`,
+    templateVersion:
+      agreement?.templateVersion ||
+      agreement?.agreementVersion?.versionNumber ||
+      "v2.0",
+    state: agreement?.state || fullClient?.state || "RI",
+    status:
+      agreement?.status ||
+      (fullClient?.hasCompletedAgreement ? "EXECUTED" : "DRAFT"),
+
+    // Plan & Financials
+    selectedPlan:
+      agreement?.selectedPlan || fullClient?.selectedPlan || "Peace of Mind Plan",
+    planName:
+      agreement?.plan?.name ||
+      agreement?.planSnapshot?.planName ||
+      agreement?.selectedPlan ||
+      fullClient?.selectedPlan ||
+      "Member Service Plan",
+    planPrice:
+      agreement?.planPrice ??
+      agreement?.planSnapshot?.totalPrice ??
+      fullClient?.subscriptions?.[0]?.contractedPrice ??
+      495,
+    hasCleaningAddon:
+      agreement?.hasCleaningAddon ?? fullClient?.hasCleaningAddon ?? false,
+    planSnapshot: agreement?.planSnapshot || null,
+
+    // Client Details
+    clientFullName: fullName,
+    clientPrintedName: agreement?.clientPrintedName || fullName,
+    clientNumber: fullClient?.clientNumber || "AW-MEMBER",
+    address: fullClient?.address || "",
+    city: fullClient?.city || "",
+    stateAddress: fullClient?.state || "RI",
+    postalCode: fullClient?.postalCode || "",
+    phone: clientUser?.phone || fullClient?.primaryContactPhone || "",
+    dob: fullClient?.dateOfBirth || "",
+    dateOfBirth: fullClient?.dateOfBirth || "",
+    email: clientUser?.email || fullClient?.primaryContactEmail || "",
+
+    // Signing Track & Representative
+    signingTrack:
+      onboardingData?.signingTrack || (isRepresentative ? "TRACK_B" : "TRACK_A"),
+    signerRole:
+      agreement?.signerRole || fullClient?.signerRole || "RESIDENT",
+    signerName:
+      agreement?.signerName || agreement?.authorizedRepName || fullName,
+    signerEmail:
+      agreement?.signerEmail ||
+      fullClient?.primaryContactEmail ||
+      clientUser?.email ||
+      null,
+    signerPhone:
+      agreement?.signerPhone ||
+      fullClient?.primaryContactPhone ||
+      clientUser?.phone ||
+      null,
+    representativeCapacity:
+      onboardingData?.representativeCapacity ||
+      agreement?.legalAuthority ||
+      fullClient?.legalAuthority ||
+      null,
+    repFullName:
+      agreement?.authorizedRepName ||
+      (isRepresentative ? agreement?.signerName : null),
+    authorizedRepName:
+      agreement?.authorizedRepName ||
+      (isRepresentative ? agreement?.signerName : null),
+    relationshipToClient:
+      agreement?.relationshipToClient ||
+      fullClient?.primaryContactRelation ||
+      (isRepresentative ? "Authorized Representative" : "Self"),
+    legalAuthority:
+      agreement?.legalAuthority || fullClient?.legalAuthority || null,
+    legalAuthorityOther:
+      agreement?.legalAuthorityOther || fullClient?.legalAuthorityOther || null,
+    authorityDocumentUrl:
+      agreement?.documentUrl || onboardingData?.authorityDocumentUrl || null,
+    documentUrl:
+      agreement?.documentUrl || onboardingData?.authorityDocumentUrl || null,
+
+    // Contacts
+    primaryContactName:
+      fullClient?.primaryContactName ||
+      (isRepresentative ? agreement?.signerName : fullName),
+    primaryContactPhone:
+      fullClient?.primaryContactPhone || clientUser?.phone || null,
+    primaryContactEmail:
+      fullClient?.primaryContactEmail || clientUser?.email || "",
+    primaryContactRelation:
+      fullClient?.primaryContactRelation ||
+      (isRepresentative ? "Authorized Representative" : "Self"),
+    primaryBillingContact:
+      agreement?.primaryBillingContact ||
+      fullClient?.primaryContactEmail ||
+      clientUser?.email ||
+      "",
+
+    emergencyContactName:
+      agreement?.emergencyContactName ||
+      fullClient?.emergencyContactName ||
+      "Not Provided",
+    emergencyContactPhone:
+      agreement?.emergencyContactPhone ||
+      fullClient?.emergencyContactPhone ||
+      "Not Provided",
+    emergencyContactEmail:
+      agreement?.emergencyContactEmail ||
+      fullClient?.emergencyContactEmail ||
+      null,
+    emergencyContactRelation:
+      agreement?.emergencyContactRelation ||
+      fullClient?.emergencyContactRelation ||
+      "Family",
+
+    // Authorized Report Recipients
+    authorizedRecipients,
+
+    // Home Access Specifications
+    homeAccessType: fullClient?.homeAccessType || "RESIDENT_ANSWERS",
+    homeAccessInstructions: fullClient?.homeAccessInstructions || null,
+    homeAccessCode: fullClient?.homeAccessCode || null,
+    homeAccessAuthorized: onboardingData?.homeAccessAuthorized ?? true,
+
+    // Authorizations
+    authorizations: onboardingData?.authorizations || {
+      emergencyRightOfEntry: true,
+      residentAutonomyAcknowledgment: true,
+      automaticBillingAuthorization: true,
+    },
+
+    // Statutory Cancellation
+    cancellationDeadline: agreement?.cancellationDeadline
+      ? new Date(agreement.cancellationDeadline).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })
+      : null,
+    cancellationDeadlineRule:
+      agreement?.cancellationDeadlineRule ||
+      "3 business days under state consumer protection regulations",
+
+    // Signatures & Dates
+    clientSignature: agreement?.clientSignature || null,
+    agreementDate:
+      agreement?.agreementDate ||
+      agreement?.signedAt ||
+      agreement?.createdAt ||
+      new Date(),
+    signedAt: agreement?.signedAt || null,
+    executedAt: agreement?.executedAt || null,
+    createdAt: agreement?.createdAt || null,
+    updatedAt: agreement?.updatedAt || null,
+  };
 }
 
 /**
@@ -753,6 +967,11 @@ export async function getAllAdminAgreements(query?: {
               phone: true,
             },
           },
+          familyMembers: true,
+          subscriptions: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
         },
       },
       plan: true,
@@ -762,38 +981,134 @@ export async function getAllAdminAgreements(query?: {
   });
 
   return agreements.map((agr: any) => {
-    const clientUser = agr.client?.user;
+    const fullClient = agr.client;
+    const clientUser = fullClient?.user;
     const clientName =
       `${clientUser?.firstName || agr.clientPrintedName || "Client"} ${clientUser?.lastName || ""}`.trim();
     const clientEmail = clientUser?.email || agr.primaryBillingContact || "";
     const title = `${agr.state} Client Service Agreement`;
-    const primaryContactName = agr.client?.primaryContactName || clientName;
-    const primaryContactPhone =
-      agr.client?.primaryContactPhone ||
-      clientUser?.phone ||
-      agr.signerPhone ||
-      null;
-    const primaryContactEmail = agr.client?.primaryContactEmail || clientEmail;
-    const primaryContactRelation =
-      agr.client?.primaryContactRelation ||
-      (agr.signerRole === "RESIDENT" ? "Self" : "Representative");
+    const onboardingData = (fullClient?.onboardingData as any) || {};
+    const isRepresentative =
+      (agr.signerRole && agr.signerRole !== "RESIDENT") ||
+      fullClient?.signerRole !== "RESIDENT";
+
+    const authorizedRecipients =
+      Array.isArray(onboardingData?.authorizedRecipients) &&
+      onboardingData.authorizedRecipients.length > 0
+        ? onboardingData.authorizedRecipients
+        : (fullClient?.familyMembers || []).map((fm: any) => ({
+            name: fm.name,
+            relationship: fm.relationship,
+            email: fm.email,
+            phone: fm.phone || null,
+          }));
 
     return {
       id: agr.id,
-      clientId: agr.client?.clientNumber || agr.clientId,
-      clientNumber: agr.client?.clientNumber || agr.clientId,
+      clientId: fullClient?.id || agr.clientId,
+      clientNumber: fullClient?.clientNumber || agr.clientId,
       clientName,
+      clientFullName: clientName,
+      clientPrintedName: agr.clientPrintedName || clientName,
       clientEmail,
-      primaryContactName,
-      primaryContactPhone,
-      primaryContactEmail,
-      primaryContactRelation,
-      title,
+      email: clientEmail,
+      phone:
+        clientUser?.phone ||
+        fullClient?.primaryContactPhone ||
+        agr.signerPhone ||
+        null,
+      dob: fullClient?.dateOfBirth || null,
+      dateOfBirth: fullClient?.dateOfBirth || null,
+      address: fullClient?.address || null,
+      city: fullClient?.city || null,
       state: agr.state,
+      postalCode: fullClient?.postalCode || null,
+
+      // Contacts
+      primaryContactName:
+        fullClient?.primaryContactName ||
+        (isRepresentative ? agr.signerName : clientName),
+      primaryContactPhone:
+        fullClient?.primaryContactPhone ||
+        clientUser?.phone ||
+        agr.signerPhone ||
+        null,
+      primaryContactEmail: fullClient?.primaryContactEmail || clientEmail,
+      primaryContactRelation:
+        fullClient?.primaryContactRelation ||
+        (isRepresentative ? "Authorized Representative" : "Self"),
+      primaryBillingContact:
+        agr.primaryBillingContact ||
+        fullClient?.primaryContactEmail ||
+        clientEmail,
+
+      emergencyContactName:
+        agr.emergencyContactName ||
+        fullClient?.emergencyContactName ||
+        "Not Provided",
+      emergencyContactPhone:
+        agr.emergencyContactPhone ||
+        fullClient?.emergencyContactPhone ||
+        "Not Provided",
+      emergencyContactEmail:
+        agr.emergencyContactEmail || fullClient?.emergencyContactEmail || null,
+      emergencyContactRelation:
+        agr.emergencyContactRelation ||
+        fullClient?.emergencyContactRelation ||
+        "Family",
+
+      // Authorized Report Recipients
+      authorizedRecipients,
+
+      // Home Access Specifications
+      homeAccessType: fullClient?.homeAccessType || "RESIDENT_ANSWERS",
+      homeAccessInstructions: fullClient?.homeAccessInstructions || null,
+      homeAccessCode: fullClient?.homeAccessCode || null,
+      homeAccessAuthorized: onboardingData?.homeAccessAuthorized ?? true,
+
+      // Authorizations
+      authorizations: onboardingData?.authorizations || {
+        emergencyRightOfEntry: true,
+        residentAutonomyAcknowledgment: true,
+        automaticBillingAuthorization: true,
+      },
+
+      // Track & Representative
+      signingTrack:
+        onboardingData?.signingTrack || (isRepresentative ? "TRACK_B" : "TRACK_A"),
+      representativeCapacity:
+        onboardingData?.representativeCapacity ||
+        agr.legalAuthority ||
+        fullClient?.legalAuthority ||
+        null,
+      repFullName:
+        agr.authorizedRepName || (isRepresentative ? agr.signerName : null),
+      authorizedRepName:
+        agr.authorizedRepName || (isRepresentative ? agr.signerName : null),
+      relationshipToClient:
+        agr.relationshipToClient ||
+        fullClient?.primaryContactRelation ||
+        (isRepresentative ? "Authorized Representative" : "Self"),
+      authorityDocumentUrl:
+        agr.documentUrl || onboardingData?.authorityDocumentUrl || null,
+      documentUrl:
+        agr.documentUrl || onboardingData?.authorityDocumentUrl || null,
+
+      // Agreement Details
+      title,
       version:
+        agr.templateVersion || agr.agreementVersion?.versionNumber || "v2.0",
+      templateVersion:
         agr.templateVersion || agr.agreementVersion?.versionNumber || "v2.0",
       signerRole: agr.signerRole || "RESIDENT",
       signerName: agr.signerName || agr.clientPrintedName || clientName,
+      signerEmail:
+        agr.signerEmail || fullClient?.primaryContactEmail || clientEmail,
+      signerPhone:
+        agr.signerPhone ||
+        fullClient?.primaryContactPhone ||
+        clientUser?.phone ||
+        null,
       legalAuthority: agr.legalAuthority,
       legalAuthorityOther: agr.legalAuthorityOther,
       status: agr.status,
@@ -804,9 +1119,14 @@ export async function getAllAdminAgreements(query?: {
             year: "numeric",
           })
         : null,
-      cancellationDeadlineRule: agr.cancellationDeadlineRule,
-      planName: agr.plan?.name || agr.selectedPlan,
-      planPrice: agr.planPrice,
+      cancellationDeadlineRule:
+        agr.cancellationDeadlineRule || "3 business days under state regulations",
+      planName:
+        agr.plan?.name || agr.planSnapshot?.planName || agr.selectedPlan,
+      selectedPlan: agr.selectedPlan || agr.plan?.code,
+      planPrice: agr.planPrice ?? agr.planSnapshot?.totalPrice ?? 495,
+      hasCleaningAddon: agr.hasCleaningAddon,
+      clientSignature: agr.clientSignature,
       signedDate: agr.signedAt
         ? new Date(agr.signedAt).toLocaleDateString("en-US", {
             month: "short",
@@ -814,9 +1134,9 @@ export async function getAllAdminAgreements(query?: {
             year: "numeric",
           })
         : null,
+      agreementDate: agr.agreementDate || agr.signedAt || agr.createdAt,
+      signedAt: agr.signedAt,
       executedAt: agr.executedAt,
-      hasCleaningAddon: agr.hasCleaningAddon,
-      clientSignature: agr.clientSignature,
     };
   });
 }

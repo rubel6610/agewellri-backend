@@ -13,6 +13,9 @@ export const submitAgreementSchema = z.object({
   // Signer party & legal authority
   signingTrack: z.enum(["TRACK_A", "TRACK_B"]).optional().nullable(),
   representativeCapacity: z.enum(["ATTORNEY_IN_FACT", "GUARDIAN", "CONSERVATOR"]).optional().nullable(),
+  repCapacity: z.enum(["ATTORNEY_IN_FACT", "GUARDIAN", "CONSERVATOR"]).optional().nullable(),
+  repFullName: z.string().optional().nullable(),
+  repRelationship: z.string().optional().nullable(),
   authorityDocumentUrl: z.string().optional().nullable(),
   signerRole: z.enum([
     "RESIDENT",

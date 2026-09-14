@@ -330,7 +330,10 @@ export async function verifySmsOtp(input: VerifySmsOtpInput) {
   };
 }
 
-import { submitServiceAgreement } from "../agreement/agreement.service";
+import {
+  submitServiceAgreement,
+  getClientAgreement,
+} from "../agreement/agreement.service";
 
 /**
  * Submit Client Service Agreement with dynamic plan resolution and state cancellation deadline.
@@ -346,81 +349,11 @@ export async function submitAgreement(
  * Fetch full active client agreement for the current user.
  */
 export async function getMyAgreement(userId: string) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: {
-      client: {
-        include: {
-          agreements: {
-            orderBy: { createdAt: "desc" },
-            take: 1,
-          },
-        },
-      },
-    },
-  });
-
-  if (!user || !user.client) {
-    throw new Error("Client account not found.");
+  const agreement = await getClientAgreement(userId);
+  if (!agreement) {
+    throw new Error("Client agreement not found.");
   }
-
-  const client = user.client as any;
-  const latestAgreement = client?.agreements?.[0] as any;
-  const fullName = `${user.firstName} ${user.lastName}`.trim();
-
-  return {
-    id: latestAgreement?.id,
-    templateVersion: latestAgreement?.templateVersion,
-    status:
-      latestAgreement?.status ||
-      (client?.hasCompletedAgreement ? "SIGNED" : "DRAFT"),
-    selectedPlan: latestAgreement?.selectedPlan || client?.selectedPlan || null,
-    planPrice:
-      latestAgreement?.planPrice ??
-      client?.subscriptions?.[0]?.contractedPrice ??
-      client?.plan?.price ??
-      0,
-    hasCleaningAddon:
-      latestAgreement?.hasCleaningAddon || client?.hasCleaningAddon || false,
-    clientFullName: fullName,
-    clientPrintedName: latestAgreement?.clientPrintedName || fullName,
-    authorizedRepName:
-      latestAgreement?.authorizedRepName || client?.primaryContactName || null,
-    relationshipToClient:
-      latestAgreement?.relationshipToClient ||
-      client?.primaryContactRelation ||
-      null,
-    clientSignature: latestAgreement?.clientSignature || null,
-    agreementDate:
-      latestAgreement?.agreementDate ||
-      latestAgreement?.signedAt ||
-      latestAgreement?.createdAt ||
-      new Date(),
-    signedAt: latestAgreement?.signedAt || null,
-    executedAt: latestAgreement?.executedAt || null,
-    address: client?.address,
-    city: client?.city,
-    state: client?.state,
-    postalCode: client?.postalCode,
-    phone: user.phone,
-    dob: client?.dateOfBirth,
-    email: user.email,
-    primaryContactName: client?.primaryContactName,
-    primaryContactPhone: client?.primaryContactPhone,
-    primaryContactEmail: client?.primaryContactEmail,
-    primaryContactRelation: client?.primaryContactRelation,
-    emergencyContactName: client?.emergencyContactName,
-    emergencyContactPhone: client?.emergencyContactPhone,
-    emergencyContactRelation: client?.emergencyContactRelation,
-    clientNumber: client?.clientNumber,
-    stripePaymentMethodId:
-      latestAgreement?.stripePaymentMethodId ||
-      client?.stripePaymentMethodId ||
-      null,
-    stripeSetupIntentId: latestAgreement?.stripeSetupIntentId || null,
-    cardBrand: client?.cardBrand || null,
-    cardLast4: client?.cardLast4 || null,
-  };
+  return agreement;
 }
 
 /**
