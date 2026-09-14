@@ -1104,22 +1104,43 @@ export async function sendWelcomeInvitationEmail(
 export interface SendAgreementExecutedEmailOptions {
   to: string | string[];
   clientName: string;
+  clientNumber?: string;
   signerName?: string;
   signerRole?: string;
   legalAuthority?: string;
+  serviceAddress?: string;
   state: string;
   templateVersion: string;
   signedDate: Date;
   cancellationDeadline: Date;
   cancellationDeadlineRule?: string;
   selectedPlan?: string;
+  planName?: string;
+  planCode?: string;
+  planDescription?: string;
+  features?: string[];
+  services?: Array<{
+    serviceName: string;
+    allocatedVisits: number;
+    unit?: string;
+    description?: string;
+  }>;
+  hasCleaningAddon?: boolean;
+  amount?: number;
+  currency?: string;
+  billingInterval?: "MONTHLY" | "ONE_TIME" | string;
+  billingMethod?: "AUTOMATIC" | "INVOICE" | string;
+  cardBrand?: string;
+  cardLast4?: string;
+  invoiceNumber?: string;
+  firstBillingDate?: Date | null;
   portalUrl?: string;
   supportPhone?: string;
   supportEmail?: string;
 }
 
 /**
- * Send Executed Agreement Notification Email to Client / Signer
+ * Send Executed Agreement & Membership Plan Confirmation Email (All-In-One)
  */
 export async function sendAgreementExecutedEmail(
   options: SendAgreementExecutedEmailOptions,
@@ -1127,19 +1148,35 @@ export async function sendAgreementExecutedEmail(
   const {
     to,
     clientName,
+    clientNumber,
     signerName,
     signerRole,
     legalAuthority,
+    serviceAddress,
     state,
     templateVersion,
     signedDate,
     cancellationDeadline,
     cancellationDeadlineRule,
     selectedPlan = "AgeWellRI Membership",
+    planName,
+    planDescription,
+    features = [],
+    services = [],
+    hasCleaningAddon = false,
+    amount,
+    currency = "USD",
+    billingMethod = "AUTOMATIC",
+    cardBrand,
+    cardLast4,
+    invoiceNumber,
+    firstBillingDate,
     portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
     supportPhone = "(401) 212-3002",
     supportEmail = "agewellri@gmail.com",
   } = options;
+
+  const resolvedPlanName = planName || selectedPlan || "AgeWellRI Membership";
 
   const signedDateFormatted = new Date(signedDate).toLocaleDateString("en-US", {
     month: "long",
@@ -1157,25 +1194,78 @@ export async function sendAgreementExecutedEmail(
     },
   );
 
-  const isRep = signerName && signerName !== clientName;
+  const firstBillingDateFormatted = firstBillingDate
+    ? new Date(firstBillingDate).toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "the 1st of next month";
+
+  const isRep = Boolean(signerName && signerName !== clientName);
   const displayName = isRep
     ? `${signerName} (on behalf of ${clientName})`
     : clientName;
 
-  const subject = `Your Executed AgeWellRI Service Agreement (${state} - ${templateVersion})`;
+  const subject = `Your Executed AgeWellRI Service Agreement & Plan Confirmation (${state} - ${templateVersion})`;
 
   let stateLawName = "Rhode Island Law (RIGL § 6-28-3)";
   if (state === "CT") stateLawName = "Connecticut Law (CGS § 42-134a)";
   else if (state === "MA") stateLawName = "Massachusetts Law (MGL c. 93 § 48)";
 
+  // Build Services breakdown rows
+  let servicesListHtml = "";
+  if (services && services.length > 0) {
+    servicesListHtml = `
+      <div style="margin-top: 8px;">
+        ${services
+          .map(
+            (s) => `
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 1px dashed #E2E8F0; font-size: 13px;">
+            <span style="color: #243746; font-weight: 700;">• ${s.serviceName}:</span>
+            <span style="color: #294B68; font-weight: 800; background: #EAF3F8; padding: 2px 8px; border-radius: 6px;">${s.allocatedVisits} ${s.unit || "visits"}</span>
+          </div>
+        `,
+          )
+          .join("")}
+      </div>
+    `;
+  } else {
+    servicesListHtml = `
+      <div style="padding: 6px 0; font-size: 13px; color: #475569;">
+        • Complete Senior Safety Oversight &amp; Home Wellness Visits
+      </div>
+    `;
+  }
+
+  // Build Features list
+  let featuresListHtml = "";
+  if (features && features.length > 0) {
+    featuresListHtml = `
+      <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #E2E8F0;">
+        <div style="font-size: 11px; font-weight: 800; color: #64748B; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Key Plan Inclusions:</div>
+        <ul style="margin: 0; padding-left: 18px; font-size: 12px; color: #475569; line-height: 1.6;">
+          ${features.map((f) => `<li>${f}</li>`).join("")}
+        </ul>
+      </div>
+    `;
+  }
+
   const content = `
     <div class="greeting">Hello ${displayName},</div>
-    <div class="message">
-      Thank you for completing your <strong>AgeWellRI Member Service Agreement</strong>. Your agreement has been fully signed and executed by both parties (including pre-signed execution by AgeWellRI Care Services).
+
+    <div style="background: #EBF8F2; border: 1px solid #86EFAC; border-radius: 12px; padding: 16px 20px; margin: 16px 0 24px 0;">
+      <div style="font-size: 13px; font-weight: 800; color: #166534; text-transform: uppercase; letter-spacing: 0.5px;">
+        ✓ Service Agreement Executed &amp; Membership Active
+      </div>
+      <div style="font-size: 13px; color: #334155; margin-top: 6px; line-height: 1.5;">
+        Thank you for partnering with AgeWellRI. Your <strong>Member Service Agreement</strong> has been fully executed by both parties. Your recurring monthly membership for <strong>${resolvedPlanName}</strong> is confirmed. You were <strong>not charged today ($0.00 charged at signup)</strong>, and your first billing and scheduled service start date is <strong>${firstBillingDateFormatted}</strong>.
+      </div>
     </div>
 
+    <!-- 1. Executed Agreement Details Card -->
     <div class="highlight-card">
-      <div style="font-size: 13px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; border-bottom: 1px solid #D9E4EC; padding-bottom: 6px;">
+      <div style="font-size: 12px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.75px; margin-bottom: 12px; border-bottom: 1px solid #D9E4EC; padding-bottom: 6px;">
         📄 Executed Agreement Details
       </div>
       <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
@@ -1184,10 +1274,26 @@ export async function sendAgreementExecutedEmail(
           <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${clientName}</td>
         </tr>
         ${
+          clientNumber
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Client ID:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${clientNumber}</td>
+              </tr>`
+            : ""
+        }
+        ${
           isRep
             ? `<tr>
                 <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Authorized Signer:</td>
                 <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${signerName} (${signerRole || "Family Representative"}${legalAuthority ? ` - ${legalAuthority}` : ""})</td>
+              </tr>`
+            : ""
+        }
+        ${
+          serviceAddress
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Service Address:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 700; text-align: right;">${serviceAddress}</td>
               </tr>`
             : ""
         }
@@ -1200,17 +1306,77 @@ export async function sendAgreementExecutedEmail(
           <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${signedDateFormatted}</td>
         </tr>
         <tr>
-          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Selected Plan:</td>
-          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${selectedPlan}</td>
-        </tr>
-        <tr>
-          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Status:</td>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Agreement Status:</td>
           <td style="padding: 6px 0; color: #166534; font-weight: 900; text-align: right;">EXECUTED ✓</td>
         </tr>
       </table>
     </div>
 
-    <!-- Official 3-Business-Day Cancellation Notice -->
+    <!-- 2. Membership & Billing Schedule Card -->
+    <div class="highlight-card">
+      <div style="font-size: 12px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.75px; margin-bottom: 12px; border-bottom: 1px solid #D9E4EC; padding-bottom: 6px;">
+        💳 Membership &amp; Billing Schedule
+      </div>
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Selected Membership Plan:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${resolvedPlanName}</td>
+        </tr>
+        ${
+          amount !== undefined
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Monthly Membership Fee:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">$${amount.toFixed(2)} ${currency} / month</td>
+              </tr>`
+            : ""
+        }
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Charged Today:</td>
+          <td style="padding: 6px 0; color: #166534; font-weight: 900; font-size: 14px; text-align: right;">$0.00 (No Charge Today)</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">First Billing &amp; Service Start:</td>
+          <td style="padding: 6px 0; color: #1E40AF; font-weight: 800; text-align: right;">${firstBillingDateFormatted}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Payment Method:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">
+            ${
+              billingMethod === "INVOICE"
+                ? "Direct Invoice Statement (Due in 14 days)"
+                : `Automatic Monthly (${cardBrand || "Card"} ending in ${cardLast4 || "••••"})`
+            }
+          </td>
+        </tr>
+        ${
+          invoiceNumber
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Initial Invoice Reference:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${invoiceNumber}</td>
+              </tr>`
+            : ""
+        }
+      </table>
+    </div>
+
+    <!-- 3. Included Care Services & Visit Quotas Card -->
+    <div class="highlight-card" style="background: #FFFFFF; border: 1px solid #CBD5E1;">
+      <div style="font-size: 12px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.75px; margin-bottom: 10px; border-bottom: 1px solid #E2E8F0; padding-bottom: 6px;">
+        🛡️ Included Care Services &amp; Visit Allocations
+      </div>
+      ${planDescription ? `<div style="font-size: 13px; color: #334155; margin-bottom: 8px; font-style: italic;">${planDescription}</div>` : ""}
+      ${servicesListHtml}
+      ${
+        hasCleaningAddon
+          ? `<div style="margin-top: 8px; font-size: 13px; color: #166534; font-weight: 700; background: #F0FDF4; padding: 6px 10px; border-radius: 6px;">
+              ✨ Home Cleaning Add-on: Included (+6 Additional Visits)
+             </div>`
+          : ""
+      }
+      ${featuresListHtml}
+    </div>
+
+    <!-- 4. Official 3-Business-Day Cancellation Notice -->
     <div style="background: #F8FAFC; border-left: 4px solid #5E8FB2; border-radius: 0 8px 8px 0; padding: 14px 18px; margin: 20px 0; font-size: 12px; color: #475569; line-height: 1.6;">
       <strong style="color: #243746; font-size: 13px;">Official Notice of Right of Cancellation (${stateLawName}):</strong><br>
       Under state law, you may cancel this transaction without penalty not later than midnight of the third business day after agreement signing.<br>
@@ -1218,15 +1384,26 @@ export async function sendAgreementExecutedEmail(
       <span style="font-size: 11px; color: #64748B;">${cancellationDeadlineRule || "Sundays and recognized legal holidays are excluded from calculation."}</span>
     </div>
 
-    <div style="text-align: center; margin: 28px 0;">
-      <a href="${portalUrl}/dashboard/agreements" class="btn-primary">
+    <!-- 5. CTA Action Buttons -->
+    <div style="text-align: center; margin: 28px 0 16px 0;">
+      <a href="${portalUrl}/dashboard/agreements" class="btn-primary" style="margin: 0 6px 8px 6px;">
         View Executed Agreement &amp; Download PDF →
+      </a>
+      <a href="${portalUrl}/dashboard" class="btn-primary" style="background-color: #3F8F6B; margin: 0 6px 8px 6px;">
+        Access Client Portal
+      </a>
+    </div>
+    <div style="text-align: center; margin-bottom: 24px;">
+      <a href="${portalUrl}/dashboard/billing" class="btn-secondary">
+        View Billing &amp; Invoices
       </a>
     </div>
 
+    <!-- 6. Next Steps & Support -->
     <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 12px; color: #475569; line-height: 1.6;">
-      <strong>What's Next?</strong><br>
-      A permanent digital copy of your signed agreement is stored securely in your member portal. You can view, print, or download your agreement anytime from your <a href="${portalUrl}/dashboard/agreements" style="color: #294B68; font-weight: 700;">Client Portal Documents</a>.<br><br>
+      <strong style="color: #243746; font-size: 13px;">What to Expect Next:</strong><br>
+      • Your dedicated AgeWellRI Care Coordinator will contact you prior to <strong>${firstBillingDateFormatted}</strong> to introduce your care team and schedule your first home visit.<br>
+      • A permanent digital copy of your signed agreement and billing records is stored in your <a href="${portalUrl}/dashboard/agreements" style="color: #294B68; font-weight: 700;">Client Portal</a>.<br><br>
       Questions or need support? Contact our team: <strong>${supportPhone}</strong> | <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>
     </div>
   `;
@@ -1236,10 +1413,10 @@ export async function sendAgreementExecutedEmail(
 
   console.log(`\n======================================================`);
   console.log(
-    `📜 [EMAIL SERVICE] Agreement Executed Email dispatched to: ${recipientString}`,
+    `📜 [EMAIL SERVICE] Executed Agreement & Plan Confirmation Email dispatched to: ${recipientString}`,
   );
   console.log(
-    `Client: ${clientName} | State: ${state} | Deadline: ${deadlineFormatted}`,
+    `Client: ${clientName} | Plan: ${resolvedPlanName}${amount ? ` ($${amount}/mo)` : ""} | First Billing: ${firstBillingDateFormatted} | Deadline: ${deadlineFormatted}`,
   );
   console.log(`======================================================\n`);
 

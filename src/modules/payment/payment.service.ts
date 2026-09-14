@@ -832,90 +832,92 @@ export async function processAgreementPayment(
     },
   });
 
-  // 7. Dispatch Plan Purchase Confirmation & Agreement Execution Email
-  try {
-    const agreement = input.agreementId
-      ? await prisma.serviceAgreement.findUnique({
-          where: { id: input.agreementId },
-        })
-      : await prisma.serviceAgreement.findFirst({
-          where: { clientId: client.id },
-          orderBy: { createdAt: "desc" },
-        });
+  // 7. Dispatch Plan Purchase Confirmation & Agreement Execution Email (Skipped if part of unified agreement execution flow)
+  if (!input.skipEmail) {
+    try {
+      const agreement = input.agreementId
+        ? await prisma.serviceAgreement.findUnique({
+            where: { id: input.agreementId },
+          })
+        : await prisma.serviceAgreement.findFirst({
+            where: { clientId: client.id },
+            orderBy: { createdAt: "desc" },
+          });
 
-    const clientPrinted =
-      agreement?.clientPrintedName ||
-      `${user.firstName || ""} ${user.lastName || ""}`.trim() ||
-      "Valued Client";
-    const signerDisplay =
-      agreement?.authorizedRepName || agreement?.signerName || clientPrinted;
-    const isRepSigner =
-      agreement?.signerRole && agreement.signerRole !== "RESIDENT";
+      const clientPrinted =
+        agreement?.clientPrintedName ||
+        `${user.firstName || ""} ${user.lastName || ""}`.trim() ||
+        "Valued Client";
+      const signerDisplay =
+        agreement?.authorizedRepName || agreement?.signerName || clientPrinted;
+      const isRepSigner =
+        agreement?.signerRole && agreement.signerRole !== "RESIDENT";
 
-    // Primary email provided in agreement form or client profile or user account
-    const agreementProvidedEmail =
-      client.primaryContactEmail?.trim() ||
-      agreement?.primaryBillingContact?.trim() ||
-      user.email;
+      // Primary email provided in agreement form or client profile or user account
+      const agreementProvidedEmail =
+        client.primaryContactEmail?.trim() ||
+        agreement?.primaryBillingContact?.trim() ||
+        user.email;
 
-    // Collect all valid unique email recipients to ensure client gets notified at provided email
-    const recipientEmails = Array.from(
-      new Set(
-        [agreementProvidedEmail, client.primaryContactEmail, user.email]
-          .filter((e): e is string =>
-            Boolean(e && typeof e === "string" && e.includes("@")),
-          )
-          .map((e) => e.trim()),
-      ),
-    ).join(", ");
+      // Collect all valid unique email recipients to ensure client gets notified at provided email
+      const recipientEmails = Array.from(
+        new Set(
+          [agreementProvidedEmail, client.primaryContactEmail, user.email]
+            .filter((e): e is string =>
+              Boolean(e && typeof e === "string" && e.includes("@")),
+            )
+            .map((e) => e.trim()),
+        ),
+      ).join(", ");
 
-    const serviceAddress = [
-      client.address,
-      client.city,
-      client.state,
-      client.postalCode,
-    ]
-      .filter(Boolean)
-      .join(", ");
+      const serviceAddress = [
+        client.address,
+        client.city,
+        client.state,
+        client.postalCode,
+      ]
+        .filter(Boolean)
+        .join(", ");
 
-    const { sendPlanPurchaseConfirmationEmail } =
-      await import("../../utils/email");
-    await sendPlanPurchaseConfirmationEmail({
-      to: recipientEmails,
-      clientName: clientPrinted,
-      clientNumber: client.clientNumber,
-      signerName:
-        isRepSigner && signerDisplay !== clientPrinted
-          ? signerDisplay
-          : undefined,
-      signerRole: agreement?.signerRole,
-      serviceAddress: serviceAddress || undefined,
-      planName: pricing.planName,
-      planCode: pricing.code,
-      planDescription: pricing.planDescription,
-      features: pricing.features,
-      services: pricing.services,
-      hasCleaningAddon: input.hasCleaningAddon,
-      amount: pricing.totalPrice,
-      currency: pricing.currency,
-      billingInterval: pricing.billingInterval,
-      billingMethod: isInvoiceBilling ? "INVOICE" : "AUTOMATIC",
-      paymentStatus: "SCHEDULED_FIRST_OF_MONTH",
-      cardBrand: client.cardBrand || undefined,
-      cardLast4: client.cardLast4 || undefined,
-      invoiceNumber: invoice.invoiceNumber,
-      paidAt: null,
-      coveragePeriodStart: firstBillingDate,
-      coveragePeriodEnd: periodEndDate,
-      nextRenewalDate: firstBillingDate,
-      cancellationDeadline: agreement?.cancellationDeadline,
-      cancellationDeadlineRule: agreement?.cancellationDeadlineRule,
-    });
-  } catch (emailErr) {
-    console.warn(
-      "⚠️ Failed to dispatch plan purchase confirmation email:",
-      emailErr,
-    );
+      const { sendPlanPurchaseConfirmationEmail } =
+        await import("../../utils/email");
+      await sendPlanPurchaseConfirmationEmail({
+        to: recipientEmails,
+        clientName: clientPrinted,
+        clientNumber: client.clientNumber,
+        signerName:
+          isRepSigner && signerDisplay !== clientPrinted
+            ? signerDisplay
+            : undefined,
+        signerRole: agreement?.signerRole,
+        serviceAddress: serviceAddress || undefined,
+        planName: pricing.planName,
+        planCode: pricing.code,
+        planDescription: pricing.planDescription,
+        features: pricing.features,
+        services: pricing.services,
+        hasCleaningAddon: input.hasCleaningAddon,
+        amount: pricing.totalPrice,
+        currency: pricing.currency,
+        billingInterval: pricing.billingInterval,
+        billingMethod: isInvoiceBilling ? "INVOICE" : "AUTOMATIC",
+        paymentStatus: "SCHEDULED_FIRST_OF_MONTH",
+        cardBrand: client.cardBrand || undefined,
+        cardLast4: client.cardLast4 || undefined,
+        invoiceNumber: invoice.invoiceNumber,
+        paidAt: null,
+        coveragePeriodStart: firstBillingDate,
+        coveragePeriodEnd: periodEndDate,
+        nextRenewalDate: firstBillingDate,
+        cancellationDeadline: agreement?.cancellationDeadline,
+        cancellationDeadlineRule: agreement?.cancellationDeadlineRule,
+      });
+    } catch (emailErr) {
+      console.warn(
+        "⚠️ Failed to dispatch plan purchase confirmation email:",
+        emailErr,
+      );
+    }
   }
 
   return {

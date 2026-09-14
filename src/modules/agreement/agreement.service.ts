@@ -3,7 +3,6 @@ import prisma from "../../lib/prisma";
 import { CancellationDeadlineService } from "./cancellation-deadline.service";
 import {
   sendAgreementExecutedEmail,
-  sendPlanPurchaseConfirmationEmail,
   sendWelcomeInvitationEmail,
 } from "../../utils/email";
 import { processAgreementPayment } from "../payment/payment.service";
@@ -492,18 +491,24 @@ export async function submitServiceAgreement(
     });
   }
 
-  // 7. Payment Provisioning via Stripe
-  if (input.paymentMethodId || input.setupIntentId) {
+  // 7. Payment Provisioning via Stripe (with skipEmail: true to guarantee a single unified email)
+  let paymentResult: any = null;
+  if (
+    input.paymentMethodId ||
+    input.setupIntentId ||
+    input.billingMethod === "INVOICE"
+  ) {
     try {
-      await processAgreementPayment(userId, {
+      paymentResult = await processAgreementPayment(userId, {
         agreementId: agreement.id,
         paymentMethodId: input.paymentMethodId || undefined,
         setupIntentId: input.setupIntentId || undefined,
-        billingMethod: "AUTOMATIC",
+        billingMethod: input.billingMethod || "AUTOMATIC",
         selectedPlan:
           (targetPlan?.code as any) ||
           (input.selectedPlan as any),
         hasCleaningAddon: input.hasCleaningAddon,
+        skipEmail: true,
       });
     } catch (paymentErr) {
       console.warn(
@@ -513,25 +518,89 @@ export async function submitServiceAgreement(
     }
   }
 
-  // 8. Send Executed Agreement Email Confirmation (Nodemailer)
-  const recipientEmail =
-    input.signerEmail ||
-    input.primaryBillingContact ||
-    input.email ||
-    user.email;
+  // 8. Send Unified Executed Agreement & Membership Confirmation Email (Single Dispatch)
+  const targetClientId = clientId || user.client?.id;
+  let latestClient: any = null;
+  if (targetClientId) {
+    try {
+      latestClient = await (prisma as any).client.findUnique({
+        where: { id: targetClientId },
+      });
+    } catch {}
+  }
+
+  const serviceAddress = [
+    input.address,
+    input.city,
+    state,
+    input.postalCode,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  const recipientEmails = Array.from(
+    new Set(
+      [
+        input.signerEmail,
+        input.primaryBillingContact,
+        input.primaryContactEmail,
+        input.email,
+        user.email,
+      ]
+        .filter((e): e is string =>
+          Boolean(e && typeof e === "string" && e.includes("@")),
+        )
+        .map((e) => e.trim()),
+    ),
+  ).join(", ");
+
   try {
+    const servicesList = (targetVersion?.planServices || []).map((ps: any) => ({
+      serviceName: ps.serviceType?.name || "Care Service",
+      allocatedVisits: ps.allocatedVisits,
+      unit: ps.unit || "visits",
+    }));
+
     await sendAgreementExecutedEmail({
-      to: recipientEmail,
-      clientName: `${user.firstName} ${user.lastName}`.trim(),
+      to: recipientEmails || user.email,
+      clientName:
+        `${user.firstName || ""} ${user.lastName || ""}`.trim() ||
+        input.clientFullName ||
+        "Valued Client",
+      clientNumber: latestClient?.clientNumber,
       signerName,
       signerRole,
-      legalAuthority: input.legalAuthority || undefined,
+      legalAuthority: isRepresentative
+        ? input.legalAuthority || undefined
+        : undefined,
+      serviceAddress: serviceAddress || undefined,
       state,
       templateVersion,
       signedDate: new Date(),
       cancellationDeadline: deadlineResult.deadlineDate,
       cancellationDeadlineRule: deadlineResult.ruleExplanation,
-      selectedPlan: targetPlan?.name || input.selectedPlan,
+      selectedPlan:
+        targetVersion?.name || targetPlan?.name || input.selectedPlan,
+      planName:
+        targetVersion?.name ||
+        targetPlan?.name ||
+        input.selectedPlan ||
+        "AgeWellRI Membership",
+      planCode: targetPlan?.code || input.selectedPlan,
+      planDescription: targetVersion?.description || targetPlan?.description,
+      features: targetVersion?.features || targetPlan?.features || [],
+      services: servicesList,
+      hasCleaningAddon: input.hasCleaningAddon,
+      amount: finalPrice,
+      currency: "USD",
+      billingInterval: "MONTHLY",
+      billingMethod: input.billingMethod || "AUTOMATIC",
+      cardBrand: latestClient?.cardBrand || undefined,
+      cardLast4: latestClient?.cardLast4 || undefined,
+      invoiceNumber: paymentResult?.invoiceNumber,
+      firstBillingDate: paymentResult?.firstBillingDate
+        ? new Date(paymentResult.firstBillingDate)
+        : null,
     });
   } catch (emailErr) {
     console.warn("⚠️ Nodemailer executed agreement email notice:", emailErr);

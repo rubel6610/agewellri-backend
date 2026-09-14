@@ -28,6 +28,7 @@ export const processAgreementPaymentSchema = z.object({
   billingMethod: z.enum(["AUTOMATIC", "INVOICE"]).default("AUTOMATIC"),
   selectedPlan: z.string().optional(),
   hasCleaningAddon: z.boolean().default(false),
+  skipEmail: z.boolean().optional(),
 });
 
 export const createInvoicePaymentSchema = z.object({
