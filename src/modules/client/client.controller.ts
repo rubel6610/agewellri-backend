@@ -322,3 +322,50 @@ export async function handleSetDefaultClientAccessMethod(
   }
 }
 
+/**
+ * DELETE /api/v1/clients/admin/:id
+ * Permanent deletion of a client and all associated resources by Admin
+ */
+export async function handleDeleteAdminClient(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      sendResponse(res, {
+        statusCode: 403,
+        success: false,
+        message: "Access restricted to administrators.",
+      });
+      return;
+    }
+
+    const clientId = req.params.id as string;
+    if (!clientId) {
+      sendResponse(res, {
+        statusCode: 400,
+        success: false,
+        message: "Client ID is required.",
+      });
+      return;
+    }
+
+    const result = await clientService.deleteAdminClient(req.user.id, clientId);
+
+    sendResponse(res, {
+      statusCode: 200,
+      success: true,
+      message: result.message,
+      data: result.deletedClient,
+    });
+  } catch (error: any) {
+    sendResponse(res, {
+      statusCode: error.message?.includes("not found") ? 404 : 500,
+      success: false,
+      message: error.message || "Failed to delete client.",
+    });
+  }
+}
+
+

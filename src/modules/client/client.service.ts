@@ -1,4 +1,5 @@
 import prisma from "../../lib/prisma";
+import { stripe } from "../../config/stripe";
 import { formatPeriodEntitlements } from "../payment/visit-entitlement.service";
 
 export interface AdminClientsQuery {
@@ -1305,4 +1306,281 @@ export async function setDefaultClientAccessMethod(
 ): Promise<{ success: boolean; accessMethods: ClientAccessMethod[] }> {
   return updateClientAccessMethod(userIdOrClientId, methodId, { isDefault: true });
 }
+
+/**
+ * DELETE Admin Client
+ * Permanently removes a client, their user account, all associated resources, and cancels active subscriptions.
+ * Frees the email so the client can re-register from scratch if needed.
+ */
+export async function deleteAdminClient(
+  adminUserId: string,
+  clientIdOrNumber: string
+): Promise<{
+  success: boolean;
+  message: string;
+  deletedClient: { id: string; clientNumber: string; email: string };
+}> {
+  const trimmed = (clientIdOrNumber || "").trim();
+  if (!trimmed) {
+    throw new Error("Client ID or Client Number is required.");
+  }
+
+  // 1. Build flexible search conditions to match by clientNumber (e.g. AW-1046), ObjectId, or userId
+  const orConditions: any[] = [
+    { clientNumber: trimmed },
+    { clientNumber: { equals: trimmed, mode: "insensitive" } },
+    { clientNumber: { contains: trimmed, mode: "insensitive" } },
+    { user: { email: { equals: trimmed, mode: "insensitive" } } },
+    { primaryContactEmail: { equals: trimmed, mode: "insensitive" } },
+    { emergencyContactEmail: { equals: trimmed, mode: "insensitive" } },
+  ];
+
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length >= 3) {
+    orConditions.push({ clientNumber: `AW-${digits}` });
+    orConditions.push({
+      clientNumber: { contains: digits, mode: "insensitive" },
+    });
+  }
+
+  if (isValidObjectId(trimmed)) {
+    orConditions.unshift({ id: trimmed });
+    orConditions.push({ userId: trimmed });
+  }
+
+  // Fetch full client record
+  const client = await (prisma.client.findFirst as any)({
+    where: {
+      OR: orConditions,
+    },
+    include: {
+      user: true,
+      subscriptions: true,
+      appointments: true,
+      agreements: true,
+      invoices: true,
+      payments: true,
+      reports: true,
+      familyMembers: true,
+      invitations: true,
+    },
+  });
+
+  if (!client) {
+    throw new Error(`Client "${clientIdOrNumber}" was not found.`);
+  }
+
+  const realClientId = client.id;
+  const userId = client.userId;
+  const clientEmail = client.user?.email || "";
+  const clientNumber = client.clientNumber || "";
+
+  // 2. Cancel active Stripe subscriptions if any
+  if (client.subscriptions && client.subscriptions.length > 0) {
+    for (const sub of client.subscriptions) {
+      if (sub.stripeSubscriptionId) {
+        try {
+          await stripe.subscriptions.cancel(sub.stripeSubscriptionId);
+        } catch (stripeErr: any) {
+          console.warn(
+            `[deleteAdminClient] Stripe subscription cancel warning for ${sub.stripeSubscriptionId}:`,
+            stripeErr.message
+          );
+        }
+      }
+    }
+  }
+
+  // 3. Cascade delete all linked records in proper dependency order
+  const subscriptionIds = (client.subscriptions || []).map((s: any) => s.id);
+  const appointmentIds = (client.appointments || []).map((a: any) => a.id);
+
+  // A. Get subscription period IDs
+  let periodIds: string[] = [];
+  if (subscriptionIds.length > 0) {
+    const periods = await (prisma.subscriptionPeriod.findMany as any)({
+      where: { subscriptionId: { in: subscriptionIds } },
+      select: { id: true },
+    });
+    periodIds = periods.map((p: any) => p.id);
+  }
+
+  // B. Get visit IDs for appointments
+  let visitIds: string[] = [];
+  if (appointmentIds.length > 0) {
+    const visits = await (prisma.visit.findMany as any)({
+      where: { appointmentId: { in: appointmentIds } },
+      select: { id: true },
+    });
+    visitIds = visits.map((v: any) => v.id);
+  }
+
+  // C. Get assessment IDs for visits
+  let assessmentIds: string[] = [];
+  if (visitIds.length > 0) {
+    const assessments = await (prisma.assessment.findMany as any)({
+      where: { visitId: { in: visitIds } },
+      select: { id: true },
+    });
+    assessmentIds = assessments.map((a: any) => a.id);
+  }
+
+  // Delete AssessmentResponses
+  if (assessmentIds.length > 0) {
+    await (prisma.assessmentResponse.deleteMany as any)({
+      where: { assessmentId: { in: assessmentIds } },
+    });
+  }
+
+  // Delete Assessments
+  if (visitIds.length > 0) {
+    await (prisma.assessment.deleteMany as any)({
+      where: { visitId: { in: visitIds } },
+    });
+  }
+
+  // Delete Reports
+  await (prisma.report.deleteMany as any)({
+    where: {
+      OR: [
+        { clientId: realClientId },
+        ...(visitIds.length > 0 ? [{ visitId: { in: visitIds } }] : []),
+      ],
+    },
+  });
+
+  // Delete CalendarEvents
+  if (appointmentIds.length > 0) {
+    await (prisma.calendarEvent.deleteMany as any)({
+      where: { appointmentId: { in: appointmentIds } },
+    });
+  }
+
+  // Delete Visits
+  if (appointmentIds.length > 0) {
+    await (prisma.visit.deleteMany as any)({
+      where: { appointmentId: { in: appointmentIds } },
+    });
+  }
+
+  // Delete Appointments
+  await (prisma.appointment.deleteMany as any)({
+    where: { clientId: realClientId },
+  });
+
+  // Delete Renewals
+  if (subscriptionIds.length > 0) {
+    await (prisma.renewal.deleteMany as any)({
+      where: { subscriptionId: { in: subscriptionIds } },
+    });
+  }
+
+  // Delete VisitAllocations
+  if (periodIds.length > 0) {
+    await (prisma.visitAllocation.deleteMany as any)({
+      where: { subscriptionPeriodId: { in: periodIds } },
+    });
+  }
+
+  // Delete SubscriptionPeriods
+  if (subscriptionIds.length > 0) {
+    await (prisma.subscriptionPeriod.deleteMany as any)({
+      where: { subscriptionId: { in: subscriptionIds } },
+    });
+  }
+
+  // Delete BillingNotificationLogs
+  if (subscriptionIds.length > 0) {
+    await (prisma.billingNotificationLog.deleteMany as any)({
+      where: { subscriptionId: { in: subscriptionIds } },
+    });
+  }
+
+  // Delete Invoices & Payments
+  await (prisma.payment.deleteMany as any)({
+    where: { clientId: realClientId },
+  });
+
+  await (prisma.invoice.deleteMany as any)({
+    where: { clientId: realClientId },
+  });
+
+  // Delete Subscriptions
+  await (prisma.subscription.deleteMany as any)({
+    where: { clientId: realClientId },
+  });
+
+  // Delete ServiceAgreements
+  await (prisma.serviceAgreement.deleteMany as any)({
+    where: { clientId: realClientId },
+  });
+
+  // Delete FamilyMembers
+  await (prisma.familyMember.deleteMany as any)({
+    where: { clientId: realClientId },
+  });
+
+  // Delete Invitations
+  await (prisma.invitation.deleteMany as any)({
+    where: {
+      OR: [
+        { clientId: realClientId },
+        ...(clientEmail
+          ? [{ email: { equals: clientEmail, mode: "insensitive" } }]
+          : []),
+      ],
+    },
+  });
+
+  // Delete User Notifications
+  if (userId) {
+    await (prisma.notification.deleteMany as any)({
+      where: { userId },
+    });
+  }
+
+  // Delete Client Profile
+  await (prisma.client.delete as any)({
+    where: { id: realClientId },
+  });
+
+  // Delete User Account (frees email and removes credentials)
+  if (userId) {
+    await (prisma.user.delete as any)({
+      where: { id: userId },
+    });
+  }
+
+  // Record an administrative audit log
+  if (adminUserId) {
+    try {
+      await (prisma.auditLog.create as any)({
+        data: {
+          actorUserId: adminUserId,
+          action: "CLIENT_PERMANENTLY_DELETED",
+          entityType: "CLIENT",
+          entityId: realClientId,
+          metadata: {
+            clientNumber,
+            email: clientEmail,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+    } catch (auditErr: any) {
+      console.warn("[deleteAdminClient] Audit log warning:", auditErr.message);
+    }
+  }
+
+  return {
+    success: true,
+    message: `Client ${clientNumber || ""} (${clientEmail}) and all associated resources were permanently deleted.`,
+    deletedClient: {
+      id: realClientId,
+      clientNumber,
+      email: clientEmail,
+    },
+  };
+}
+
 

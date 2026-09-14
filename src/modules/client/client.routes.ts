@@ -10,6 +10,7 @@ import {
   handleUpdateClientAccessMethod,
   handleDeleteClientAccessMethod,
   handleSetDefaultClientAccessMethod,
+  handleDeleteAdminClient,
 } from "./client.controller";
 
 const router = Router();
@@ -39,6 +40,12 @@ router.get(
   "/admin/:id",
   authenticate,
   handleGetAdminClientById
+);
+
+router.delete(
+  "/admin/:id",
+  authenticate,
+  handleDeleteAdminClient
 );
 
 export default router;
