@@ -11,6 +11,7 @@ import {
   handleSendAgreementReminder,
   handleUploadAuthorityDocument,
   handleDeleteAgreement,
+  handleDownloadAuthorityDocument,
 } from "./agreement.controller";
 import { handleAuthorityDocFileUpload } from "../../middlewares/upload.middleware";
 
@@ -64,6 +65,55 @@ router.get(
   handleGetMyAgreement
 );
 
+// Authority document download & view routes
+router.get(
+  "/my-agreement/authority-document/download",
+  authenticate,
+  handleDownloadAuthorityDocument
+);
+router.get(
+  "/my-agreement/authority-document/file",
+  authenticate,
+  handleDownloadAuthorityDocument
+);
+router.get(
+  "/my-agreement/authority-document/view",
+  authenticate,
+  handleDownloadAuthorityDocument
+);
+
+router.get(
+  "/authority-document/download",
+  authenticate,
+  handleDownloadAuthorityDocument
+);
+router.get(
+  "/authority-document/file",
+  authenticate,
+  handleDownloadAuthorityDocument
+);
+router.get(
+  "/authority-document/view",
+  authenticate,
+  handleDownloadAuthorityDocument
+);
+
+router.get(
+  "/:id/authority-document/download",
+  authenticate,
+  handleDownloadAuthorityDocument
+);
+router.get(
+  "/:id/authority-document/file",
+  authenticate,
+  handleDownloadAuthorityDocument
+);
+router.get(
+  "/:id/authority-document/view",
+  authenticate,
+  handleDownloadAuthorityDocument
+);
+
 // Admin routes
 router.get(
   "/admin/all",
@@ -86,3 +136,4 @@ router.delete(
 );
 
 export default router;
+

@@ -1,4 +1,6 @@
 import { UserRole, OnboardingStatus, NotificationType } from "@prisma/client";
+import path from "path";
+import fs from "fs";
 import prisma from "../../lib/prisma";
 import { CancellationDeadlineService } from "./cancellation-deadline.service";
 import {
@@ -1283,3 +1285,172 @@ export async function deleteAgreement(
     message: "Service Agreement deleted successfully.",
   };
 }
+
+/**
+ * Get Legal Authority Document File for Download or Inline View
+ */
+export async function getAuthorityDocumentForDownload(
+  identifier: string,
+  user: { id: string; role: string }
+): Promise<{
+  filePath: string;
+  fileName: string;
+  mimeType: string;
+}> {
+  let docUrl: string | null = null;
+  let clientName = "Client";
+
+  // Check if identifier is "my-agreement" or user is CLIENT requesting their own
+  if (
+    identifier === "my-agreement" ||
+    identifier === "me" ||
+    identifier === "current"
+  ) {
+    const context = await resolveClientForUser(user.id);
+    const fullClient = context?.client
+      ? await ((prisma as any).client.findUnique as any)({
+          where: { id: context.client.id },
+          include: { user: true },
+        })
+      : null;
+
+    if (!fullClient) {
+      throw new Error("Client account not found.");
+    }
+    clientName =
+      `${fullClient.user?.firstName || ""} ${fullClient.user?.lastName || ""}`.trim() ||
+      "Member";
+
+    const agreement = await ((prisma as any).serviceAgreement.findFirst as any)({
+      where: { clientId: fullClient.id },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const onboardingData = fullClient.onboardingData as any;
+    docUrl =
+      agreement?.documentUrl || onboardingData?.authorityDocumentUrl || null;
+  } else if (
+    identifier.startsWith("poa-") ||
+    identifier.endsWith(".pdf") ||
+    identifier.endsWith(".png") ||
+    identifier.endsWith(".jpg") ||
+    identifier.endsWith(".jpeg")
+  ) {
+    // Lookup by filename (with path sanitization)
+    const sanitizedFilename = path.basename(identifier);
+    if (user.role !== "ADMIN") {
+      // For clients, verify this file belongs to them
+      const context = await resolveClientForUser(user.id);
+      const fullClient = context?.client
+        ? await ((prisma as any).client.findUnique as any)({
+            where: { id: context.client.id },
+            include: { user: true },
+          })
+        : null;
+
+      if (!fullClient) throw new Error("Client account not found.");
+      const agreement = await (
+        (prisma as any).serviceAgreement.findFirst as any
+      )({
+        where: { clientId: fullClient.id },
+        orderBy: { createdAt: "desc" },
+      });
+      const onboardingData = fullClient.onboardingData as any;
+      const clientDoc =
+        agreement?.documentUrl || onboardingData?.authorityDocumentUrl || null;
+      if (!clientDoc || !clientDoc.includes(sanitizedFilename)) {
+        throw new Error("You do not have permission to download this document.");
+      }
+      clientName =
+        `${fullClient.user?.firstName || ""} ${fullClient.user?.lastName || ""}`.trim() ||
+        "Member";
+    }
+    docUrl = `/uploads/authority-documents/${sanitizedFilename}`;
+  } else {
+    // Lookup by agreement ID
+    const agreement = await (
+      (prisma as any).serviceAgreement.findUnique as any
+    )({
+      where: { id: identifier },
+      include: {
+        client: {
+          include: {
+            user: true,
+          },
+        },
+      },
+    });
+
+    if (!agreement) {
+      // Check if identifier is clientId
+      const clientRecord = await ((prisma as any).client.findUnique as any)({
+        where: { id: identifier },
+        include: { user: true },
+      });
+      if (clientRecord) {
+        if (user.role !== "ADMIN" && clientRecord.userId !== user.id) {
+          throw new Error("You do not have permission to access this document.");
+        }
+        clientName =
+          `${clientRecord.user?.firstName || ""} ${clientRecord.user?.lastName || ""}`.trim() ||
+          "Member";
+        const onboardingData = clientRecord.onboardingData as any;
+        const agr = await (
+          (prisma as any).serviceAgreement.findFirst as any
+        )({
+          where: { clientId: clientRecord.id },
+          orderBy: { createdAt: "desc" },
+        });
+        docUrl =
+          agr?.documentUrl || onboardingData?.authorityDocumentUrl || null;
+      } else {
+        throw new Error("Agreement record not found.");
+      }
+    } else {
+      if (user.role !== "ADMIN" && agreement.client?.userId !== user.id) {
+        throw new Error("You do not have permission to download this document.");
+      }
+      const clientUser = agreement.client?.user;
+      clientName =
+        `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() ||
+        agreement.signerName ||
+        "Member";
+      const onboardingData = agreement.client?.onboardingData as any;
+      docUrl =
+        agreement.documentUrl || onboardingData?.authorityDocumentUrl || null;
+    }
+  }
+
+  if (!docUrl) {
+    throw new Error("No legal authority document is attached to this agreement.");
+  }
+
+  const rawFilename = path.basename(docUrl);
+  const filePath = path.join(
+    process.cwd(),
+    "uploads",
+    "authority-documents",
+    rawFilename
+  );
+
+  if (!fs.existsSync(filePath)) {
+    throw new Error("Authority document file was not found on server storage.");
+  }
+
+  const ext = path.extname(filePath).toLowerCase();
+  let mimeType = "application/octet-stream";
+  if (ext === ".pdf") mimeType = "application/pdf";
+  else if (ext === ".png") mimeType = "image/png";
+  else if (ext === ".jpg" || ext === ".jpeg") mimeType = "image/jpeg";
+
+  const safeClientName = clientName.replace(/[^a-zA-Z0-9.-]/g, "_");
+  const cleanExt = ext || ".pdf";
+  const downloadFileName = `AgeWellRI_Legal_Authority_${safeClientName}${cleanExt}`;
+
+  return {
+    filePath,
+    fileName: downloadFileName,
+    mimeType,
+  };
+}
+
