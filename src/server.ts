@@ -2,6 +2,18 @@ import app from "./app";
 import { initRenewalScheduler } from "./modules/payment/scheduler.service";
 import { seedDefaultAssessmentTemplate } from "./modules/report/report.service";
 
+// Global process safety handlers for unhandled promise rejections & uncaught exceptions
+process.on("unhandledRejection", (reason: any) => {
+  console.error("💥 [PROCESS] Unhandled Promise Rejection:", reason?.message || reason);
+});
+
+process.on("uncaughtException", (error: Error) => {
+  console.error("💥 [PROCESS] Uncaught Exception:", error.message);
+  if (error.stack) {
+    console.error(error.stack);
+  }
+});
+
 const PORT = process.env.PORT || 5173;
 
 app.listen(PORT, () => {
