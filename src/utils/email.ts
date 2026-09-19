@@ -950,7 +950,7 @@ export async function sendPlanPurchaseConfirmationEmail(
       <strong style="color: #243746; font-size: 13px;">What to Expect Next:</strong><br>
       1. <strong>Care Specialist Assignment:</strong> A dedicated, certified Rhode Island AgeWell Specialist is being matched with your home.<br>
       2. <strong>First Visit Scheduling:</strong> Your coordinator will reach out to schedule your initial Comprehensive Home Safety Audit, or you can book online anytime.<br>
-      3. <strong>Live Family Portal:</strong> Family members and caregivers can view real-time visit reports and photo logs from any device.<br>
+      3. <strong>Live Family Portal:</strong> Family members  can view real-time visit reports and photo logs from any device.<br>
       <br>
       Need assistance? Contact our local Westerly, RI team: <strong>${supportPhone}</strong> | <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>
     </div>
@@ -1058,7 +1058,7 @@ export async function sendWelcomeInvitationEmail(
     </div>
 
     <div class="message">
-      Click the button below to get started. You will be able to confirm whether you are signing as the Resident or as an Authorized Family Member / Caregiver, review the state-specific agreement, and activate your safety coverage.
+      Click the button below to get started. You will be able to confirm whether you are signing as the Resident or as an Authorized Family Member  review the state-specific agreement, and activate your safety coverage.
     </div>
 
     <div style="text-align: center; margin: 28px 0;">
@@ -1068,7 +1068,7 @@ export async function sendWelcomeInvitationEmail(
     </div>
 
     <div style="background: #F8FAFC; border: 1px solid #D9E4EC; border-radius: 12px; padding: 14px; font-size: 12px; color: #64748B; line-height: 1.5;">
-      <strong>Note for Family Members &amp; Caregivers:</strong> If you are managing care for a loved one, you can specify your legal authority (e.g., Power of Attorney or Authorized Representative) during the onboarding steps.<br><br>
+      <strong>Note for Family Members:</strong> If you are managing care for a loved one, you can specify your legal authority (e.g., Power of Attorney or Authorized Representative) during the onboarding steps.<br><br>
       Questions? Contact our team anytime: <strong>${supportPhone}</strong> | <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>
     </div>
   `;

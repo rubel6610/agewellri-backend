@@ -61,7 +61,6 @@ export const submitAgreementSchema = z.object({
   signerRole: z.enum([
     "RESIDENT",
     "FAMILY_MEMBER",
-    "CAREGIVER",
     "POWER_OF_ATTORNEY",
     "AUTHORIZED_REPRESENTATIVE",
   ]).default("RESIDENT"),

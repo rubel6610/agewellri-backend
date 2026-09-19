@@ -7,6 +7,7 @@ import {
   sendAgreementExecutedEmail,
   sendWelcomeInvitationEmail,
 } from "../../utils/email";
+import { generateNextClientNumber } from "../../utils/client-number.util";
 import { processAgreementPayment } from "../payment/payment.service";
 import {
   SubmitAgreementInput,
@@ -318,46 +319,63 @@ export async function submitServiceAgreement(
   };
 
   if (!clientId) {
-    const clientCount = await prisma.client.count();
-    const clientNumber = `AW-${1001 + clientCount}`;
-    const newClient = await ((prisma as any).client.create as any)({
-      data: {
-        userId: user.id,
-        clientNumber,
-        address: input.address,
-        city: input.city,
-        state,
-        postalCode: input.postalCode,
-        country: "USA",
-        dateOfBirth: input.dob || null,
-        signerRole,
-        legalAuthority: isRepresentative ? input.legalAuthority || null : null,
-        legalAuthorityOther:
-          isRepresentative && input.legalAuthority === "OTHER"
-            ? input.legalAuthorityOther || null
-            : null,
-        primaryContactName: input.primaryContactName || input.clientFullName,
-        primaryContactPhone: input.primaryContactPhone || input.phone,
-        primaryContactEmail:
-          input.primaryContactEmail || input.email || user.email,
-        primaryContactRelation:
-          input.primaryContactRelation ||
-          (isRepresentative ? "Authorized Signer" : "Self"),
-        emergencyContactName,
-        emergencyContactPhone,
-        emergencyContactEmail,
-        emergencyContactRelation,
-        homeAccessType,
-        homeAccessInstructions: input.homeAccessInstructions || null,
-        homeAccessCode: input.homeAccessCode || null,
-        selectedPlan: targetPlan?.code || input.selectedPlan,
-        hasCleaningAddon: input.hasCleaningAddon,
-        hasCompletedAgreement: true,
-        onboardingStatus: OnboardingStatus.AGREEMENT_SIGNED,
-        onboardingStep: 6,
-        onboardingData,
-      },
-    });
+    let attempts = 0;
+    const maxAttempts = 5;
+    let newClient: any = null;
+    while (attempts < maxAttempts) {
+      try {
+        const clientNumber = await generateNextClientNumber();
+        newClient = await ((prisma as any).client.create as any)({
+          data: {
+            userId: user.id,
+            clientNumber,
+            address: input.address,
+            city: input.city,
+            state,
+            postalCode: input.postalCode,
+            country: "USA",
+            dateOfBirth: input.dob || null,
+            signerRole,
+            legalAuthority: isRepresentative ? input.legalAuthority || null : null,
+            legalAuthorityOther:
+              isRepresentative && input.legalAuthority === "OTHER"
+                ? input.legalAuthorityOther || null
+                : null,
+            primaryContactName: input.primaryContactName || input.clientFullName,
+            primaryContactPhone: input.primaryContactPhone || input.phone,
+            primaryContactEmail:
+              input.primaryContactEmail || input.email || user.email,
+            primaryContactRelation:
+              input.primaryContactRelation ||
+              (isRepresentative ? "Authorized Signer" : "Self"),
+            emergencyContactName,
+            emergencyContactPhone,
+            emergencyContactEmail,
+            emergencyContactRelation,
+            homeAccessType,
+            homeAccessInstructions: input.homeAccessInstructions || null,
+            homeAccessCode: input.homeAccessCode || null,
+            selectedPlan: targetPlan?.code || input.selectedPlan,
+            hasCleaningAddon: input.hasCleaningAddon,
+            hasCompletedAgreement: true,
+            onboardingStatus: OnboardingStatus.AGREEMENT_SIGNED,
+            onboardingStep: 6,
+            onboardingData,
+          },
+        });
+        break;
+      } catch (err: any) {
+        attempts++;
+        if (
+          (err?.code === "P2002" || err?.message?.includes("Unique constraint failed")) &&
+          attempts < maxAttempts
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 10 + Math.floor(Math.random() * 40)));
+          continue;
+        }
+        throw err;
+      }
+    }
     clientId = newClient.id;
   } else {
     await ((prisma as any).client.update as any)({

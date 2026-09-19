@@ -4,6 +4,7 @@ import prisma from "../../lib/prisma";
 import { hashPassword, comparePassword } from "../../utils/password";
 import { generateAuthTokens, verifyRefreshToken } from "../../utils/jwt";
 import { sendPasswordResetOtpEmail } from "../../utils/email";
+import { generateNextClientNumber } from "../../utils/client-number.util";
 import { processAgreementPayment } from "../payment/payment.service";
 import { CancellationDeadlineService } from "../agreement/cancellation-deadline.service";
 import {
@@ -27,7 +28,6 @@ import {
 export type SignerRoleType =
   | "RESIDENT"
   | "FAMILY_MEMBER"
-  | "CAREGIVER"
   | "POWER_OF_ATTORNEY"
   | "AUTHORIZED_REPRESENTATIVE";
 
@@ -96,22 +96,37 @@ export async function registerUser(input: RegisterInput) {
 
   let client = null;
   if (user.role === UserRole.CLIENT) {
-    const clientCount = await prisma.client.count();
-    const clientNumber = `AW-${1001 + clientCount}`;
-
-    client = await prisma.client.create({
-      data: {
-        userId: user.id,
-        clientNumber: clientNumber,
-        address: input.address || "",
-        city: input.city || "",
-        state: input.state || "",
-        postalCode: input.postalCode || "",
-        country: "USA",
-        onboardingStatus: OnboardingStatus.ACCOUNT_CREATED,
-        hasCompletedAgreement: false,
-      },
-    });
+    let attempts = 0;
+    const maxAttempts = 5;
+    while (attempts < maxAttempts) {
+      try {
+        const clientNumber = await generateNextClientNumber();
+        client = await prisma.client.create({
+          data: {
+            userId: user.id,
+            clientNumber: clientNumber,
+            address: input.address || "",
+            city: input.city || "",
+            state: input.state || "",
+            postalCode: input.postalCode || "",
+            country: "USA",
+            onboardingStatus: OnboardingStatus.ACCOUNT_CREATED,
+            hasCompletedAgreement: false,
+          },
+        });
+        break;
+      } catch (err: any) {
+        attempts++;
+        if (
+          (err?.code === "P2002" || err?.message?.includes("Unique constraint failed")) &&
+          attempts < maxAttempts
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 10 + Math.floor(Math.random() * 40)));
+          continue;
+        }
+        throw err;
+      }
+    }
   }
 
   const authTokens = generateAuthTokens({

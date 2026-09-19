@@ -9,6 +9,7 @@ import {
   RenewalStatus,
 } from "@prisma/client";
 import prisma from "../../lib/prisma";
+import { generateNextClientNumber } from "../../utils/client-number.util";
 import {
   stripe,
   STRIPE_PUBLISHABLE_KEY,
@@ -109,18 +110,35 @@ export async function getOrCreateStripeCustomer(userId: string) {
 
   let client: any = context?.client || user.client;
   if (!client) {
-    const clientNumber = `AW-${Math.floor(1000 + Math.random() * 9000)}`;
-    client = await prisma.client.create({
-      data: {
-        userId: user.id,
-        clientNumber,
-        address: "",
-        city: "",
-        state: "RI",
-        postalCode: "",
-        country: "USA",
-      },
-    });
+    let attempts = 0;
+    const maxAttempts = 5;
+    while (attempts < maxAttempts) {
+      try {
+        const clientNumber = await generateNextClientNumber();
+        client = await prisma.client.create({
+          data: {
+            userId: user.id,
+            clientNumber,
+            address: "",
+            city: "",
+            state: "RI",
+            postalCode: "",
+            country: "USA",
+          },
+        });
+        break;
+      } catch (err: any) {
+        attempts++;
+        if (
+          (err?.code === "P2002" || err?.message?.includes("Unique constraint failed")) &&
+          attempts < maxAttempts
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 10 + Math.floor(Math.random() * 40)));
+          continue;
+        }
+        throw err;
+      }
+    }
   }
 
   if (client.stripeCustomerId) {

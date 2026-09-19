@@ -4,6 +4,7 @@ import prisma from "../../lib/prisma";
 import { hashPassword } from "../../utils/password";
 import { generateAuthTokens } from "../../utils/jwt";
 import { sendWelcomeInvitationEmail } from "../../utils/email";
+import { generateNextClientNumber } from "../../utils/client-number.util";
 import {
   CreateInvitationInput,
   AcceptInvitationInput,
@@ -217,36 +218,51 @@ export async function acceptInvitation(input: AcceptInvitationInput) {
 
   // Create User & Client
   const passwordHash = await hashPassword(input.password);
-  const clientCount = await prisma.client.count();
-  const clientNumber = `AW-${1001 + clientCount}`;
-
-  user = await (prisma.user.create as any)({
-    data: {
-      email,
-      passwordHash,
-      firstName: input.firstName.trim(),
-      lastName: input.lastName.trim(),
-      phone: input.phone.trim(),
-      role: UserRole.CLIENT,
-      status: UserStatus.ACTIVE,
-      emailVerifiedAt: new Date(),
-      client: {
-        create: {
-          clientNumber,
-          address: input.address?.trim() || "TBD",
-          city: input.city?.trim() || "Providence",
-          state: input.state?.trim() || "RI",
-          postalCode: input.postalCode?.trim() || "02906",
-          country: "USA",
-          onboardingStatus: OnboardingStatus.ACCOUNT_CREATED,
-          onboardingStep: 1,
+  let attempts = 0;
+  const maxAttempts = 5;
+  while (attempts < maxAttempts) {
+    try {
+      const clientNumber = await generateNextClientNumber();
+      user = await (prisma.user.create as any)({
+        data: {
+          email,
+          passwordHash,
+          firstName: input.firstName.trim(),
+          lastName: input.lastName.trim(),
+          phone: input.phone.trim(),
+          role: UserRole.CLIENT,
+          status: UserStatus.ACTIVE,
+          emailVerifiedAt: new Date(),
+          client: {
+            create: {
+              clientNumber,
+              address: input.address?.trim() || "TBD",
+              city: input.city?.trim() || "Providence",
+              state: input.state?.trim() || "RI",
+              postalCode: input.postalCode?.trim() || "02906",
+              country: "USA",
+              onboardingStatus: OnboardingStatus.ACCOUNT_CREATED,
+              onboardingStep: 1,
+            },
+          },
         },
-      },
-    },
-    include: {
-      client: true,
-    },
-  });
+        include: {
+          client: true,
+        },
+      });
+      break;
+    } catch (err: any) {
+      attempts++;
+      if (
+        (err?.code === "P2002" || err?.message?.includes("Unique constraint failed")) &&
+        attempts < maxAttempts
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 10 + Math.floor(Math.random() * 40)));
+        continue;
+      }
+      throw err;
+    }
+  }
 
   if (!user) {
     throw new Error("Failed to create member account.");

@@ -310,7 +310,7 @@ export function formatAppointmentRecord(
     technicianTitle: appt.technicianId
       ? tech.title ||
         (st.category === "CLEANING"
-          ? "Senior Home Support Caregiver"
+          ? "Senior Home Safety Specialist  "
           : "Certified Home Safety Specialist")
       : "Pending Admin Assignment",
     technicianPhone: tech.phone || null,
