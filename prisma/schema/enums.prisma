@@ -49,13 +49,10 @@ enum SubscriptionStatus {
 
 enum BillingInterval {
   MONTHLY
-  ANNUAL
-  ONE_TIME
 }
 
 enum BillingMethod {
   AUTOMATIC
-  INVOICE
 }
 
 enum PaymentStatus {

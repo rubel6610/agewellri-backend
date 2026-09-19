@@ -41,8 +41,6 @@ model ServiceAgreement {
   subscription             Subscription?     @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
   planId                   String?           @db.ObjectId
   plan                     ServicePlan?      @relation(fields: [planId], references: [id], onDelete: SetNull)
-  planVersionId            String?           @db.ObjectId
-  planVersion              PlanVersion?      @relation(fields: [planVersionId], references: [id], onDelete: SetNull)
   agreementVersionId       String?           @db.ObjectId
   agreementVersion         AgreementVersion? @relation(fields: [agreementVersionId], references: [id], onDelete: SetNull)
   templateVersion          String            @default("v2.0")

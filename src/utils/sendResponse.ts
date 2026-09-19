@@ -1,4 +1,5 @@
 import { Response } from "express";
+import { formatToHumanReadable } from "../middlewares/error.middleware";
 
 export interface ApiResponse<T> {
   statusCode: number;
@@ -17,12 +18,20 @@ export interface ApiResponse<T> {
 
 /**
  * Reusable utility to send standardized HTTP JSON responses across controllers.
+ * Automatically sanitizes any technical/database errors into clean human-readable text.
  */
 export function sendResponse<T>(res: Response, data: ApiResponse<T>): void {
+  const cleanMessage =
+    data.message !== undefined
+      ? data.success === false
+        ? formatToHumanReadable(data.message)
+        : data.message
+      : undefined;
+
   const responsePayload: ApiResponse<T> = {
     statusCode: data.statusCode,
     success: data.success,
-    message: data.message,
+    message: cleanMessage,
     meta: data.meta,
     data: data.data !== undefined ? data.data : null,
     errors: data.errors,

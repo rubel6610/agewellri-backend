@@ -201,7 +201,7 @@ export async function resolvePlanPricingDynamic(
 
   // 1. Try finding the exact requested plan by ID, code, or name in the Database
   let plan = identifier
-    ? await (prisma.servicePlan.findFirst as any)({
+    ? await prisma.servicePlan.findFirst({
         where: {
           OR: [
             { id: identifier.length === 24 ? identifier : undefined },
@@ -209,50 +209,14 @@ export async function resolvePlanPricingDynamic(
             { name: { equals: identifier, mode: "insensitive" } },
           ],
         },
-        include: {
-          planServices: {
-            include: { serviceType: true },
-          },
-          versions: {
-            where: { status: "ACTIVE" },
-            orderBy: { versionNumber: "desc" },
-            take: 1,
-            include: {
-              prices: {
-                where: { isActive: true },
-                orderBy: { createdAt: "desc" },
-                take: 1,
-              },
-              planServices: { include: { serviceType: true } },
-            },
-          },
-        },
       })
     : null;
 
   // 2. If not found or not specified, dynamically load the default active plan configured in DB
   if (!plan) {
-    plan = await (prisma.servicePlan.findFirst as any)({
+    plan = await prisma.servicePlan.findFirst({
       where: { isActive: true, isArchived: false },
       orderBy: { displayOrder: "asc" },
-      include: {
-        planServices: {
-          include: { serviceType: true },
-        },
-        versions: {
-          where: { status: "ACTIVE" },
-          orderBy: { versionNumber: "desc" },
-          take: 1,
-          include: {
-            prices: {
-              where: { isActive: true },
-              orderBy: { createdAt: "desc" },
-              take: 1,
-            },
-            planServices: { include: { serviceType: true } },
-          },
-        },
-      },
     });
   }
 
@@ -262,85 +226,30 @@ export async function resolvePlanPricingDynamic(
     );
   }
 
-  const activeVersion = plan.versions?.[0];
-  const activePrice = activeVersion?.prices?.[0];
-  const basePrice =
-    activePrice?.amount ?? activeVersion?.price ?? plan.price ?? 0;
+  const planAny = plan as any;
+  const basePrice = planAny.price ?? 0;
   const addonPrice = hasCleaningAddon ? 60 : 0;
   const totalPrice = basePrice + addonPrice;
-
-  // Dynamically resolve services from planServices configured by admin on the plan or version
-  const servicesSource =
-    plan.planServices && plan.planServices.length > 0
-      ? plan.planServices
-      : activeVersion?.planServices || [];
-
-  const services = servicesSource.map((ps: any) => ({
-    serviceTypeId: ps.serviceTypeId,
-    serviceName: ps.serviceType?.name || "Service",
-    category: ps.serviceType?.category,
-    allocatedVisits:
-      (ps.allocatedVisits || 0) +
-      (hasCleaningAddon && ps.serviceType?.category === "CLEANING" ? 6 : 0),
-    unit: ps.unit || "visits",
-  }));
-
-  // If cleaning addon selected but no cleaning service in plan, dynamically fetch cleaning serviceType from DB
-  if (
-    hasCleaningAddon &&
-    !services.some((s: any) => s.category === "CLEANING")
-  ) {
-    const cleaningService = await prisma.serviceType.findFirst({
-      where: { category: "CLEANING", isActive: true },
-    });
-    if (cleaningService) {
-      services.push({
-        serviceTypeId: cleaningService.id,
-        serviceName: cleaningService.name,
-        category: "CLEANING",
-        allocatedVisits: 6,
-        unit: "visits",
-      });
-    }
-  }
-
-  const totalVisits = services.reduce(
-    (sum: number, s: any) => sum + (s.allocatedVisits || 0),
-    0,
-  );
-
-  const planMeta: any = plan.metadata || {};
-  const features: string[] =
-    activeVersion?.features && activeVersion.features.length > 0
-      ? activeVersion.features
-      : Array.isArray(planMeta.features) && planMeta.features.length > 0
-        ? planMeta.features
-        : [];
+  const totalVisits = Number(planAny.totalVisits ?? 2);
+  const features: string[] = Array.isArray(planAny.features)
+    ? planAny.features
+    : [];
 
   return {
-    planId: plan.id,
-    versionId: activeVersion?.id || null,
-    code: plan.code,
-    planName: activeVersion?.name || plan.name,
-    planDescription:
-      plan.shortDescription ||
-      plan.fullDescription ||
-      activeVersion?.description ||
-      "",
+    planId: planAny.id,
+    versionId: planAny.id,
+    code: planAny.code,
+    planName: planAny.name,
+    planDescription: planAny.shortDescription || planAny.fullDescription || "",
     features,
     basePrice,
     addonPrice,
     totalPrice,
-    billingInterval: (activePrice?.billingInterval ||
-      activeVersion?.billingInterval ||
-      plan.billingInterval ||
-      "MONTHLY") as BillingInterval,
-    currency: activePrice?.currency || activeVersion?.currency || "USD",
-    stripePriceId:
-      activePrice?.stripePriceId || activeVersion?.stripePriceId || null,
-    services,
+    billingInterval: "MONTHLY" as BillingInterval,
+    currency: "USD",
+    stripePriceId: planAny.stripePriceId || null,
     totalVisits,
-    isOneTime: plan.billingInterval === "ONE_TIME",
+    isOneTime: false,
   };
 }
 
@@ -575,11 +484,10 @@ export async function processAgreementPayment(
     input.hasCleaningAddon,
   );
 
-  const billingMethod =
-    input.billingMethod === "INVOICE"
-      ? BillingMethod.INVOICE
-      : BillingMethod.AUTOMATIC;
-  const isInvoiceBilling = billingMethod === BillingMethod.INVOICE;
+  const billingMethod = (
+    input.billingMethod === "INVOICE" ? "INVOICE" : "AUTOMATIC"
+  ) as BillingMethod;
+  const isInvoiceBilling = input.billingMethod === "INVOICE";
 
   let stripeCustomerId = client.stripeCustomerId;
   let stripePaymentMethodId = client.stripePaymentMethodId;
@@ -619,11 +527,11 @@ export async function processAgreementPayment(
     pricing.billingInterval,
   );
 
-  // 1. Resolve planId and versionId
+  // 1. Resolve planId
   let planId = pricing.planId;
   if (!planId) {
     const fallbackPlan = await prisma.servicePlan.findFirst();
-    planId = fallbackPlan?.id;
+    planId = fallbackPlan?.id || "";
   }
 
   // 2. Create Stripe-Native Subscription with trial_end anchored to the 1st of next month (NO charge on signup day)
@@ -712,11 +620,10 @@ export async function processAgreementPayment(
   const subscriptionStatus = SubscriptionStatus.PENDING;
 
   if (!subscription) {
-    subscription = await (prisma.subscription.create as any)({
+    subscription = await prisma.subscription.create({
       data: {
         clientId: client.id,
         planId,
-        planVersionId: pricing.versionId,
         contractedPrice: pricing.totalPrice,
         currency: pricing.currency,
         status: subscriptionStatus,
@@ -731,11 +638,10 @@ export async function processAgreementPayment(
       },
     });
   } else {
-    subscription = await (prisma.subscription.update as any)({
+    subscription = await prisma.subscription.update({
       where: { id: subscription.id },
       data: {
         planId: planId || subscription.planId,
-        planVersionId: pricing.versionId || subscription.planVersionId,
         contractedPrice: pricing.totalPrice,
         currency: pricing.currency,
         billingInterval: pricing.billingInterval,
@@ -913,7 +819,6 @@ export async function processAgreementPayment(
         planCode: pricing.code,
         planDescription: pricing.planDescription,
         features: pricing.features,
-        services: pricing.services,
         hasCleaningAddon: input.hasCleaningAddon,
         amount: pricing.totalPrice,
         currency: pricing.currency,
@@ -983,7 +888,6 @@ export async function cancelSubscriptionRenewal(
             take: 1,
             include: {
               plan: true,
-              planVersion: true,
             },
           },
           agreements: {
@@ -1009,7 +913,6 @@ export async function cancelSubscriptionRenewal(
           take: 1,
           include: {
             plan: true,
-            planVersion: true,
           },
         },
         agreements: {
@@ -1114,7 +1017,6 @@ export async function cancelSubscriptionRenewal(
       `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() ||
       "Valued Member";
     const planName =
-      activeSub.planVersion?.name ||
       activeSub.plan?.name ||
       (client as any)?.selectedPlan ||
       "AgeWellRI Plan";
@@ -1234,7 +1136,6 @@ export async function reactivateSubscriptionRenewal(userId: string) {
             take: 1,
             include: {
               plan: true,
-              planVersion: true,
             },
           },
         },
@@ -1256,7 +1157,6 @@ export async function reactivateSubscriptionRenewal(userId: string) {
           take: 1,
           include: {
             plan: true,
-            planVersion: true,
           },
         },
       },
@@ -1336,13 +1236,12 @@ export async function reactivateSubscriptionRenewal(userId: string) {
     `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() ||
     "Valued Member";
   const planName =
-    sub.planVersion?.name ||
     sub.plan?.name ||
     (client as any)?.selectedPlan ||
     "AgeWellRI Plan";
   const nextBillingDate = sub.nextRenewalDate || sub.currentPeriodEnd;
   const recurringAmount =
-    sub.contractedPrice ?? sub.planVersion?.price ?? sub.plan?.price ?? null;
+    sub.contractedPrice ?? sub.plan?.price ?? null;
 
   if (recipientEmail) {
     try {
@@ -1403,7 +1302,7 @@ export async function reactivateSubscriptionRenewal(userId: string) {
 
 /**
  * Client Billing Overview for /dashboard/billing
- * Displays the client's contracted PlanVersion and historical price terms.
+ * Displays the client's contracted ServicePlan and price terms.
  */
 export async function getBillingOverview(userId: string) {
   const context = await resolveClientForUser(userId);
@@ -1428,9 +1327,6 @@ export async function getBillingOverview(userId: string) {
       subscriptions: {
         include: {
           plan: true,
-          planVersion: {
-            include: { planServices: true },
-          },
           periods: {
             orderBy: { periodNumber: "desc" },
             take: 1,
@@ -1501,18 +1397,15 @@ export async function getBillingOverview(userId: string) {
 
   // Contracted terms preservation
   const contractedPlanName =
-    activeSub?.planVersion?.name ||
     activeSub?.plan?.name ||
     (client as any)?.selectedPlan ||
     "No Active Plan";
   const contractedPrice =
     activeSub?.contractedPrice ??
-    activeSub?.planVersion?.price ??
     activeSub?.plan?.price ??
     0;
   const billingInterval =
     activeSub?.billingInterval ||
-    activeSub?.planVersion?.billingInterval ||
     "MONTHLY";
 
   const clientUser = client.user;
@@ -1761,7 +1654,6 @@ export async function handleStripeWebhook(
                 include: {
                   periods: { orderBy: { periodNumber: "desc" }, take: 1 },
                   plan: true,
-                  planVersion: { include: { planServices: true } },
                 },
               },
             },
@@ -1804,10 +1696,9 @@ export async function handleStripeWebhook(
               });
             }
 
-            // Provision fresh visit allocations idempotently from active plan version / services
+            // Provision fresh visit allocations idempotently from active plan
             await ensureVisitAllocationsForPeriod(
               newPeriod.id,
-              activeSub.planVersionId,
               activeSub.planId,
               activeSub.client?.hasCleaningAddon,
             );
@@ -1874,7 +1765,6 @@ export async function handleStripeWebhook(
             }
 
             const planName =
-              activeSub.planVersion?.name ||
               activeSub.plan?.name ||
               (client as any)?.selectedPlan ||
               "Service Plan";
@@ -1904,23 +1794,19 @@ export async function handleStripeWebhook(
                 });
 
                 // Fetch new allocations for email breakdown
-                const periodWithAlloc = await (
-                  prisma.subscriptionPeriod.findUnique as any
-                )({
+                const periodWithAlloc = await prisma.subscriptionPeriod.findUnique({
                   where: { id: newPeriod.id },
                   include: {
-                    allocations: {
-                      include: { serviceType: true },
-                    },
+                    allocations: true,
                   },
                 });
 
                 const allocatedVisits = (
                   periodWithAlloc?.allocations || []
                 ).map((a: any) => ({
-                  serviceName: a.serviceType?.name || "Care Visit",
-                  count: a.allocatedCount || 6,
-                  durationMinutes: a.serviceType?.durationMinutes || 60,
+                  serviceName: a.serviceName || "Care Visit",
+                  count: a.allocatedCount || 2,
+                  durationMinutes: 60,
                 }));
 
                 const totalAllocVisits = allocatedVisits.reduce(
@@ -2335,7 +2221,6 @@ export async function getAdminInvoices(query: AdminBillingFilterInput) {
       clientNumber: inv.client?.clientNumber || "AW-0000",
       planName:
         inv.subscription?.plan?.name ||
-        inv.subscription?.planVersion?.name ||
         (inv.client as any)?.selectedPlan ||
         "Service Plan",
       billingFrequency: "Monthly",
@@ -2442,7 +2327,6 @@ export async function getAdminSubscriptions(query: AdminBillingFilterInput) {
           },
         },
         plan: true,
-        planVersion: true,
         periods: {
           orderBy: { periodNumber: "desc" },
           take: 1,
@@ -2461,11 +2345,10 @@ export async function getAdminSubscriptions(query: AdminBillingFilterInput) {
         : "Client",
       clientNumber: sub.client?.clientNumber || "AW-0000",
       planName:
-        sub.planVersion?.name ||
         sub.plan?.name ||
         (sub.client as any)?.selectedPlan ||
         "Service Plan",
-      planPrice: `$${(sub.contractedPrice ?? sub.planVersion?.price ?? sub.plan?.price ?? 0).toFixed(2)}`,
+      planPrice: `$${(sub.contractedPrice ?? sub.plan?.price ?? 0).toFixed(2)}`,
       status: sub.status,
       billingInterval: sub.billingInterval || "MONTHLY",
       billingMethod: sub.billingMethod,
@@ -2539,7 +2422,6 @@ export async function getAdminUpcomingRenewals(query?: {
         include: { user: true },
       },
       plan: true,
-      planVersion: true,
       periods: {
         orderBy: { periodNumber: "desc" },
         take: 1,
@@ -2568,12 +2450,11 @@ export async function getAdminUpcomingRenewals(query?: {
       clientPhone: sub.client?.phone || clientUser?.phone || "",
       representativeEmail: sub.client?.primaryContactEmail || null,
       planName:
-        sub.planVersion?.name ||
         sub.plan?.name ||
         (sub.client as any)?.selectedPlan ||
         "Service Plan",
       contractedPrice:
-        sub.contractedPrice ?? sub.planVersion?.price ?? sub.plan?.price ?? 0,
+        sub.contractedPrice ?? sub.plan?.price ?? 0,
       billingInterval: sub.billingInterval || "MONTHLY",
       billingMethod: sub.billingMethod || "AUTOMATIC",
       autoRenew: sub.autoRenew ?? true,
@@ -2774,7 +2655,6 @@ export async function adminCancelSubscription(
             `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() ||
             "Valued Member",
           planName:
-            subscription.planVersion?.name ||
             subscription.plan?.name ||
             "AgeWellRI Plan",
           serviceEndDate: now,
@@ -2790,7 +2670,7 @@ export async function adminCancelSubscription(
     // Dispatch In-App Notifications
     try {
       const clientName = `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() || "Client";
-      const planName = subscription.planVersion?.name || subscription.plan?.name || "AgeWellRI Plan";
+      const planName = subscription.plan?.name || "AgeWellRI Plan";
 
       await notifyClientAndFamily(
         subscription.clientId,
@@ -2869,7 +2749,6 @@ export async function adminCancelSubscription(
             `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() ||
             "Valued Member",
           planName:
-            subscription.planVersion?.name ||
             subscription.plan?.name ||
             "AgeWellRI Plan",
           serviceEndDate: effectiveDate,
@@ -2885,7 +2764,7 @@ export async function adminCancelSubscription(
     // Dispatch In-App Notifications
     try {
       const clientName = `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() || "Client";
-      const planName = subscription.planVersion?.name || subscription.plan?.name || "AgeWellRI Plan";
+      const planName = subscription.plan?.name || "AgeWellRI Plan";
 
       await notifyClientAndFamily(
         subscription.clientId,
@@ -2934,7 +2813,6 @@ export async function adminReactivateSubscription(
     include: {
       client: { include: { user: true } },
       plan: true,
-      planVersion: true,
     },
   });
 
@@ -3006,14 +2884,12 @@ export async function adminReactivateSubscription(
           `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() ||
           "Valued Member",
         planName:
-          subscription.planVersion?.name ||
           subscription.plan?.name ||
           "AgeWellRI Plan",
         nextBillingDate:
           subscription.nextRenewalDate || subscription.currentPeriodEnd,
         recurringAmount:
           subscription.contractedPrice ??
-          subscription.planVersion?.price ??
           subscription.plan?.price ??
           null,
       });
@@ -3028,7 +2904,7 @@ export async function adminReactivateSubscription(
   // Dispatch In-App Notifications
   try {
     const clientName = `${clientUser?.firstName || ""} ${clientUser?.lastName || ""}`.trim() || "Client";
-    const planName = subscription.planVersion?.name || subscription.plan?.name || "AgeWellRI Plan";
+    const planName = subscription.plan?.name || "AgeWellRI Plan";
     const nextBillingDate = subscription.nextRenewalDate || subscription.currentPeriodEnd;
 
     await notifyClientAndFamily(

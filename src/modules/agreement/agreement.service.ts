@@ -208,13 +208,12 @@ export async function submitServiceAgreement(
       ).trim()
     : (input.clientPrintedName || input.clientFullName).trim();
 
-  // 1. Resolve Dynamic Plan & PlanVersion
+  // 1. Resolve Dynamic Plan
   let targetPlan: any = null;
-  let targetVersion: any = null;
 
   if (input.planId) {
     try {
-      targetPlan = await ((prisma as any).servicePlan.findFirst as any)({
+      targetPlan = await prisma.servicePlan.findFirst({
         where: {
           OR: [
             { id: input.planId },
@@ -223,54 +222,25 @@ export async function submitServiceAgreement(
             { name: { equals: input.selectedPlan || "", mode: "insensitive" } },
           ],
         },
-        include: {
-          versions: {
-            where: { status: "ACTIVE" },
-            orderBy: { versionNumber: "desc" },
-            take: 1,
-            include: { planServices: { include: { serviceType: true } } },
-          },
-        },
       });
-      targetVersion = targetPlan?.versions?.[0];
     } catch {
       targetPlan = null;
     }
   }
 
-  if (!targetPlan && input.planVersionId) {
-    targetVersion = await ((prisma as any).planVersion.findUnique as any)({
-      where: { id: input.planVersionId },
-      include: {
-        plan: true,
-        planServices: { include: { serviceType: true } },
-      },
-    });
-    targetPlan = targetVersion?.plan;
-  }
-
   if (!targetPlan && input.selectedPlan) {
-    targetPlan = await ((prisma as any).servicePlan.findFirst as any)({
+    targetPlan = await prisma.servicePlan.findFirst({
       where: {
         OR: [
           { code: input.selectedPlan.toUpperCase() },
           { name: { equals: input.selectedPlan, mode: "insensitive" } },
         ],
       },
-      include: {
-        versions: {
-          where: { status: "ACTIVE" },
-          orderBy: { versionNumber: "desc" },
-          take: 1,
-          include: { planServices: { include: { serviceType: true } } },
-        },
-      },
     });
-    targetVersion = targetPlan?.versions?.[0];
   }
 
-  const basePrice = targetVersion?.price ?? targetPlan?.price ?? 495;
-  const finalPrice = input.hasCleaningAddon ? basePrice + 50 : basePrice;
+  const basePrice = targetPlan?.price ?? 995;
+  const finalPrice = input.hasCleaningAddon ? basePrice + 60 : basePrice;
 
   // 2. Server-side 3-Business-Day Cancellation Deadline Calculation
   const deadlineResult = CancellationDeadlineService.calculateDeadline(
@@ -456,21 +426,14 @@ export async function submitServiceAgreement(
   // 5. Build Immutable Plan Snapshot
   const planSnapshot = {
     planId: targetPlan?.id,
-    planVersionId: targetVersion?.id,
-    planName: targetVersion?.name || targetPlan?.name || input.selectedPlan,
+    planName: targetPlan?.name || input.selectedPlan,
     planCode: targetPlan?.code || input.selectedPlan,
     basePrice,
     addonPrice: input.hasCleaningAddon ? 60 : 0,
     totalPrice: finalPrice,
-    billingInterval:
-      targetVersion?.billingInterval ||
-      targetPlan?.billingInterval ||
-      "Monthly",
-    features: targetVersion?.features || [],
-    services: (targetVersion?.planServices || []).map((ps: any) => ({
-      serviceName: ps.serviceType?.name,
-      allocatedVisits: ps.allocatedVisits,
-    })),
+    totalVisits: targetPlan?.totalVisits || 2,
+    billingInterval: "MONTHLY",
+    features: targetPlan?.features || [],
   };
 
   // 6. Create Immutable ServiceAgreement Record
@@ -478,7 +441,6 @@ export async function submitServiceAgreement(
     data: {
       clientId,
       planId: targetPlan?.id || null,
-      planVersionId: targetVersion?.id || null,
       agreementVersionId,
       templateVersion,
       state,
@@ -594,12 +556,6 @@ export async function submitServiceAgreement(
   ).join(", ");
 
   try {
-    const servicesList = (targetVersion?.planServices || []).map((ps: any) => ({
-      serviceName: ps.serviceType?.name || "Care Service",
-      allocatedVisits: ps.allocatedVisits,
-      unit: ps.unit || "visits",
-    }));
-
     await sendAgreementExecutedEmail({
       to: recipientEmails || user.email,
       clientName:
@@ -618,17 +574,12 @@ export async function submitServiceAgreement(
       signedDate: new Date(),
       cancellationDeadline: deadlineResult.deadlineDate,
       cancellationDeadlineRule: deadlineResult.ruleExplanation,
-      selectedPlan:
-        targetVersion?.name || targetPlan?.name || input.selectedPlan,
-      planName:
-        targetVersion?.name ||
-        targetPlan?.name ||
-        input.selectedPlan ||
-        "AgeWellRI Membership",
+      selectedPlan: targetPlan?.name || input.selectedPlan,
+      planName: targetPlan?.name || input.selectedPlan || "AgeWellRI Membership",
       planCode: targetPlan?.code || input.selectedPlan,
-      planDescription: targetVersion?.description || targetPlan?.description,
-      features: targetVersion?.features || targetPlan?.features || [],
-      services: servicesList,
+      planDescription: targetPlan?.shortDescription || targetPlan?.description || "",
+      features: targetPlan?.features || [],
+      services: [],
       hasCleaningAddon: input.hasCleaningAddon,
       amount: finalPrice,
       currency: "USD",
@@ -657,7 +608,7 @@ export async function submitServiceAgreement(
         year: "numeric",
       });
 
-      const planDisplay = targetVersion?.name || targetPlan?.name || input.selectedPlan || "AgeWellRI Membership";
+      const planDisplay = targetPlan?.name || input.selectedPlan || "AgeWellRI Membership";
       const priceDisplay = `$${finalPrice}/month`;
 
       const notificationMessage = `Your service agreement is complete and your subscription is active.\n• Your plan: ${planDisplay} — ${priceDisplay}\n• Service begins: ${commencementDateFormatted}\n• First billing: ${commencementDateFormatted} — you won't be charged today\n• A copy of your signed agreement has been emailed to you for your records.\nWe'll be in touch shortly to schedule your first visit. Questions? Call us anytime at (401) 212-3002.`;

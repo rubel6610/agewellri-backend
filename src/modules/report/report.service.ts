@@ -196,7 +196,7 @@ export async function submitAssessment(
     where: { id: appointmentId },
     include: {
       client: { include: { user: true } },
-      serviceType: true,
+      plan: true,
       technician: true,
       visit: {
         include: {
@@ -331,7 +331,7 @@ export async function submitAssessment(
       where: { visitId: visit.id, isArchived: false },
     });
 
-    const reportTitle = `${appointment.serviceType?.name || "Home Safety"} — Age Safe® Assessment`;
+    const reportTitle = `${appointment.serviceName || appointment.plan?.name || "Home Safety"} — Age Safe® Assessment`;
 
     if (!report) {
       report = await tx.report.create({
@@ -413,7 +413,7 @@ export async function uploadVisitReport(
     where: { id: appointmentId },
     include: {
       client: { include: { user: true } },
-      serviceType: true,
+      plan: true,
       technician: true,
       visit: {
         include: {
@@ -479,8 +479,8 @@ export async function uploadVisitReport(
     });
   }
 
-  // 4. Default report title if none specified
-  const serviceName = appointment.serviceType?.name || "Home Safety";
+  // 3. Determine Report Title and Service Details
+  const serviceName = appointment.serviceName || appointment.plan?.name || "Home Safety";
   const defaultTitle = title?.trim() || `${serviceName} Visit Report`;
   const storageFilename = file.filename;
   const relativeFileUrl = `/uploads/reports/${storageFilename}`;
@@ -532,7 +532,7 @@ export async function uploadVisitReport(
         client: { include: { user: true } },
         visit: {
           include: {
-            appointment: { include: { serviceType: true } },
+            appointment: { include: { plan: true } },
             technician: true,
           },
         },
@@ -555,7 +555,7 @@ export async function uploadVisitReport(
         client: { include: { user: true } },
         visit: {
           include: {
-            appointment: { include: { serviceType: true } },
+            appointment: { include: { plan: true } },
             technician: true,
           },
         },
@@ -804,7 +804,7 @@ function formatReportDetail(report: any, allSpecialists: any[] = []) {
     clientEmail: user?.email || client?.primaryContactEmail || "",
     clientPhone: user?.phone || client?.primaryContactPhone || "",
     clientAddress: address,
-    serviceType: appt?.serviceType?.name || "Home Safety Oversight",
+    serviceType: appt?.serviceName || appt?.plan?.name || "Home Safety Oversight",
     visitDate: visit?.completedAt || appt?.startAt || report.createdAt,
     formattedVisitDate: (
       visit?.completedAt ||
@@ -816,7 +816,7 @@ function formatReportDetail(report: any, allSpecialists: any[] = []) {
       day: "numeric",
       year: "numeric",
     }),
-    title: report.title || `${appt?.serviceType?.name || "Visit"} Report`,
+    title: report.title || `${appt?.serviceName || appt?.plan?.name || "Visit"} Report`,
     reportType: report.reportType,
     status:
       report.status === "GENERATED" || report.status === "UPLOADED"
@@ -861,7 +861,7 @@ export async function getReportByAppointmentId(
     where: { id: appointmentId },
     include: {
       client: { include: { user: true } },
-      serviceType: true,
+      plan: true,
       visit: {
         include: {
           technician: true,
@@ -914,7 +914,7 @@ export async function getReportByAppointmentId(
     visit,
     reportType: ReportType.HOME_SAFETY_SCORE,
     status: ReportStatus.GENERATED,
-    title: `${appt.serviceType?.name || "Home Safety"} Assessment Report`,
+    title: `${appt.serviceName || appt.plan?.name || "Home Safety"} Assessment Report`,
     score: visit.assessment?.score ?? 45,
     summary:
       visit.assessment?.summary || "Comprehensive home safety evaluation.",
@@ -972,7 +972,7 @@ async function hydrateReports(rawReports: any[]) {
     apptIds.length > 0
       ? await (prisma.appointment.findMany as any)({
           where: { id: { in: apptIds } },
-          include: { serviceType: true, technician: true },
+          include: { plan: true, technician: true },
         })
       : [];
 

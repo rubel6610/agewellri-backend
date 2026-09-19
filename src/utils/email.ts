@@ -1084,7 +1084,7 @@ export async function sendWelcomeInvitationEmail(
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Care Coordination"),
+        from: getDefaultFromAddress("AgeWellRI LLC"),
         to,
         subject,
         html: htmlContent,
@@ -1366,13 +1366,7 @@ export async function sendAgreementExecutedEmail(
       </div>
       ${planDescription ? `<div style="font-size: 13px; color: #334155; margin-bottom: 8px; font-style: italic;">${planDescription}</div>` : ""}
       ${servicesListHtml}
-      ${
-        hasCleaningAddon
-          ? `<div style="margin-top: 8px; font-size: 13px; color: #166534; font-weight: 700; background: #F0FDF4; padding: 6px 10px; border-radius: 6px;">
-              ✨ Home Cleaning Add-on: Included (+6 Additional Visits)
-             </div>`
-          : ""
-      }
+     
       ${featuresListHtml}
     </div>
 
