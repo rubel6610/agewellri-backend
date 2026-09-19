@@ -1,12 +1,11 @@
 import prisma from "../../lib/prisma";
-import { ServiceTypeCategory } from "@prisma/client";
 
 export interface VisitEntitlementItem {
   id: string;
-  serviceTypeId: string;
+  serviceTypeId?: string;
   serviceName: string;
   serviceCode: string | null;
-  category: ServiceTypeCategory | string;
+  category?: string;
   durationMinutes: number;
   allocated: number;
   scheduled: number;
@@ -39,30 +38,19 @@ export interface ClientVisitEntitlementsResponse {
 }
 
 /**
- * Idempotently provisions VisitAllocations for a given SubscriptionPeriod
- * based on the plan version's / plan's configured PlanServices.
+ * Provisions VisitAllocations for a given SubscriptionPeriod based on the client's ServicePlan.
  */
 export async function ensureVisitAllocationsForPeriod(
   subscriptionPeriodId: string,
-  planVersionId?: string | null,
   planId?: string | null,
-  hasCleaningAddon: boolean = false
+  _hasCleaningAddon: boolean = false
 ): Promise<void> {
-  const period = await (prisma.subscriptionPeriod.findUnique as any)({
+  const period = await prisma.subscriptionPeriod.findUnique({
     where: { id: subscriptionPeriodId },
     include: {
       subscription: {
         include: {
-          plan: {
-            include: {
-              planServices: true,
-            },
-          },
-          planVersion: {
-            include: {
-              planServices: true,
-            },
-          },
+          plan: true,
         },
       },
     },
@@ -73,116 +61,37 @@ export async function ensureVisitAllocationsForPeriod(
   }
 
   const sub = period.subscription;
-  const targetVersion =
-    (planVersionId
-      ? await (prisma.planVersion.findUnique as any)({
-          where: { id: planVersionId },
-          include: { planServices: true },
-        })
-      : null) || sub?.planVersion;
-
   const targetPlan =
     (planId
-      ? await (prisma.servicePlan.findUnique as any)({
+      ? await prisma.servicePlan.findUnique({
           where: { id: planId },
-          include: { planServices: true },
         })
       : null) || sub?.plan;
 
-  // 1. Gather services from PlanVersion or fallback to ServicePlan
-  let planServices: any[] = targetVersion?.planServices || targetPlan?.planServices || [];
+  const totalVisits = targetPlan?.totalVisits || 2;
+  const planName = targetPlan?.name || "Safety Oversight & Upkeep Visit";
 
-  // If no specific PlanServices are attached to version/plan, find from DB by planId
-  if (planServices.length === 0 && targetPlan?.id) {
-    planServices = await (prisma.planService.findMany as any)({
-      where: { planId: targetPlan.id },
+  const existingAllocation = await prisma.visitAllocation.findFirst({
+    where: { subscriptionPeriodId },
+  });
+
+  if (!existingAllocation) {
+    await prisma.visitAllocation.create({
+      data: {
+        subscriptionPeriodId,
+        serviceName: planName,
+        allocatedCount: totalVisits,
+        usedCount: 0,
+      },
     });
-  }
-
-  // 2. Iterate through plan services and upsert allocations
-  if (planServices.length > 0) {
-    for (const ps of planServices) {
-      if (ps.serviceTypeId && ps.allocatedVisits > 0) {
-        await (prisma.visitAllocation.upsert as any)({
-          where: {
-            subscriptionPeriodId_serviceTypeId: {
-              subscriptionPeriodId,
-              serviceTypeId: ps.serviceTypeId,
-            },
-          },
-          create: {
-            subscriptionPeriodId,
-            serviceTypeId: ps.serviceTypeId,
-            allocatedCount: ps.allocatedVisits,
-            usedCount: 0,
-          },
-          update: {
-            // Keep existing used count, only update allocated count if refreshed
-            allocatedCount: ps.allocatedVisits,
-          },
-        });
-      }
-    }
   } else {
-    // Fallback: Dynamically link active Safety Oversight service from Catalog
-    const safetyService = await prisma.serviceType.findFirst({
-      where: {
-        OR: [
-          { category: ServiceTypeCategory.SAFETY_OVERSIGHT },
-          { name: { contains: "Safety", mode: "insensitive" } },
-        ],
-        isActive: true,
+    await prisma.visitAllocation.update({
+      where: { id: existingAllocation.id },
+      data: {
+        serviceName: planName,
+        allocatedCount: totalVisits,
       },
     });
-
-    if (safetyService) {
-      await (prisma.visitAllocation.upsert as any)({
-        where: {
-          subscriptionPeriodId_serviceTypeId: {
-            subscriptionPeriodId,
-            serviceTypeId: safetyService.id,
-          },
-        },
-        create: {
-          subscriptionPeriodId,
-          serviceTypeId: safetyService.id,
-          allocatedCount: 6,
-          usedCount: 0,
-        },
-        update: {},
-      });
-    }
-  }
-
-  // 3. Handle Cleaning Addon dynamically if enabled and not already allocated
-  if (hasCleaningAddon) {
-    const cleaningService = await prisma.serviceType.findFirst({
-      where: {
-        OR: [
-          { category: ServiceTypeCategory.CLEANING },
-          { name: { contains: "Cleaning", mode: "insensitive" } },
-        ],
-        isActive: true,
-      },
-    });
-
-    if (cleaningService) {
-      await (prisma.visitAllocation.upsert as any)({
-        where: {
-          subscriptionPeriodId_serviceTypeId: {
-            subscriptionPeriodId,
-            serviceTypeId: cleaningService.id,
-          },
-        },
-        create: {
-          subscriptionPeriodId,
-          serviceTypeId: cleaningService.id,
-          allocatedCount: 6,
-          usedCount: 0,
-        },
-        update: {},
-      });
-    }
   }
 }
 
@@ -191,46 +100,38 @@ export async function ensureVisitAllocationsForPeriod(
  */
 export function formatPeriodEntitlements(
   period: any,
-  appointments: any[] = [],
-  allServiceTypes: any[] = []
+  appointments: any[] = []
 ): VisitEntitlementItem[] {
   if (!period || !period.allocations || period.allocations.length === 0) {
     return [];
   }
 
-  const stMap = new Map<string, any>(
-    allServiceTypes.map((st: any) => [st.id, st])
-  );
-
   const periodAppts = (appointments || []).filter((a: any) => {
     if (a.subscriptionPeriodId) {
       return a.subscriptionPeriodId === period.id;
     }
-    // Date fallback if appointment start falls inside period window
     if (a.startAt && period.startDate && period.endDate) {
       const start = new Date(a.startAt).getTime();
-      return start >= new Date(period.startDate).getTime() && start <= new Date(period.endDate).getTime();
+      return (
+        start >= new Date(period.startDate).getTime() &&
+        start <= new Date(period.endDate).getTime()
+      );
     }
     return false;
   });
 
   return period.allocations.map((alloc: any) => {
-    const st = alloc.serviceType || stMap.get(alloc.serviceTypeId) || {};
-    const serviceTypeId = alloc.serviceTypeId;
-
-    const scheduledCount = periodAppts.filter(
-      (a: any) =>
-        a.serviceTypeId === serviceTypeId &&
-        ["SCHEDULED", "CONFIRMED", "RESCHEDULED"].includes(a.status?.toUpperCase())
+    const scheduledCount = periodAppts.filter((a: any) =>
+      ["SCHEDULED", "CONFIRMED", "RESCHEDULED"].includes(
+        a.status?.toUpperCase()
+      )
     ).length;
 
     const completedCount =
       alloc.usedCount > 0
         ? alloc.usedCount
         : periodAppts.filter(
-            (a: any) =>
-              a.serviceTypeId === serviceTypeId &&
-              a.status?.toUpperCase() === "COMPLETED"
+            (a: any) => a.status?.toUpperCase() === "COMPLETED"
           ).length;
 
     const allocated = alloc.allocatedCount || 0;
@@ -245,11 +146,11 @@ export function formatPeriodEntitlements(
 
     return {
       id: alloc.id,
-      serviceTypeId: alloc.serviceTypeId,
-      serviceName: st.name || "Home Care Visit",
-      serviceCode: st.code || null,
-      category: st.category || "OTHER",
-      durationMinutes: st.durationMinutes || 60,
+      serviceTypeId: alloc.id,
+      serviceName: alloc.serviceName || "Safety Oversight & Upkeep Visit",
+      serviceCode: "PLAN_VISIT",
+      category: "SAFETY_OVERSIGHT",
+      durationMinutes: 60,
       allocated,
       scheduled: scheduledCount,
       completed: completedCount,
@@ -272,12 +173,13 @@ export async function getClientVisitEntitlements(
       client: {
         include: {
           subscriptions: {
-            where: { status: { in: ["ACTIVE", "PENDING", "CANCELLATION_REQUESTED"] } },
+            where: {
+              status: { in: ["ACTIVE", "PENDING", "CANCELLATION_REQUESTED"] },
+            },
             orderBy: { createdAt: "desc" },
             take: 1,
             include: {
               plan: true,
-              planVersion: true,
               periods: {
                 orderBy: { startDate: "desc" },
                 take: 1,
@@ -303,8 +205,10 @@ export async function getClientVisitEntitlements(
   if (activeSub && !currentPeriod) {
     try {
       const now = new Date();
-      const periodEnd = activeSub.currentPeriodEnd || new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
-      const newPeriod = await (prisma.subscriptionPeriod.create as any)({
+      const periodEnd =
+        activeSub.currentPeriodEnd ||
+        new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      const newPeriod = await prisma.subscriptionPeriod.create({
         data: {
           subscriptionId: activeSub.id,
           periodNumber: 1,
@@ -318,12 +222,11 @@ export async function getClientVisitEntitlements(
 
       await ensureVisitAllocationsForPeriod(
         newPeriod.id,
-        activeSub?.planVersionId,
         activeSub?.planId,
         Boolean(client?.hasCleaningAddon)
       );
 
-      const refreshedPeriod = await (prisma.subscriptionPeriod.findUnique as any)({
+      const refreshedPeriod = await prisma.subscriptionPeriod.findUnique({
         where: { id: newPeriod.id },
         include: { allocations: true },
       });
@@ -335,16 +238,17 @@ export async function getClientVisitEntitlements(
   }
 
   // If period exists but has no allocations yet, ensure they are provisioned
-  if (currentPeriod && (!currentPeriod.allocations || currentPeriod.allocations.length === 0)) {
+  if (
+    currentPeriod &&
+    (!currentPeriod.allocations || currentPeriod.allocations.length === 0)
+  ) {
     await ensureVisitAllocationsForPeriod(
       currentPeriod.id,
-      activeSub?.planVersionId,
       activeSub?.planId,
       Boolean(client?.hasCleaningAddon)
     );
 
-    // Re-fetch period allocations
-    const refreshedPeriod = await (prisma.subscriptionPeriod.findUnique as any)({
+    const refreshedPeriod = await prisma.subscriptionPeriod.findUnique({
       where: { id: currentPeriod.id },
       include: {
         allocations: true,
@@ -356,55 +260,52 @@ export async function getClientVisitEntitlements(
     }
   }
 
-  const allServiceTypes = await prisma.serviceType.findMany();
-  let entitlements = formatPeriodEntitlements(currentPeriod, client?.appointments || [], allServiceTypes);
+  let entitlements = formatPeriodEntitlements(
+    currentPeriod,
+    client?.appointments || []
+  );
 
-  // Fallback defaults if entitlements array is empty (e.g. preview state)
+  // Fallback defaults if entitlements array is empty
   if (entitlements.length === 0) {
+    const defaultVisits = activeSub?.plan?.totalVisits || 2;
     entitlements = [
       {
-        id: "default-safety-quota",
-        serviceTypeId: "safety-oversight",
-        serviceName: "Safety Oversight Visit",
-        serviceCode: "SAFETY_OVERSIGHT",
+        id: "default-plan-quota",
+        serviceTypeId: "default-plan-quota",
+        serviceName: activeSub?.plan?.name || "Safety Oversight & Upkeep Visit",
+        serviceCode: activeSub?.plan?.code || "PLAN_VISIT",
         category: "SAFETY_OVERSIGHT",
         durationMinutes: 60,
-        allocated: 6,
+        allocated: defaultVisits,
         scheduled: 0,
         completed: 0,
-        remaining: 6,
+        remaining: defaultVisits,
         unit: "visits",
         status: "ACTIVE",
       },
-      ...(client?.hasCleaningAddon
-        ? [
-            {
-              id: "default-cleaning-quota",
-              serviceTypeId: "cleaning-support",
-              serviceName: "Home Cleaning Visit",
-              serviceCode: "CLEANING_SUPPORT",
-              category: "CLEANING_SUPPORT",
-              durationMinutes: 90,
-              allocated: 6,
-              scheduled: 0,
-              completed: 0,
-              remaining: 6,
-              unit: "visits",
-              status: "ACTIVE" as const,
-            },
-          ]
-        : []),
     ];
   }
 
-  const totalAllocated = entitlements.reduce((sum, item) => sum + item.allocated, 0);
-  const totalScheduled = entitlements.reduce((sum, item) => sum + item.scheduled, 0);
-  const totalCompleted = entitlements.reduce((sum, item) => sum + item.completed, 0);
-  const totalRemaining = entitlements.reduce((sum, item) => sum + item.remaining, 0);
+  const totalAllocated = entitlements.reduce(
+    (sum, item) => sum + item.allocated,
+    0
+  );
+  const totalScheduled = entitlements.reduce(
+    (sum, item) => sum + item.scheduled,
+    0
+  );
+  const totalCompleted = entitlements.reduce(
+    (sum, item) => sum + item.completed,
+    0
+  );
+  const totalRemaining = entitlements.reduce(
+    (sum, item) => sum + item.remaining,
+    0
+  );
 
   const rawPlanName =
-    activeSub?.planVersion?.name || activeSub?.plan?.name || (client as any)?.selectedPlan || "Service Plan";
-  
+    activeSub?.plan?.name || (client as any)?.selectedPlan || "Service Plan";
+
   let formattedPlanName = rawPlanName;
   if (formattedPlanName.includes("_") || formattedPlanName.includes("-")) {
     formattedPlanName = formattedPlanName
@@ -445,7 +346,7 @@ export async function getClientVisitEntitlements(
 export async function getAdminClientVisitEntitlements(
   clientId: string
 ): Promise<ClientVisitEntitlementsResponse> {
-  const client = await (prisma.client.findUnique as any)({
+  const client = await prisma.client.findUnique({
     where: { id: clientId },
     include: {
       subscriptions: {
@@ -453,7 +354,6 @@ export async function getAdminClientVisitEntitlements(
         take: 1,
         include: {
           plan: true,
-          planVersion: true,
           periods: {
             orderBy: { startDate: "desc" },
             take: 1,
@@ -476,15 +376,17 @@ export async function getAdminClientVisitEntitlements(
   const activeSub = client.subscriptions?.[0] || null;
   const currentPeriod = activeSub?.periods?.[0] || null;
 
-  if (currentPeriod && (!currentPeriod.allocations || currentPeriod.allocations.length === 0)) {
+  if (
+    currentPeriod &&
+    (!currentPeriod.allocations || currentPeriod.allocations.length === 0)
+  ) {
     await ensureVisitAllocationsForPeriod(
       currentPeriod.id,
-      activeSub?.planVersionId,
       activeSub?.planId,
       client.hasCleaningAddon
     );
 
-    const refreshedPeriod = await (prisma.subscriptionPeriod.findUnique as any)({
+    const refreshedPeriod = await prisma.subscriptionPeriod.findUnique({
       where: { id: currentPeriod.id },
       include: {
         allocations: true,
@@ -496,16 +398,30 @@ export async function getAdminClientVisitEntitlements(
     }
   }
 
-  const allServiceTypes = await prisma.serviceType.findMany();
-  const entitlements = formatPeriodEntitlements(currentPeriod, client.appointments || [], allServiceTypes);
+  const entitlements = formatPeriodEntitlements(
+    currentPeriod,
+    client.appointments || []
+  );
 
-  const totalAllocated = entitlements.reduce((sum, item) => sum + item.allocated, 0);
-  const totalScheduled = entitlements.reduce((sum, item) => sum + item.scheduled, 0);
-  const totalCompleted = entitlements.reduce((sum, item) => sum + item.completed, 0);
-  const totalRemaining = entitlements.reduce((sum, item) => sum + item.remaining, 0);
+  const totalAllocated = entitlements.reduce(
+    (sum, item) => sum + item.allocated,
+    0
+  );
+  const totalScheduled = entitlements.reduce(
+    (sum, item) => sum + item.scheduled,
+    0
+  );
+  const totalCompleted = entitlements.reduce(
+    (sum, item) => sum + item.completed,
+    0
+  );
+  const totalRemaining = entitlements.reduce(
+    (sum, item) => sum + item.remaining,
+    0
+  );
 
   const planName =
-    activeSub?.planVersion?.name || activeSub?.plan?.name || (client as any)?.selectedPlan || "Service Plan";
+    activeSub?.plan?.name || (client as any)?.selectedPlan || "Service Plan";
   const planCode = activeSub?.plan?.code || (client as any)?.selectedPlan || "";
 
   return {

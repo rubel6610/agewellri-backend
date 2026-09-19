@@ -145,54 +145,12 @@ export function parseDateAndTimeSlot(
 }
 
 /**
- * Resolves a ServiceType from ID, name, or category string
- */
-async function resolveServiceType(
-  serviceTypeId?: string,
-  serviceName?: string,
-) {
-  if (serviceTypeId && isValidObjectId(serviceTypeId)) {
-    const srv = await prisma.serviceType.findUnique({
-      where: { id: serviceTypeId },
-    });
-    if (srv) return srv;
-  }
-
-  if (serviceName) {
-    const isCleaning =
-      serviceName.toLowerCase().includes("cleaning") ||
-      serviceName.toUpperCase() === "CLEANING";
-    const isSafety =
-      serviceName.toLowerCase().includes("safety") ||
-      serviceName.toUpperCase() === "SAFETY_OVERSIGHT";
-
-    const srv = await prisma.serviceType.findFirst({
-      where: {
-        OR: [
-          { name: { contains: serviceName, mode: "insensitive" } },
-          isCleaning ? { category: ServiceTypeCategory.CLEANING } : {},
-          isSafety ? { category: ServiceTypeCategory.SAFETY_OVERSIGHT } : {},
-        ],
-        isActive: true,
-      },
-    });
-    if (srv) return srv;
-  }
-
-  // Fallback to active safety oversight service
-  return await prisma.serviceType.findFirst({
-    where: { isActive: true },
-    orderBy: { createdAt: "asc" },
-  });
-}
-
-/**
  * Resolves or assigns a Specialist/Technician safely using getAllSpecialists()
  */
 async function resolveTechnician(
   technicianId?: string,
   technicianName?: string,
-  serviceCategory?: string,
+  _serviceCategory?: string,
 ) {
   const allSpecialists = await getAllSpecialists();
 
@@ -208,24 +166,6 @@ async function resolveTechnician(
     if (found) return found;
   }
 
-  // Auto-assign active specialist matching specialty
-  const matched = allSpecialists.find((s: any) => {
-    if (serviceCategory === "CLEANING") {
-      return s.specialties?.some(
-        (sp: string) =>
-          sp.toLowerCase().includes("cleaning") ||
-          sp.toLowerCase().includes("support"),
-      );
-    }
-    return s.specialties?.some(
-      (sp: string) =>
-        sp.toLowerCase().includes("safety") ||
-        sp.toLowerCase().includes("fall"),
-    );
-  });
-
-  if (matched) return matched;
-
   return allSpecialists[0] || null;
 }
 
@@ -236,7 +176,6 @@ export function formatAppointmentRecord(
   appt: any,
   specialistsList: any[] = [],
 ) {
-  const st = appt.serviceType || {};
   let tech = appt.technician;
   if (!tech && appt.technicianId && specialistsList.length > 0) {
     tech = specialistsList.find((s: any) => s.id === appt.technicianId);
@@ -284,6 +223,8 @@ export function formatAppointmentRecord(
     rawStatus === "REQUESTED" ||
     (!appt.technicianId && rawStatus !== "CANCELLED");
 
+  const serviceName = appt.serviceName || appt.plan?.name || "Care Visit";
+
   return {
     id: appt.id,
     appointmentId: appt.id,
@@ -294,24 +235,20 @@ export function formatAppointmentRecord(
     clientEmail: user.email || client.primaryContactEmail || "",
     clientPhone: user.phone || client.primaryContactPhone || "",
     clientAddress: `${client.address || "100 Main St"}, ${client.city || "Providence"}, ${client.state || "RI"} ${client.postalCode || "02903"}`,
-    serviceTypeId: appt.serviceTypeId,
-    serviceType:
-      st.name ||
-      (st.category === "CLEANING"
-        ? "Cleaning Visit"
-        : "Safety Oversight Visit"),
-    serviceCategory: st.category || "OTHER",
-    durationMinutes: st.durationMinutes || 60,
+    serviceTypeId: appt.planId || appt.id,
+    serviceType: serviceName,
+    serviceName: serviceName,
+    planId: appt.planId || null,
+    planName: appt.plan?.name || null,
+    serviceCategory: "HOME_CARE",
+    durationMinutes: 60,
     subscriptionPeriodId: appt.subscriptionPeriodId,
     technicianId: appt.technicianId || null,
     technicianName: appt.technicianId
       ? tech.name || "Assigned Specialist"
       : "Unassigned Specialist",
     technicianTitle: appt.technicianId
-      ? tech.title ||
-        (st.category === "CLEANING"
-          ? "Senior Home Safety Specialist  "
-          : "Certified Home Safety Specialist")
+      ? tech.title || "Certified Home Care Specialist"
       : "Pending Admin Assignment",
     technicianPhone: tech.phone || null,
     technicianColor: tech.color || "#294B68",
@@ -389,7 +326,6 @@ async function validateAndExecuteContractualScheduling(
     },
     orderBy: { createdAt: "desc" },
     include: {
-      planVersion: true,
       plan: true,
     },
   });
@@ -418,7 +354,7 @@ async function validateAndExecuteContractualScheduling(
     );
   }
 
-  // 2. CONTRACTUAL INTEGRITY: Validate Active Subscription & Contracted PlanVersion
+  // 2. CONTRACTUAL INTEGRITY: Validate Active Subscription & Contracted ServicePlan
   const activeSubscription = await (prisma.subscription.findFirst as any)({
     where: {
       clientId: client.id,
@@ -433,16 +369,11 @@ async function validateAndExecuteContractualScheduling(
     orderBy: { createdAt: "desc" },
     include: {
       plan: true,
-      planVersion: {
-        include: { planServices: true },
-      },
       periods: {
         orderBy: { startDate: "desc" },
         take: 1,
         include: {
-          allocations: {
-            include: { serviceType: true },
-          },
+          allocations: true,
         },
       },
     },
@@ -498,27 +429,24 @@ async function validateAndExecuteContractualScheduling(
     }
   }
 
-  // 4. Resolve Selected Service Type
-  const serviceType = await resolveServiceType(
-    params.serviceTypeId,
-    params.serviceType,
-  );
-  if (!serviceType) {
-    throw new Error("Invalid or inactive service type selected.");
-  }
+  // 4. Resolve Plan & Service Name
+  const targetPlan = activeSubscription.plan || executedAgreement?.plan;
+  const serviceName =
+    params.serviceType ||
+    targetPlan?.name ||
+    "Home Care & Safety Visit";
 
-  // 5. Ensure Period Allocations from the Contracted PlanVersion / Agreement
+  // 5. Ensure Period Allocations
   if (!activePeriod.allocations || activePeriod.allocations.length === 0) {
     await ensureVisitAllocationsForPeriod(
       activePeriod.id,
-      activeSubscription.planVersionId || executedAgreement?.planVersionId,
       activeSubscription.planId || executedAgreement?.planId,
       client.hasCleaningAddon || executedAgreement?.hasCleaningAddon,
     );
 
     const refreshed = await (prisma.subscriptionPeriod.findUnique as any)({
       where: { id: activePeriod.id },
-      include: { allocations: { include: { serviceType: true } } },
+      include: { allocations: true },
     });
     if (refreshed) {
       activePeriod.allocations = refreshed.allocations;
@@ -526,27 +454,16 @@ async function validateAndExecuteContractualScheduling(
   }
 
   // 6. CONTRACTUAL INTEGRITY: Validate Visit Entitlement Inclusions & Quotas
-  const matchingAlloc = (activePeriod.allocations || []).find(
-    (a: any) =>
-      a.serviceTypeId === serviceType.id ||
-      a.serviceType?.category === serviceType.category,
-  );
-
-  if (!matchingAlloc) {
-    const contractedPlanName =
-      activeSubscription.planVersion?.name ||
-      activeSubscription.plan?.name ||
-      "contracted plan";
-    throw new Error(
-      `The selected service "${serviceType.name}" is not included in the client's ${contractedPlanName}.`,
-    );
-  }
+  const totalAllocated =
+    activePeriod.allocations?.reduce(
+      (sum: number, a: any) => sum + (a.allocatedCount || 0),
+      0,
+    ) || targetPlan?.totalVisits || 1;
 
   const existingAppts = await (prisma.appointment.findMany as any)({
     where: {
       clientId: client.id,
       subscriptionPeriodId: activePeriod.id,
-      serviceTypeId: matchingAlloc.serviceTypeId || serviceType.id,
       status: { not: AppointmentStatus.CANCELLED },
     },
   });
@@ -558,21 +475,17 @@ async function validateAndExecuteContractualScheduling(
       AppointmentStatus.RESCHEDULED,
     ].includes(a.status),
   ).length;
-  const completedCount =
-    matchingAlloc.usedCount > 0
-      ? matchingAlloc.usedCount
-      : existingAppts.filter(
-          (a: any) => a.status === AppointmentStatus.COMPLETED,
-        ).length;
-  const allocatedCount = matchingAlloc.allocatedCount || 0;
+  const completedCount = existingAppts.filter(
+    (a: any) => a.status === AppointmentStatus.COMPLETED,
+  ).length;
   const remainingCount = Math.max(
     0,
-    allocatedCount - (scheduledCount + completedCount),
+    totalAllocated - (scheduledCount + completedCount),
   );
 
   if (remainingCount <= 0) {
     throw new Error(
-      `You have 0 remaining visits available for ${serviceType.name} in the current MONTHLY cycle (${allocatedCount} allocated, all scheduled/used).`,
+      `You have 0 remaining visits available in your ${targetPlan?.name || "plan"} for the current monthly cycle (${totalAllocated} allocated, all scheduled/used).`,
     );
   }
 
@@ -608,7 +521,6 @@ async function validateAndExecuteContractualScheduling(
   const technician = await resolveTechnician(
     params.technicianId,
     params.technicianName,
-    serviceType.category,
   );
 
   const clientAddress = `${client.address || "100 Main St"}, ${client.city || "Providence"}, ${client.state || "RI"} ${client.postalCode || "02903"}`;
@@ -620,7 +532,6 @@ async function validateAndExecuteContractualScheduling(
       where: {
         clientId: client.id,
         subscriptionPeriodId: activePeriod.id,
-        serviceTypeId: matchingAlloc.serviceTypeId || serviceType.id,
         status: {
           in: [
             AppointmentStatus.SCHEDULED,
@@ -632,9 +543,9 @@ async function validateAndExecuteContractualScheduling(
       },
     });
 
-    if (currentActiveCount >= allocatedCount) {
+    if (currentActiveCount >= totalAllocated) {
       throw new Error(
-        `All visit entitlements for ${serviceType.name} have already been booked for this cycle.`,
+        `All visit entitlements for ${targetPlan?.name || "your plan"} have already been booked for this cycle.`,
       );
     }
 
@@ -684,7 +595,8 @@ async function validateAndExecuteContractualScheduling(
     const createdAppt = await tx.appointment.create({
       data: {
         clientId: client.id,
-        serviceTypeId: serviceType.id,
+        planId: activeSubscription.planId || executedAgreement?.planId || null,
+        serviceName,
         subscriptionPeriodId: activePeriod.id,
         technicianId: assignedTechId,
         startAt,
@@ -699,7 +611,6 @@ async function validateAndExecuteContractualScheduling(
         createdByUserId: actorUserId,
       },
       include: {
-        serviceType: true,
         client: { include: { user: true } },
         createdByUser: true,
       },
@@ -736,7 +647,7 @@ async function validateAndExecuteContractualScheduling(
       agreementId: executedAgreement?.id || null,
       subscriptionId: activeSubscription.id,
       subscriptionPeriodId: activePeriod.id,
-      serviceType: serviceType.name,
+      serviceType: serviceName,
       technicianName: isAdmin
         ? technician?.name
         : "Unassigned (Pending Admin Review)",
@@ -758,10 +669,10 @@ async function validateAndExecuteContractualScheduling(
       {
         type: "APPOINTMENT_CREATED",
         title: "Visit Scheduled",
-        message: `Your AgeWellRI visit (${serviceType.name}) has been scheduled for ${formattedDate} (${params.timeSlot}).`,
+        message: `Your AgeWellRI visit (${serviceName}) has been scheduled for ${formattedDate} (${params.timeSlot}).`,
         metadata: {
           appointmentId: appointment.id,
-          serviceName: serviceType.name,
+          serviceName,
           startAt: startAt.toISOString(),
           timeSlot: params.timeSlot,
         },
@@ -773,11 +684,11 @@ async function validateAndExecuteContractualScheduling(
     await notifyAdmins({
       type: "APPOINTMENT_CREATED",
       title: "New Visit Booked",
-      message: `${clientDisplayName} booked a ${serviceType.name} visit for ${formattedDate}.`,
+      message: `${clientDisplayName} booked a ${serviceName} visit for ${formattedDate}.`,
       metadata: {
         clientId: client.id,
         appointmentId: appointment.id,
-        serviceName: serviceType.name,
+        serviceName,
       },
     });
   } catch (notifErr: any) {
@@ -918,7 +829,6 @@ export async function getClientAppointments(userId: string) {
       },
       orderBy: { startAt: "desc" },
       include: {
-        serviceType: true,
         client: { include: { user: true } },
         createdByUser: true,
         visit: {
@@ -997,7 +907,6 @@ export async function getAdminAppointments(query: AdminAppointmentsQuery = {}) {
       take: query.limit || 50,
       skip: query.page && query.limit ? (query.page - 1) * query.limit : 0,
       include: {
-        serviceType: true,
         client: { include: { user: true } },
         createdByUser: true,
         visit: {
@@ -1030,7 +939,6 @@ export async function getAppointmentById(
   const appt = await (prisma.appointment.findUnique as any)({
     where: { id },
     include: {
-      serviceType: true,
       client: { include: { user: true } },
       createdByUser: true,
       visit: {
@@ -1110,7 +1018,6 @@ export async function rescheduleAppointment(
         : appt.notes,
     },
     include: {
-      serviceType: true,
       client: { include: { user: true } },
       createdByUser: true,
     },
@@ -1140,7 +1047,7 @@ export async function rescheduleAppointment(
         {
           type: "APPOINTMENT_RESCHEDULED",
           title: "Visit Rescheduled",
-          message: `Your AgeWellRI visit (${updated.serviceType?.name || "Visit"}) has been rescheduled to ${formattedDate}.`,
+          message: `Your AgeWellRI visit (${updated.serviceName || updated.plan?.name || "Visit"}) has been rescheduled to ${formattedDate}.`,
           metadata: {
             appointmentId,
             startAt: startAt.toISOString(),
@@ -1153,7 +1060,7 @@ export async function rescheduleAppointment(
       await notifyAdmins({
         type: "APPOINTMENT_RESCHEDULED",
         title: "Visit Rescheduled",
-        message: `${clientName}'s ${updated.serviceType?.name || "visit"} was rescheduled to ${formattedDate}.`,
+        message: `${clientName}'s ${updated.serviceName || updated.plan?.name || "visit"} was rescheduled to ${formattedDate}.`,
         metadata: {
           clientId: updated.client.id,
           appointmentId,
@@ -1207,7 +1114,6 @@ export async function cancelAppointment(
         : appt.notes,
     },
     include: {
-      serviceType: true,
       client: { include: { user: true } },
       createdByUser: true,
     },
@@ -1237,7 +1143,7 @@ export async function cancelAppointment(
         {
           type: "APPOINTMENT_CANCELLED",
           title: "Visit Cancelled",
-          message: `Your AgeWellRI visit (${updated.serviceType?.name || "Visit"}) has been cancelled.`,
+          message: `Your AgeWellRI visit (${updated.serviceName || updated.plan?.name || "Visit"}) has been cancelled.`,
           metadata: {
             appointmentId,
             reason,
@@ -1250,7 +1156,7 @@ export async function cancelAppointment(
       await notifyAdmins({
         type: "APPOINTMENT_CANCELLED",
         title: "Visit Cancelled",
-        message: `${clientName}'s ${updated.serviceType?.name || "visit"} was cancelled.`,
+        message: `${clientName}'s ${updated.serviceName || updated.plan?.name || "visit"} was cancelled.`,
         metadata: {
           clientId: updated.client.id,
           appointmentId,
@@ -1281,7 +1187,6 @@ export async function updateAppointmentStatus(
   const appt = await (prisma.appointment.findUnique as any)({
     where: { id: appointmentId },
     include: {
-      serviceType: true,
       client: true,
     },
   });
@@ -1299,7 +1204,6 @@ export async function updateAppointmentStatus(
         : appt.notes,
     },
     include: {
-      serviceType: true,
       client: { include: { user: true } },
       createdByUser: true,
       visit: {
@@ -1317,14 +1221,12 @@ export async function updateAppointmentStatus(
   // If marked COMPLETED, update visit allocation usedCount if subscriptionPeriod exists
   if (
     input.status === "COMPLETED" &&
-    appt.subscriptionPeriodId &&
-    appt.serviceTypeId
+    appt.subscriptionPeriodId
   ) {
     try {
       await (prisma.visitAllocation.updateMany as any)({
         where: {
           subscriptionPeriodId: appt.subscriptionPeriodId,
-          serviceTypeId: appt.serviceTypeId,
         },
         data: {
           usedCount: { increment: 1 },
@@ -1351,7 +1253,7 @@ export async function updateAppointmentStatus(
         {
           type: "VISIT_COMPLETED",
           title: "Visit Completed",
-          message: `Your AgeWellRI visit (${updated.serviceType?.name || "Visit"}) has been completed.`,
+          message: `Your AgeWellRI visit (${updated.serviceName || updated.plan?.name || "Visit"}) has been completed.`,
           metadata: {
             appointmentId,
           },
@@ -1390,7 +1292,6 @@ export async function acceptVisitRequest(
   const appt = await (prisma.appointment.findUnique as any)({
     where: { id: appointmentId },
     include: {
-      serviceType: true,
       client: { include: { user: true } },
     },
   });
@@ -1407,7 +1308,6 @@ export async function acceptVisitRequest(
   const technician = await resolveTechnician(
     input.technicianId,
     input.technicianName,
-    appt.serviceType?.category,
   );
 
   if (!technician) {
@@ -1440,7 +1340,6 @@ export async function acceptVisitRequest(
         : appt.notes,
     },
     include: {
-      serviceType: true,
       client: { include: { user: true } },
       createdByUser: true,
       visit: {
@@ -1502,7 +1401,7 @@ export async function acceptVisitRequest(
         {
           type: "SPECIALIST_ASSIGNED",
           title: "Specialist Assigned",
-          message: `Specialist ${technician.name} has been assigned to your AgeWellRI visit (${updated.serviceType?.name || "Visit"}).`,
+          message: `Specialist ${technician.name} has been assigned to your AgeWellRI visit (${updated.serviceName || updated.plan?.name || "Visit"}).`,
           metadata: {
             appointmentId,
             technicianId: technician.id,

@@ -61,7 +61,7 @@ export async function checkAndSendRenewalReminders() {
 
       const clientUser = sub.client.user;
       const clientName = clientUser ? `${clientUser.firstName || ""} ${clientUser.lastName || ""}`.trim() || "Valued Member" : "Valued Member";
-      const planName = (sub as any).planVersion?.name || sub.plan?.name || sub.client?.selectedPlan || "Service Plan";
+      const planName = sub.plan?.name || sub.client?.selectedPlan || "Service Plan";
       const contractedPrice = sub.contractedPrice ?? sub.plan?.price ?? 0;
 
       // Determine recipients: Primary client and designated authorized contact

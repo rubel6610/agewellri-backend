@@ -10,13 +10,63 @@ interface FormattedError {
 }
 
 /**
+ * Format any raw internal error string into clean, human-readable, polite text.
+ */
+export function formatToHumanReadable(raw: string): string {
+  if (!raw || typeof raw !== "string") {
+    return "An unexpected error occurred. Please try again.";
+  }
+
+  const trimmed = raw.trim();
+
+  // Detect Prisma validation / invocation / unknown field errors
+  if (
+    trimmed.includes("invocation:") ||
+    trimmed.includes("Invalid `prisma.") ||
+    trimmed.includes("Unknown field") ||
+    trimmed.includes("Unknown argument")
+  ) {
+    const unknownFieldMatch = trimmed.match(/Unknown field `?([a-zA-Z0-9_]+)`?/i);
+    if (unknownFieldMatch) {
+      return `Invalid request parameter or unrecognized field: "${unknownFieldMatch[1]}". Please verify your request data.`;
+    }
+    const unknownArgMatch = trimmed.match(/Unknown argument `?([a-zA-Z0-9_]+)`?/i);
+    if (unknownArgMatch) {
+      return `Unrecognized parameter: "${unknownArgMatch[1]}". Please check your request parameters.`;
+    }
+    const argumentMatch = trimmed.match(/Argument `?([a-zA-Z0-9_]+)`? is missing/i);
+    if (argumentMatch) {
+      return `Required field "${argumentMatch[1]}" is missing. Please provide all required information.`;
+    }
+    return "The submitted request contains invalid or unrecognized parameters. Please review your input and try again.";
+  }
+
+  // Detect MongoDB ObjectId conversion errors
+  if (
+    trimmed.includes("Argument `id` is missing") ||
+    trimmed.includes("Malformed ObjectId") ||
+    trimmed.includes("must be a single String of 12 bytes or a string of 24 hex characters")
+  ) {
+    return "Invalid resource identifier format. Please provide a valid ID.";
+  }
+
+  // Detect stack traces or node_modules paths
+  if (trimmed.includes("node_modules") || trimmed.includes("    at ") || trimmed.includes("Error:\n")) {
+    return "An unexpected server error occurred while processing your request. Please try again later.";
+  }
+
+  // Clean out any remaining raw backticks or technical prefixes
+  return trimmed.replace(/^Error:\s*/i, "").trim();
+}
+
+/**
  * Format Prisma known request errors into clean human-readable messages.
  */
 function handlePrismaKnownError(err: Prisma.PrismaClientKnownRequestError): FormattedError {
   switch (err.code) {
     case "P2002": {
       // Unique constraint violation
-      let targetField = "field";
+      let targetField = "value";
       if (err.meta?.target) {
         if (Array.isArray(err.meta.target)) {
           targetField = err.meta.target.join(", ");
@@ -32,7 +82,10 @@ function handlePrismaKnownError(err: Prisma.PrismaClientKnownRequestError): Form
       // Clean up common target names (e.g. User_email_key -> email)
       targetField = targetField
         .replace(/^[A-Za-z]+_([A-Za-z0-9]+)_key$/i, "$1")
-        .replace(/_key$/i, "");
+        .replace(/_key$/i, "")
+        .replace(/([A-Z])/g, " $1")
+        .toLowerCase()
+        .trim();
 
       return {
         statusCode: 409,
@@ -87,13 +140,11 @@ function handlePrismaKnownError(err: Prisma.PrismaClientKnownRequestError): Form
  */
 function handlePrismaValidationError(err: Prisma.PrismaClientValidationError): FormattedError {
   const rawMsg = err.message || "";
-  // Extract the specific argument or validation issue if present
-  const lines = rawMsg.split("\n").filter((l) => l.trim().length > 0);
-  const relevantLine = lines.find((l) => l.includes("Argument") || l.includes("Unknown argument") || l.includes("Invalid"));
+  const humanMsg = formatToHumanReadable(rawMsg);
 
   return {
     statusCode: 400,
-    message: relevantLine ? `Invalid database input: ${relevantLine.trim()}` : "Database validation failed. Please check your submitted fields.",
+    message: humanMsg || "The request contains invalid or incomplete parameters. Please review your input.",
   };
 }
 
@@ -152,7 +203,7 @@ export function globalErrorHandler(
     errors = formatted.errors;
   }
   // 4. Prisma Validation Errors
-  else if (err instanceof Prisma.PrismaClientValidationError) {
+  else if (err instanceof Prisma.PrismaClientValidationError || err?.name === "PrismaClientValidationError") {
     const formatted = handlePrismaValidationError(err);
     statusCode = formatted.statusCode;
     message = formatted.message;
@@ -196,15 +247,12 @@ export function globalErrorHandler(
   // 10. Standard HTTP Error with Status Code
   else if (err?.statusCode || err?.status) {
     statusCode = Number(err.statusCode || err.status);
-    message = err.message || message;
+    message = formatToHumanReadable(err.message || message);
     errors = err.errors;
   }
   // 11. Generic Error with descriptive message
   else if (err?.message && typeof err.message === "string") {
-    // If message is a clean operational string and not a full internal trace dump
-    if (!err.message.includes("invocation:") && !err.message.includes("node_modules")) {
-      message = err.message;
-    }
+    message = formatToHumanReadable(err.message);
   }
 
   // Ensure statusCode is a valid integer between 400 and 599
@@ -215,7 +263,7 @@ export function globalErrorHandler(
   const responsePayload: Record<string, any> = {
     success: false,
     statusCode,
-    message,
+    message: formatToHumanReadable(message),
   };
 
   if (errors !== undefined) {

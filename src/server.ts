@@ -1,6 +1,7 @@
 import app from "./app";
 import { initRenewalScheduler } from "./modules/payment/scheduler.service";
 import { seedDefaultAssessmentTemplate } from "./modules/report/report.service";
+import { seedInitialPlansAndServices } from "./modules/plan/plan.service";
 
 // Global process safety handlers for unhandled promise rejections & uncaught exceptions
 process.on("unhandledRejection", (reason: any) => {
@@ -21,5 +22,8 @@ app.listen(PORT, () => {
   initRenewalScheduler();
   seedDefaultAssessmentTemplate().catch((e) =>
     console.warn("⚠️ Assessment template seed notice:", e.message)
+  );
+  seedInitialPlansAndServices().catch((e) =>
+    console.warn("⚠️ Plan seed notice:", e.message)
   );
 });

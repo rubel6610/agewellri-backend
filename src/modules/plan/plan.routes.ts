@@ -9,12 +9,6 @@ import {
   handleUpdatePlan,
   handleChangePlanStatus,
   handleDeletePlan,
-  handleGetServiceStats,
-  handleGetAllServices,
-  handleCreateService,
-  handleUpdateService,
-  handleChangeServiceStatus,
-  handleDeleteService,
 } from "./plan.controller";
 
 const router = Router();
@@ -53,39 +47,6 @@ router.delete(
   authenticate,
   invalidateCacheTags("plans", "admin_plans"),
   handleDeletePlan
-);
-
-// Admin Service Catalog (Real-time live data, no browser caching)
-router.get("/services/stats", authenticate, handleGetServiceStats);
-
-router.get("/services/all", authenticate, handleGetAllServices);
-
-router.post(
-  "/services",
-  authenticate,
-  invalidateCacheTags("services", "plans"),
-  handleCreateService
-);
-
-router.put(
-  "/services/:id",
-  authenticate,
-  invalidateCacheTags("services", "plans"),
-  handleUpdateService
-);
-
-router.patch(
-  "/services/:id/status",
-  authenticate,
-  invalidateCacheTags("services", "plans"),
-  handleChangeServiceStatus
-);
-
-router.delete(
-  "/services/:id",
-  authenticate,
-  invalidateCacheTags("services", "plans"),
-  handleDeleteService
 );
 
 export default router;

@@ -289,9 +289,6 @@ export async function getAdminClientById(clientIdOrNumber: string) {
       },
       appointments: {
         orderBy: { startAt: "desc" },
-        include: {
-          serviceType: true,
-        },
       },
       reports: {
         orderBy: { createdAt: "desc" },
@@ -803,7 +800,6 @@ export async function getAdminDashboardStats() {
       take: 10,
       include: {
         client: { include: { user: true } },
-        serviceType: true,
         technician: true,
       },
     }),
@@ -814,7 +810,7 @@ export async function getAdminDashboardStats() {
         status: true,
         startAt: true,
         clientId: true,
-        serviceTypeId: true,
+        serviceName: true,
         visit: { select: { id: true } },
       },
     }),
@@ -1030,7 +1026,7 @@ export async function getAdminDashboardStats() {
         ? `${appt.client.user.firstName} ${appt.client.user.lastName}`.trim()
         : "Client",
       clientId: appt.client?.clientNumber || appt.clientId,
-      serviceType: appt.serviceType?.name || "Safety Oversight Visit",
+      serviceType: appt.serviceName || "Safety & Upkeep Visit",
       specialistName: appt.technician?.name || "Assigned Specialist",
       specialistColor: appt.technician?.color || "#294B68",
       dateFormatted: safeFormatDate(appt.startAt) || "Upcoming",
