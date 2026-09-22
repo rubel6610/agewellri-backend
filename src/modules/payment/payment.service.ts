@@ -347,19 +347,39 @@ export async function savePaymentMethod(
   paymentMethodId: string,
   setAsDefault: boolean = true,
 ) {
-  const { customerId, client } = await getOrCreateStripeCustomer(userId);
+  const { customerId: resolvedCustId, client } =
+    await getOrCreateStripeCustomer(userId);
+  let customerId = resolvedCustId;
 
   // 1. Retrieve the payment method first to inspect its status & card details
   const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
 
-  // 2. Attach only if not already attached to this customer
-  if (pm.customer !== customerId) {
+  let isAttachedToCustomer = false;
+
+  // 2. Attach or reconcile customer ID
+  if (pm.customer) {
+    const existingCustId =
+      typeof pm.customer === "string"
+        ? pm.customer
+        : (pm.customer as any).id;
+    if (existingCustId === customerId) {
+      isAttachedToCustomer = true;
+    } else {
+      // PaymentMethod is already attached to existingCustId in Stripe
+      customerId = existingCustId;
+      isAttachedToCustomer = true;
+    }
+  } else {
+    // PaymentMethod is unattached -> attach it to the customer
     try {
       await stripe.paymentMethods.attach(paymentMethodId, {
         customer: customerId,
       });
+      isAttachedToCustomer = true;
     } catch (attachErr: any) {
-      if (!attachErr.message?.includes("already been attached")) {
+      if (attachErr.message?.includes("already been attached")) {
+        isAttachedToCustomer = true;
+      } else {
         console.warn(
           "⚠️ Stripe paymentMethod.attach notice:",
           attachErr.message,
@@ -368,8 +388,8 @@ export async function savePaymentMethod(
     }
   }
 
-  // 3. Set as default payment method on the customer
-  if (setAsDefault) {
+  // 3. Set as default payment method on the customer ONLY IF confirmed attached
+  if (setAsDefault && isAttachedToCustomer) {
     try {
       await stripe.customers.update(customerId, {
         invoice_settings: {
@@ -404,6 +424,7 @@ export async function savePaymentMethod(
     metadata: {
       brand: updatedClient.cardBrand,
       last4: updatedClient.cardLast4,
+      customerId,
     },
   });
 
@@ -542,25 +563,51 @@ export async function processAgreementPayment(
       const trialEndTimestamp = getStripeTrialEndTimestamp(now);
 
       // Verify and guarantee the payment method is attached to this customer
+      let isAttached = false;
       try {
         const pm = await stripe.paymentMethods.retrieve(effectivePmId);
-        if (pm.customer !== stripeCustomerId) {
+        if (pm.customer) {
+          const pmCustId =
+            typeof pm.customer === "string"
+              ? pm.customer
+              : (pm.customer as any).id;
+          if (pmCustId === stripeCustomerId) {
+            isAttached = true;
+          } else {
+            stripeCustomerId = pmCustId;
+            await prisma.client.update({
+              where: { id: client.id },
+              data: { stripeCustomerId },
+            });
+            isAttached = true;
+          }
+        } else {
           await stripe.paymentMethods.attach(effectivePmId, {
             customer: stripeCustomerId,
           });
+          isAttached = true;
         }
       } catch (attachCheckErr: any) {
-        // If already attached, ignore
+        if (attachCheckErr.message?.includes("already been attached")) {
+          isAttached = true;
+        }
       }
 
-      // Ensure customer's default payment method is updated
-      try {
-        await stripe.customers.update(stripeCustomerId, {
-          invoice_settings: {
-            default_payment_method: effectivePmId,
-          },
-        });
-      } catch {}
+      // Ensure customer's default payment method is updated only when verified attached
+      if (isAttached) {
+        try {
+          await stripe.customers.update(stripeCustomerId, {
+            invoice_settings: {
+              default_payment_method: effectivePmId,
+            },
+          });
+        } catch (updateErr: any) {
+          console.warn(
+            "⚠️ Stripe customer invoice_settings update notice:",
+            updateErr.message,
+          );
+        }
+      }
 
       let stripeProductId: string | undefined = undefined;
       try {

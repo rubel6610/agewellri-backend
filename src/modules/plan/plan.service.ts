@@ -511,9 +511,9 @@ export async function seedInitialPlansAndServices() {
         features: [
           "6 Dedicated In-Home Safety & Upkeep Visits per month",
           "Weekly Specialized Hazard & Accessibility Inspections",
-          "HEPA Allergen Pathway Sanitization & Cleaning Support",
-          "Complete Digital safety Scorecards & Family Dashboard",
-          "Direct Dedicated Senior safety Specialist Assigned",
+          "Comprehensive Pathway Clearance & Hazard Mitigation Support",
+          "Complete Digital Safety Scorecards & Family Dashboard",
+          "Direct Dedicated Senior Safety Specialist Assigned",
           "24/7 Priority Emergency Support & Coordination",
         ],
       },

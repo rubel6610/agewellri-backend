@@ -354,14 +354,14 @@ export async function seedDefaultSpecialists() {
 
     await createSpecialist({
       name: "Sarah Miller",
-      title: "Senior Environmental & Cleaning Specialist",
+      title: "Senior Environmental & Safety Specialist",
       phone: "(401) 555-0168",
       email: "sarah.miller@agewellri.com",
-      specialties: ["HEPA Allergen Cleaning", "Pathway Clearance", "Sanitization"],
+      specialties: ["Environmental Safety", "Pathway Clearance", "Hazard Mitigation"],
       color: "#3F8F6B",
       status: "ACTIVE",
       displayOrder: 2,
-      notes: "Lead cleaning specialist for South County residences.",
+      notes: "Senior environmental safety specialist for South County residences.",
     });
 
     await createSpecialist({

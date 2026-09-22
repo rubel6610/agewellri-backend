@@ -911,17 +911,10 @@ export async function sendPlanPurchaseConfirmationEmail(
     <!-- Included safety & Service Breakdown Card -->
     <div class="highlight-card" style="background: #FFFFFF; border: 1px solid #CBD5E1;">
       <div style="font-size: 12px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.75px; margin-bottom: 10px; border-bottom: 1px solid #E2E8F0; padding-bottom: 6px;">
-        🛡️ Included safety Services &amp; Quotas
+        🛡️ Included Safety Services &amp; Quotas
       </div>
       ${planDescription ? `<div style="font-size: 13px; color: #334155; margin-bottom: 8px; font-style: italic;">${planDescription}</div>` : ""}
       ${servicesListHtml}
-      ${
-        hasCleaningAddon
-          ? `<div style="margin-top: 8px; font-size: 13px; color: #166534; font-weight: 700; background: #F0FDF4; padding: 6px 10px; border-radius: 6px;">
-              ✨ Home Cleaning Add-on: Included (+6 Additional Visits)
-             </div>`
-          : ""
-      }
       ${featuresListHtml}
     </div>
 
