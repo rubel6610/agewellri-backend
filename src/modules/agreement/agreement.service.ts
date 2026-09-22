@@ -28,7 +28,7 @@ export async function seedDefaultAgreementTemplates() {
       state: "RI",
       title: "Rhode Island Client Service Agreement",
       description:
-        "Official AgeWellRI home safety & care coordination membership contract for Rhode Island residents.",
+        "Official AgeWellRI home safety  membership contract for Rhode Island residents.",
       versionNumber: "v2.0",
       statutoryReference: "Rhode Island General Laws § 6-28-3",
       content:
@@ -705,7 +705,6 @@ export async function getClientAgreement(userId: string) {
     orderBy: { createdAt: "desc" },
     include: {
       plan: true,
-      planVersion: true,
       agreementVersion: true,
     },
   });
@@ -946,7 +945,6 @@ export async function getAllAdminAgreements(query?: {
         },
       },
       plan: true,
-      planVersion: true,
       agreementVersion: true,
     },
   });

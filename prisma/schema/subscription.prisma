@@ -62,7 +62,7 @@ model VisitAllocation {
   id                   String             @id @default(auto()) @map("_id") @db.ObjectId
   subscriptionPeriodId String             @db.ObjectId
   subscriptionPeriod   SubscriptionPeriod @relation(fields: [subscriptionPeriodId], references: [id], onDelete: Cascade)
-  serviceName          String             @default("Home Care Visit")
+  serviceName          String             @default("")
   allocatedCount       Int
   usedCount            Int                @default(0)
   createdAt            DateTime           @default(now())

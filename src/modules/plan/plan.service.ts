@@ -17,6 +17,7 @@ export interface ServicePlanData {
   fullDescription?: string | null;
   price: number;
   totalVisits: number;
+  times?: string | null;
   billingInterval: BillingInterval;
   displayOrder: number;
   isActive: boolean;
@@ -72,7 +73,7 @@ async function createPlanAuditLog(params: {
 export async function getActivePlans() {
   const plans = (await prisma.servicePlan.findMany({
     where: { isActive: true, isArchived: false },
-    orderBy: { displayOrder: "asc" },
+    orderBy: { createdAt: "desc" },
   })) as unknown as ServicePlanData[];
 
   return plans.map((plan) => ({
@@ -86,6 +87,7 @@ export async function getActivePlans() {
     price: plan.price,
     currency: "USD",
     totalVisits: Number(plan.totalVisits ?? 2),
+    times: plan.times || "Up to 2 hours",
     billingInterval: "MONTHLY" as const,
     supportsAutomaticBilling: Boolean(plan.supportsAutomaticBilling),
     supportsInvoiceBilling: Boolean(plan.supportsInvoiceBilling),
@@ -93,6 +95,7 @@ export async function getActivePlans() {
     features: Array.isArray(plan.features) ? plan.features : [],
     displayOrder: plan.displayOrder ?? 0,
     effectiveFrom: plan.createdAt,
+    createdAt: plan.createdAt,
     isActive: plan.isActive,
   }));
 }
@@ -108,7 +111,7 @@ export async function getAllAdminPlans() {
         select: { id: true },
       },
     },
-    orderBy: { displayOrder: "asc" },
+    orderBy: { createdAt: "desc" },
   })) as unknown as (ServicePlanData & { subscriptions: { id: string }[] })[];
 
   return plans.map((plan) => ({
@@ -121,6 +124,7 @@ export async function getAllAdminPlans() {
     currentPrice: plan.price,
     price: plan.price,
     totalVisits: Number(plan.totalVisits ?? 2),
+    times: plan.times || "Up to 2 hours",
     currency: "USD",
     billingInterval: "MONTHLY" as const,
     displayOrder: plan.displayOrder ?? 0,
@@ -132,6 +136,7 @@ export async function getAllAdminPlans() {
     activeSubscribersCount: plan.subscriptions?.length || 0,
     features: Array.isArray(plan.features) ? plan.features : [],
     effectiveFrom: plan.createdAt,
+    createdAt: plan.createdAt,
     lastUpdated: plan.updatedAt,
   }));
 }
@@ -152,26 +157,28 @@ export async function getAdminPlanById(planId: string) {
         },
       },
     },
-  })) as unknown as (ServicePlanData & {
-    subscriptions: {
-      id: string;
-      status: string;
-      contractedPrice?: number | null;
-      billingInterval: string;
-      currentPeriodStart: Date;
-      currentPeriodEnd: Date;
-      client?: {
-        id?: string;
-        clientNumber?: string | null;
-        user?: {
-          firstName?: string | null;
-          lastName?: string | null;
-          email?: string | null;
-          phone?: string | null;
-        } | null;
-      } | null;
-    }[];
-  }) | null;
+  })) as unknown as
+    | (ServicePlanData & {
+        subscriptions: {
+          id: string;
+          status: string;
+          contractedPrice?: number | null;
+          billingInterval: string;
+          currentPeriodStart: Date;
+          currentPeriodEnd: Date;
+          client?: {
+            id?: string;
+            clientNumber?: string | null;
+            user?: {
+              firstName?: string | null;
+              lastName?: string | null;
+              email?: string | null;
+              phone?: string | null;
+            } | null;
+          } | null;
+        }[];
+      })
+    | null;
 
   if (!plan) {
     throw new Error("Plan not found.");
@@ -205,6 +212,7 @@ export async function getAdminPlanById(planId: string) {
     fullDescription: "",
     currentPrice: plan.price,
     totalVisits: Number(plan.totalVisits ?? 2),
+    times: plan.times || "Up to 2 hours",
     billingInterval: "MONTHLY" as const,
     features: Array.isArray(plan.features) ? plan.features : [],
     subscriptions: subscriptionsFormatted,
@@ -216,15 +224,14 @@ export async function getAdminPlanById(planId: string) {
  */
 export async function createPlan(input: CreatePlanInput, actorUserId?: string) {
   // 1. Generate unique code automatically from plan name
-  let generatedCode = (
+  let generatedCode =
     input.code?.trim() ||
     input.name
       .toUpperCase()
       .replace(/[^A-Z0-9\s]/g, "")
       .replace(/\s+/g, "_")
       .slice(0, 30) ||
-    `PLAN_${Date.now()}`
-  );
+    `PLAN_${Date.now()}`;
 
   const existingWithCode = await prisma.servicePlan.findUnique({
     where: { code: generatedCode },
@@ -257,6 +264,7 @@ export async function createPlan(input: CreatePlanInput, actorUserId?: string) {
       fullDescription: "",
       price: input.price,
       totalVisits: input.totalVisits || 2,
+      times: input.times || "Up to 2 hours",
       billingInterval: BillingInterval.MONTHLY,
       displayOrder: input.displayOrder ?? 0,
       supportsAutomaticBilling: input.supportsAutomaticBilling ?? true,
@@ -279,6 +287,7 @@ export async function createPlan(input: CreatePlanInput, actorUserId?: string) {
       code: plan.code,
       price: input.price,
       totalVisits: plan.totalVisits,
+      times: plan.times,
       billingInterval: "MONTHLY",
       featuresCount: input.features?.length || 0,
     },
@@ -311,7 +320,9 @@ export async function updatePlan(
   }
   updateData.fullDescription = "";
   if (input.price !== undefined) updateData.price = input.price;
-  if (input.totalVisits !== undefined) updateData.totalVisits = input.totalVisits;
+  if (input.totalVisits !== undefined)
+    updateData.totalVisits = input.totalVisits;
+  if (input.times !== undefined) updateData.times = input.times;
   updateData.billingInterval = BillingInterval.MONTHLY;
   if (input.displayOrder !== undefined)
     updateData.displayOrder = input.displayOrder;
@@ -339,6 +350,7 @@ export async function updatePlan(
       price: existingPlan.price,
       name: existingPlan.name,
       totalVisits: existingPlan.totalVisits,
+      times: existingPlan.times,
       billingInterval: "MONTHLY",
     },
     newValues: { ...input, billingInterval: "MONTHLY" },
@@ -396,7 +408,9 @@ export async function deletePlan(planId: string, actorUserId?: string) {
         where: { status: "ACTIVE" },
       },
     },
-  })) as unknown as (ServicePlanData & { subscriptions: { id: string }[] }) | null;
+  })) as unknown as
+    | (ServicePlanData & { subscriptions: { id: string }[] })
+    | null;
 
   if (!plan) {
     throw new Error("Plan not found.");
@@ -448,6 +462,7 @@ export async function seedInitialPlansAndServices() {
         fullDescription: "",
         price: 995,
         totalVisits: 2,
+        times: "Up to 2 hours",
         billingInterval: BillingInterval.MONTHLY,
         displayOrder: 1,
         isActive: true,
@@ -456,7 +471,7 @@ export async function seedInitialPlansAndServices() {
           "Comprehensive Fall Prevention & Grab-Bar Inspections",
           "Pathway Clearing & Hazard Mitigation",
           "Digital Safety & Health Scorecard Reports for Family",
-          "Dedicated Rhode Island Specialist Care Team",
+          "Dedicated Rhode Island Specialist safety Team",
           "Priority Scheduling & Direct Concierge Support",
         ],
       },
@@ -468,6 +483,7 @@ export async function seedInitialPlansAndServices() {
         fullDescription: "",
         price: 1495,
         totalVisits: 4,
+        times: "Up to 2 hours",
         billingInterval: BillingInterval.MONTHLY,
         displayOrder: 2,
         isActive: true,
@@ -477,17 +493,18 @@ export async function seedInitialPlansAndServices() {
           "Smoke / Carbon Monoxide Detector & Lighting Audits",
           "Detailed Digital Safety Reports with Specialist Notes",
           "Family Portal Real-Time Updates & SMS Alerts",
-          "Dedicated Specialist & Emergency Care Coordination",
+          "Dedicated Specialist & Emergency safety Coordination",
         ],
       },
       {
-        name: "Complete Care Plan",
-        code: "COMPLETE_CARE",
+        name: "Complete safety Plan",
+        code: "COMPLETE_SAFETY",
         shortDescription:
-          "Maximum weekly protection, deep hazard mitigation, and white-glove home care oversight.",
+          "Maximum weekly protection, deep hazard mitigation, and white-glove home safety oversight.",
         fullDescription: "",
         price: 1995,
         totalVisits: 6,
+        times: "Up to 2 hours",
         billingInterval: BillingInterval.MONTHLY,
         displayOrder: 3,
         isActive: true,
@@ -495,8 +512,8 @@ export async function seedInitialPlansAndServices() {
           "6 Dedicated In-Home Safety & Upkeep Visits per month",
           "Weekly Specialized Hazard & Accessibility Inspections",
           "HEPA Allergen Pathway Sanitization & Cleaning Support",
-          "Complete Digital Care Scorecards & Family Dashboard",
-          "Direct Dedicated Senior Care Specialist Assigned",
+          "Complete Digital safety Scorecards & Family Dashboard",
+          "Direct Dedicated Senior safety Specialist Assigned",
           "24/7 Priority Emergency Support & Coordination",
         ],
       },

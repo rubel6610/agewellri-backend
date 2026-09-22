@@ -42,38 +42,75 @@ export function invalidateSpecialistsCache() {
  * List all specialists directly from database (100% real-time).
  */
 export async function getAllSpecialists(_forceRefresh = true) {
-  const result: any = await (prisma as any).$runCommandRaw({
-    find: "Technician",
-    filter: { isArchived: { $ne: true } },
-  });
+  try {
+    if ((prisma as any).technician?.findMany) {
+      const docs = await (prisma as any).technician.findMany({
+        where: { isArchived: false },
+        orderBy: { displayOrder: "asc" },
+      });
+      return docs.map((doc: any) => ({
+        id: String(doc.id),
+        name: doc.name || "Specialist",
+        email: doc.email || null,
+        phone: doc.phone || null,
+        title: doc.title || "Home Safety Specialist",
+        specialties: doc.specialties || [],
+        shssCertified: Boolean(doc.shssCertified),
+        shssRenewalDate: doc.shssRenewalDate || null,
+        cprCertified: Boolean(doc.cprCertified),
+        aedCertified: Boolean(doc.aedCertified),
+        backgroundChecked: Boolean(doc.backgroundChecked),
+        bilingualSpanish: Boolean(doc.bilingualSpanish),
+        color: doc.color || "#294B68",
+        status: doc.status || "ACTIVE",
+        notes: doc.notes || null,
+        displayOrder: doc.displayOrder ?? 0,
+        activeAssignmentsCount: 0,
+        createdAt: doc.createdAt || new Date(),
+        updatedAt: doc.updatedAt || new Date(),
+      }));
+    }
+  } catch (err) {
+    console.warn("Falling back to raw query for technicians:", err);
+  }
 
-  const docs = result?.cursor?.firstBatch || [];
+  try {
+    const result: any = await (prisma as any).$runCommandRaw({
+      find: "Technician",
+      filter: { isArchived: { $ne: true } },
+    });
 
-  const mapped = docs
-    .map((doc: any) => ({
-      id: doc._id?.$oid || String(doc._id),
-      name: doc.name || "Specialist",
-      email: doc.email || null,
-      phone: doc.phone || null,
-      title: doc.title || "Home Safety Specialist",
-      specialties: doc.specialties || [],
-      shssCertified: Boolean(doc.shssCertified),
-      shssRenewalDate: doc.shssRenewalDate || null,
-      cprCertified: Boolean(doc.cprCertified),
-      aedCertified: Boolean(doc.aedCertified),
-      backgroundChecked: Boolean(doc.backgroundChecked),
-      bilingualSpanish: Boolean(doc.bilingualSpanish),
-      color: doc.color || "#294B68",
-      status: doc.status || "ACTIVE",
-      notes: doc.notes || null,
-      displayOrder: doc.displayOrder ?? 0,
-      activeAssignmentsCount: 0,
-      createdAt: doc.createdAt?.$date || doc.createdAt || new Date(),
-      updatedAt: doc.updatedAt?.$date || doc.updatedAt || new Date(),
-    }))
-    .sort((a: any, b: any) => a.displayOrder - b.displayOrder);
+    const docs = result?.cursor?.firstBatch || [];
 
-  return mapped;
+    const mapped = docs
+      .map((doc: any) => ({
+        id: doc._id?.$oid || String(doc._id),
+        name: doc.name || "Specialist",
+        email: doc.email || null,
+        phone: doc.phone || null,
+        title: doc.title || "Home Safety Specialist",
+        specialties: doc.specialties || [],
+        shssCertified: Boolean(doc.shssCertified),
+        shssRenewalDate: doc.shssRenewalDate || null,
+        cprCertified: Boolean(doc.cprCertified),
+        aedCertified: Boolean(doc.aedCertified),
+        backgroundChecked: Boolean(doc.backgroundChecked),
+        bilingualSpanish: Boolean(doc.bilingualSpanish),
+        color: doc.color || "#294B68",
+        status: doc.status || "ACTIVE",
+        notes: doc.notes || null,
+        displayOrder: doc.displayOrder ?? 0,
+        activeAssignmentsCount: 0,
+        createdAt: doc.createdAt?.$date || doc.createdAt || new Date(),
+        updatedAt: doc.updatedAt?.$date || doc.updatedAt || new Date(),
+      }))
+      .sort((a: any, b: any) => a.displayOrder - b.displayOrder);
+
+    return mapped;
+  } catch (rawErr) {
+    console.warn("Could not fetch specialists:", rawErr);
+    return [];
+  }
 }
 
 /**
@@ -329,7 +366,7 @@ export async function seedDefaultSpecialists() {
 
     await createSpecialist({
       name: "David Chen",
-      title: "Safety Specialist & Care Assessor",
+      title: "Safety Specialist",
       phone: "(401) 555-0192",
       email: "david.chen@agewellri.com",
       specialties: ["Wellness Check-ins", "Lighting & Rug Safety", "Home Hazard Mitigation"],

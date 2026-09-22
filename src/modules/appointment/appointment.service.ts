@@ -223,7 +223,7 @@ export function formatAppointmentRecord(
     rawStatus === "REQUESTED" ||
     (!appt.technicianId && rawStatus !== "CANCELLED");
 
-  const serviceName = appt.serviceName || appt.plan?.name || "Care Visit";
+  const serviceName = appt.serviceName || appt.plan?.name || "safety Visit";
 
   return {
     id: appt.id,
@@ -240,7 +240,7 @@ export function formatAppointmentRecord(
     serviceName: serviceName,
     planId: appt.planId || null,
     planName: appt.plan?.name || null,
-    serviceCategory: "HOME_CARE",
+    serviceCategory: "HOME_SAFETY",
     durationMinutes: 60,
     subscriptionPeriodId: appt.subscriptionPeriodId,
     technicianId: appt.technicianId || null,
@@ -248,7 +248,7 @@ export function formatAppointmentRecord(
       ? tech.name || "Assigned Specialist"
       : "Unassigned Specialist",
     technicianTitle: appt.technicianId
-      ? tech.title || "Certified Home Care Specialist"
+      ? tech.title || "Certified Home safety Specialist"
       : "Pending Admin Assignment",
     technicianPhone: tech.phone || null,
     technicianColor: tech.color || "#294B68",
@@ -434,7 +434,7 @@ async function validateAndExecuteContractualScheduling(
   const serviceName =
     params.serviceType ||
     targetPlan?.name ||
-    "Home Care & Safety Visit";
+    "Home Safety Visit";
 
   // 5. Ensure Period Allocations
   if (!activePeriod.allocations || activePeriod.allocations.length === 0) {

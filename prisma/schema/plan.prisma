@@ -4,6 +4,7 @@ model ServicePlan {
   code                     String          @unique
   price                    Float
   totalVisits              Int             @default(2)
+  times                    String?
   billingInterval          BillingInterval @default(MONTHLY)
   shortDescription         String?
   fullDescription          String?

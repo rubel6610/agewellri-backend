@@ -293,7 +293,7 @@ export async function createFamilyMember(userId: string, input: CreateFamilyMemb
         userId: context.client.userId,
         type: "FAMILY_MEMBER_ADDED",
         title: "Family Member Added",
-        message: `${input.name.trim()} (${input.relationship.trim()}) has been added to your care circle.`,
+        message: `${input.name.trim()} (${input.relationship.trim()}) has been added to your safety circle.`,
         metadata: {
           familyMemberId: member.id,
           clientId,

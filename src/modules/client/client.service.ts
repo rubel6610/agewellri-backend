@@ -269,7 +269,6 @@ export async function getAdminClientById(clientIdOrNumber: string) {
       agreements: {
         orderBy: { createdAt: "desc" },
         include: {
-          planVersion: true,
           agreementVersion: true,
         },
       },

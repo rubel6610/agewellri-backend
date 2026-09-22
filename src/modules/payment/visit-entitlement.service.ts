@@ -68,15 +68,15 @@ export async function ensureVisitAllocationsForPeriod(
         })
       : null) || sub?.plan;
 
-  const totalVisits = targetPlan?.totalVisits || 2;
-  const planName = targetPlan?.name || "Safety Oversight & Upkeep Visit";
+  const totalVisits = Number((targetPlan as any)?.totalVisits ?? 2);
+  const planName = targetPlan?.name || "";
 
-  const existingAllocation = await prisma.visitAllocation.findFirst({
+  const existingAllocation = await (prisma.visitAllocation.findFirst as any)({
     where: { subscriptionPeriodId },
   });
 
   if (!existingAllocation) {
-    await prisma.visitAllocation.create({
+    await (prisma.visitAllocation.create as any)({
       data: {
         subscriptionPeriodId,
         serviceName: planName,
@@ -85,7 +85,7 @@ export async function ensureVisitAllocationsForPeriod(
       },
     });
   } else {
-    await prisma.visitAllocation.update({
+    await (prisma.visitAllocation.update as any)({
       where: { id: existingAllocation.id },
       data: {
         serviceName: planName,
@@ -147,7 +147,7 @@ export function formatPeriodEntitlements(
     return {
       id: alloc.id,
       serviceTypeId: alloc.id,
-      serviceName: alloc.serviceName || "Safety Oversight & Upkeep Visit",
+      serviceName: alloc.serviceName || "",
       serviceCode: "PLAN_VISIT",
       category: "SAFETY_OVERSIGHT",
       durationMinutes: 60,
@@ -265,15 +265,15 @@ export async function getClientVisitEntitlements(
     client?.appointments || []
   );
 
-  // Fallback defaults if entitlements array is empty
-  if (entitlements.length === 0) {
-    const defaultVisits = activeSub?.plan?.totalVisits || 2;
+  // If entitlements array is empty, derive dynamically from active subscription plan
+  if (entitlements.length === 0 && activeSub?.plan) {
+    const defaultVisits = Number((activeSub.plan as any)?.totalVisits ?? 0);
     entitlements = [
       {
-        id: "default-plan-quota",
-        serviceTypeId: "default-plan-quota",
-        serviceName: activeSub?.plan?.name || "Safety Oversight & Upkeep Visit",
-        serviceCode: activeSub?.plan?.code || "PLAN_VISIT",
+        id: "plan-quota",
+        serviceTypeId: activeSub.plan.id,
+        serviceName: activeSub.plan.name || "",
+        serviceCode: activeSub.plan.code || "",
         category: "SAFETY_OVERSIGHT",
         durationMinutes: 60,
         allocated: defaultVisits,
@@ -304,7 +304,7 @@ export async function getClientVisitEntitlements(
   );
 
   const rawPlanName =
-    activeSub?.plan?.name || (client as any)?.selectedPlan || "Service Plan";
+    activeSub?.plan?.name || (client as any)?.selectedPlan || "";
 
   let formattedPlanName = rawPlanName;
   if (formattedPlanName.includes("_") || formattedPlanName.includes("-")) {
@@ -421,7 +421,7 @@ export async function getAdminClientVisitEntitlements(
   );
 
   const planName =
-    activeSub?.plan?.name || (client as any)?.selectedPlan || "Service Plan";
+    activeSub?.plan?.name || (client as any)?.selectedPlan || "";
   const planCode = activeSub?.plan?.code || (client as any)?.selectedPlan || "";
 
   return {

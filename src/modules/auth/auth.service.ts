@@ -365,9 +365,6 @@ export async function submitAgreement(
  */
 export async function getMyAgreement(userId: string) {
   const agreement = await getClientAgreement(userId);
-  if (!agreement) {
-    throw new Error("Client agreement not found.");
-  }
   return agreement;
 }
 

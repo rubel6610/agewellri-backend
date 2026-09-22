@@ -1804,7 +1804,7 @@ export async function handleStripeWebhook(
                 const allocatedVisits = (
                   periodWithAlloc?.allocations || []
                 ).map((a: any) => ({
-                  serviceName: a.serviceName || "Care Visit",
+                  serviceName: a.serviceName || "safety Visit",
                   count: a.allocatedCount || 2,
                   durationMinutes: 60,
                 }));
@@ -2125,7 +2125,7 @@ export async function getAdminBillingOverview() {
         ? `${pm.client.user.firstName} ${pm.client.user.lastName}`.trim()
         : "Client",
       clientId: pm.clientId,
-      planName: pm.subscription?.plan?.name || "Monthly Care",
+      planName: pm.subscription?.plan?.name || "Monthly Safety",
       amount: `$${pm.amount.toFixed(2)}`,
       status: pm.status.toLowerCase(),
       date: pm.createdAt.toLocaleDateString("en-US", {

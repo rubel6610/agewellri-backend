@@ -331,7 +331,7 @@ export async function submitAssessment(
       where: { visitId: visit.id, isArchived: false },
     });
 
-    const reportTitle = `${appointment.serviceName || appointment.plan?.name || "Home Safety"} — Age Safe® Assessment`;
+    const reportTitle = `${appointment.serviceName || "Home Safety"} — Age Safe® Assessment`;
 
     if (!report) {
       report = await tx.report.create({
@@ -413,7 +413,6 @@ export async function uploadVisitReport(
     where: { id: appointmentId },
     include: {
       client: { include: { user: true } },
-      plan: true,
       technician: true,
       visit: {
         include: {
@@ -480,7 +479,7 @@ export async function uploadVisitReport(
   }
 
   // 3. Determine Report Title and Service Details
-  const serviceName = appointment.serviceName || appointment.plan?.name || "Home Safety";
+  const serviceName = appointment.serviceName || "Home Safety Oversight";
   const defaultTitle = title?.trim() || `${serviceName} Visit Report`;
   const storageFilename = file.filename;
   const relativeFileUrl = `/uploads/reports/${storageFilename}`;
@@ -532,7 +531,7 @@ export async function uploadVisitReport(
         client: { include: { user: true } },
         visit: {
           include: {
-            appointment: { include: { plan: true } },
+            appointment: true,
             technician: true,
           },
         },
@@ -555,7 +554,7 @@ export async function uploadVisitReport(
         client: { include: { user: true } },
         visit: {
           include: {
-            appointment: { include: { plan: true } },
+            appointment: true,
             technician: true,
           },
         },
@@ -735,6 +734,22 @@ export async function getReportFileForDownload(
   };
 }
 
+function safeFormatDate(dateVal?: any): string {
+  if (!dateVal) return "N/A";
+  try {
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return "N/A";
+    return d.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  } catch {
+    return "N/A";
+  }
+}
+
 /**
  * Format raw Report & Assessment database record into clean client/admin DTO
  */
@@ -761,12 +776,19 @@ function formatReportDetail(report: any, allSpecialists: any[] = []) {
   const totalScore = assessment?.score ?? report.score ?? null;
   const maxScore = assessment?.maxScore ?? 50;
   const percentage =
-    totalScore != null ? Math.round((totalScore / maxScore) * 100) : null;
+    totalScore != null && maxScore > 0
+      ? Math.round((totalScore / maxScore) * 100)
+      : null;
   const ratingTier =
     assessment?.ratingTier ??
     (totalScore && totalScore >= 45 ? "EXCELLENT" : "GOOD");
 
-  const formattedResponses = (assessment?.responses || []).map((r: any) => ({
+  const rawResponses = assessment?.responses || [];
+  const sortedResponses = [...rawResponses].sort(
+    (a: any, b: any) => (a.question?.order || 0) - (b.question?.order || 0),
+  );
+
+  const formattedResponses = sortedResponses.map((r: any) => ({
     id: r.id,
     questionId: r.questionId,
     category: r.question?.category || "SAFETY",
@@ -779,23 +801,27 @@ function formatReportDetail(report: any, allSpecialists: any[] = []) {
 
   const clientName =
     `${user?.firstName || ""} ${user?.lastName || ""}`.trim() ||
+    client?.primaryContactName ||
     "Valued Client";
+  const reportIdStr = String(report.id || "");
   const clientNumber =
     client?.clientNumber ||
-    `AW-${client?.id?.slice(-4).toUpperCase() || "MEMBER"}`;
+    `AW-${String(client?.id || "").slice(-4).toUpperCase() || "MEMBER"}`;
   const address =
     [client?.address, client?.city, client?.state, client?.postalCode]
       .filter(Boolean)
       .join(", ") || "Client Residence, Rhode Island";
 
   const hasFile = Boolean(report.fileUrl);
-  const downloadUrl = hasFile ? `/api/v1/reports/${report.id}/download` : null;
-  const previewUrl = hasFile ? `/api/v1/reports/${report.id}/file` : null;
+  const downloadUrl = hasFile ? `/api/v1/reports/${reportIdStr}/download` : null;
+  const previewUrl = hasFile ? `/api/v1/reports/${reportIdStr}/file` : null;
+
+  const visitDateVal = visit?.completedAt || appt?.startAt || report.createdAt;
 
   return {
-    id: report.id,
-    reportId: report.id,
-    reportNumber: `RPT-${report.id.slice(-6).toUpperCase()}`,
+    id: reportIdStr,
+    reportId: reportIdStr,
+    reportNumber: `RPT-${reportIdStr.slice(-6).toUpperCase() || "000000"}`,
     appointmentId: appt?.id || null,
     visitId: visit?.id || null,
     clientId: report.clientId,
@@ -804,19 +830,10 @@ function formatReportDetail(report: any, allSpecialists: any[] = []) {
     clientEmail: user?.email || client?.primaryContactEmail || "",
     clientPhone: user?.phone || client?.primaryContactPhone || "",
     clientAddress: address,
-    serviceType: appt?.serviceName || appt?.plan?.name || "Home Safety Oversight",
-    visitDate: visit?.completedAt || appt?.startAt || report.createdAt,
-    formattedVisitDate: (
-      visit?.completedAt ||
-      appt?.startAt ||
-      report.createdAt
-    ).toLocaleDateString("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    }),
-    title: report.title || `${appt?.serviceName || appt?.plan?.name || "Visit"} Report`,
+    serviceType: appt?.serviceName || "Home Safety Oversight",
+    visitDate: visitDateVal,
+    formattedVisitDate: safeFormatDate(visitDateVal),
+    title: report.title || `${appt?.serviceName || "Visit"} Report`,
     reportType: report.reportType,
     status:
       report.status === "GENERATED" || report.status === "UPLOADED"
@@ -838,7 +855,7 @@ function formatReportDetail(report: any, allSpecialists: any[] = []) {
     responses: formattedResponses,
     specialistName,
     specialistTitle,
-    specialistPhone: spec?.phone || "(401) 212-3002",
+    specialistPhone: spec?.phone,
     specialistColor: spec?.color || "#294B68",
     fileUrl: downloadUrl,
     downloadUrl,
@@ -861,7 +878,7 @@ export async function getReportByAppointmentId(
     where: { id: appointmentId },
     include: {
       client: { include: { user: true } },
-      plan: true,
+      technician: true,
       visit: {
         include: {
           technician: true,
@@ -874,7 +891,6 @@ export async function getReportByAppointmentId(
             include: {
               responses: {
                 include: { question: true },
-                orderBy: { question: { order: "asc" } },
               },
             },
           },
@@ -914,7 +930,7 @@ export async function getReportByAppointmentId(
     visit,
     reportType: ReportType.HOME_SAFETY_SCORE,
     status: ReportStatus.GENERATED,
-    title: `${appt.serviceName || appt.plan?.name || "Home Safety"} Assessment Report`,
+    title: `${appt.serviceName || "Home Safety"} Assessment Report`,
     score: visit.assessment?.score ?? 45,
     summary:
       visit.assessment?.summary || "Comprehensive home safety evaluation.",
@@ -938,26 +954,38 @@ async function hydrateReports(rawReports: any[]) {
     new Set(rawReports.map((r) => r.visitId).filter(Boolean)),
   );
 
-  // Parallel fetch specialists, visits, and assessments
-  const [allSpecialists, visits, assessments] = await Promise.all([
-    getAllSpecialists(),
-    visitIds.length > 0
-      ? (prisma.visit.findMany as any)({
-          where: { id: { in: visitIds } },
-        })
-      : Promise.resolve([]),
-    visitIds.length > 0
-      ? (prisma.assessment.findMany as any)({
-          where: { visitId: { in: visitIds } },
-          include: {
-            responses: {
-              include: { question: true },
-              orderBy: { question: { order: "asc" } },
-            },
+  let allSpecialists: any[] = [];
+  let visits: any[] = [];
+  let assessments: any[] = [];
+
+  try {
+    allSpecialists = await getAllSpecialists();
+  } catch (specErr) {
+    console.warn("Could not fetch specialists:", specErr);
+  }
+
+  if (visitIds.length > 0) {
+    try {
+      visits = await (prisma.visit.findMany as any)({
+        where: { id: { in: visitIds } },
+      });
+    } catch (vErr) {
+      console.warn("Could not fetch visits for reports:", vErr);
+    }
+
+    try {
+      assessments = await (prisma.assessment.findMany as any)({
+        where: { visitId: { in: visitIds } },
+        include: {
+          responses: {
+            include: { question: true },
           },
-        })
-      : Promise.resolve([]),
-  ]);
+        },
+      });
+    } catch (aErr) {
+      console.warn("Could not fetch assessments for reports:", aErr);
+    }
+  }
 
   const visitMap = new Map<string, any>(visits.map((v: any) => [v.id, v]));
   const assessmentMap = new Map<string, any>(
@@ -968,35 +996,48 @@ async function hydrateReports(rawReports: any[]) {
   const apptIds = Array.from(
     new Set(visits.map((v: any) => v.appointmentId).filter(Boolean)),
   );
-  const appointments =
-    apptIds.length > 0
-      ? await (prisma.appointment.findMany as any)({
-          where: { id: { in: apptIds } },
-          include: { plan: true, technician: true },
-        })
-      : [];
+
+  let appointments: any[] = [];
+  if (apptIds.length > 0) {
+    try {
+      appointments = await (prisma.appointment.findMany as any)({
+        where: { id: { in: apptIds } },
+        include: { technician: true },
+      });
+    } catch (apptErr) {
+      console.warn("Could not fetch appointments for reports:", apptErr);
+    }
+  }
 
   const apptMap = new Map<string, any>(appointments.map((a: any) => [a.id, a]));
 
-  return rawReports.map((report) => {
-    const visit = report.visitId ? visitMap.get(report.visitId) : null;
-    const populatedVisit = visit ? { ...visit } : null;
+  return rawReports
+    .map((report) => {
+      try {
+        const visit = report.visitId ? visitMap.get(report.visitId) : null;
+        const populatedVisit = visit ? { ...visit } : null;
 
-    if (populatedVisit) {
-      if (populatedVisit.appointmentId) {
-        populatedVisit.appointment =
-          apptMap.get(populatedVisit.appointmentId) || null;
+        if (populatedVisit) {
+          if (populatedVisit.appointmentId) {
+            populatedVisit.appointment =
+              apptMap.get(populatedVisit.appointmentId) || null;
+          }
+          populatedVisit.assessment =
+            assessmentMap.get(populatedVisit.id) || null;
+        }
+
+        const hydratedReport = {
+          ...report,
+          visit: populatedVisit,
+        };
+
+        return formatReportDetail(hydratedReport, allSpecialists);
+      } catch (err) {
+        console.error("Error formatting report item:", err);
+        return null;
       }
-      populatedVisit.assessment = assessmentMap.get(populatedVisit.id) || null;
-    }
-
-    const hydratedReport = {
-      ...report,
-      visit: populatedVisit,
-    };
-
-    return formatReportDetail(hydratedReport, allSpecialists);
-  });
+    })
+    .filter(Boolean);
 }
 
 async function hydrateSingleReport(rawReport: any) {
@@ -1049,18 +1090,23 @@ export async function getMyReports(userId: string) {
     return [];
   }
 
-  const reports = await (prisma.report.findMany as any)({
-    where: {
-      clientId: context.client.id,
-      isArchived: false,
-    },
-    orderBy: { createdAt: "desc" },
-    include: {
-      client: { include: { user: true } },
-    },
-  });
+  try {
+    const reports = await (prisma.report.findMany as any)({
+      where: {
+        clientId: context.client.id,
+      },
+      orderBy: { createdAt: "desc" },
+      include: {
+        client: { include: { user: true } },
+      },
+    });
 
-  return hydrateReports(reports);
+    const activeReports = (reports || []).filter((r: any) => r.isArchived !== true);
+    return hydrateReports(activeReports);
+  } catch (err) {
+    console.error("Error getting client reports:", err);
+    return [];
+  }
 }
 
 /**
@@ -1075,43 +1121,65 @@ export async function getAdminReports(
     limit?: number;
   } = {},
 ) {
-  const where: any = { isArchived: false };
-
-  if (query.status && query.status !== "ALL") {
-    where.status = query.status.toUpperCase();
-  }
+  const where: any = {};
 
   if (query.clientId) {
     where.clientId = query.clientId;
   }
 
-  if (query.search && query.search.trim()) {
-    const term = query.search.trim();
-    where.OR = [
-      { client: { clientNumber: { contains: term, mode: "insensitive" } } },
-      {
-        client: {
-          user: { firstName: { contains: term, mode: "insensitive" } },
-        },
+  let reports: any[] = [];
+  try {
+    reports = await (prisma.report.findMany as any)({
+      where,
+      orderBy: { createdAt: "desc" },
+      include: {
+        client: { include: { user: true } },
       },
-      {
-        client: { user: { lastName: { contains: term, mode: "insensitive" } } },
-      },
-      { title: { contains: term, mode: "insensitive" } },
-    ];
+    });
+  } catch (dbErr) {
+    console.error("Error fetching reports from database:", dbErr);
+    return [];
   }
 
-  const reports = await (prisma.report.findMany as any)({
-    where,
-    orderBy: { createdAt: "desc" },
-    take: query.limit || 50,
-    skip: query.page && query.limit ? (query.page - 1) * query.limit : 0,
-    include: {
-      client: { include: { user: true } },
-    },
-  });
+  // Filter out archived
+  let filteredReports = (reports || []).filter((r: any) => r.isArchived !== true);
 
-  return hydrateReports(reports);
+  // Status filtering in memory (safe across all enum variants)
+  if (query.status && query.status !== "ALL") {
+    const statusUpper = query.status.toUpperCase();
+    filteredReports = filteredReports.filter((r: any) => {
+      if (statusUpper === "AVAILABLE") {
+        return r.status === "GENERATED" || r.status === "UPLOADED";
+      }
+      return r.status === statusUpper;
+    });
+  }
+
+  // Search filtering in memory (resilient across client number, name, title)
+  if (query.search && query.search.trim()) {
+    const term = query.search.trim().toLowerCase();
+    filteredReports = filteredReports.filter((r: any) => {
+      const clientNumber = (r.client?.clientNumber || "").toLowerCase();
+      const firstName = (r.client?.user?.firstName || "").toLowerCase();
+      const lastName = (r.client?.user?.lastName || "").toLowerCase();
+      const fullName = `${firstName} ${lastName}`.trim();
+      const title = (r.title || "").toLowerCase();
+      return (
+        clientNumber.includes(term) ||
+        firstName.includes(term) ||
+        lastName.includes(term) ||
+        fullName.includes(term) ||
+        title.includes(term)
+      );
+    });
+  }
+
+  // Pagination in memory
+  const page = query.page && query.page > 0 ? query.page : 1;
+  const limit = query.limit && query.limit > 0 ? query.limit : 50;
+  const paginated = filteredReports.slice((page - 1) * limit, page * limit);
+
+  return hydrateReports(paginated);
 }
 
 /**

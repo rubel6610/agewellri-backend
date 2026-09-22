@@ -130,7 +130,7 @@ function createTransporter() {
   return null;
 }
 
-function getDefaultFromAddress(senderTitle = "AgeWellRI Care Coordination") {
+function getDefaultFromAddress(senderTitle = "AgeWellRI LLC") {
   return (
     process.env.SMTP_FROM ||
     process.env.EMAIL_FROM ||
@@ -173,14 +173,13 @@ function wrapHtmlEmail(title: string, contentHtml: string): string {
         <div class="container">
           <div class="header">
             <h1>AgeWellRI</h1>
-            <p>Home Safety & Care Coordination</p>
+            <p>Home Safety Coordination</p>
           </div>
           <div class="content">
             ${contentHtml}
           </div>
           <div class="footer">
-            &copy; ${new Date().getFullYear()} AgeWellRI. Westerly, Rhode Island.<br>
-            Protecting independence and safety for Rhode Island seniors.<br>
+            &copy; ${new Date().getFullYear()} AgeWellRI LLC. Westerly, Rhode Island.<br>
             Questions? Contact Support: <a href="mailto:agewellri@gmail.com">agewellri@gmail.com</a> | (401) 212-3002
           </div>
         </div>
@@ -323,7 +322,7 @@ export async function sendBillingRenewalReminderEmail(
     <div class="message">
       ${
         isAuto
-          ? `Your card on file will be automatically billed on <strong>${formattedDate}</strong>. No action is required to maintain continuous safety oversight and home care coordination.`
+          ? `Your card on file will be automatically billed on <strong>${formattedDate}</strong>. No action is required to maintain continuous safety oversight and home safety coordination.`
           : `An invoice statement with online payment instructions will be available in your portal on <strong>${formattedDate}</strong>.`
       }
     </div>
@@ -353,7 +352,7 @@ export async function sendBillingRenewalReminderEmail(
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Billing Services"),
+        from: getDefaultFromAddress("AgeWellRI LLC Billing Services"),
         to,
         subject,
         html: htmlContent,
@@ -459,7 +458,7 @@ export async function sendPaymentSuccessEmail(
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Billing Services"),
+        from: getDefaultFromAddress("AgeWellRI LLC Billing Services"),
         to,
         subject,
         html: htmlContent,
@@ -537,7 +536,7 @@ export async function sendPaymentFailureEmail(
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Billing Services"),
+        from: getDefaultFromAddress("AgeWellRI LLC Billing Services"),
         to,
         subject,
         html: htmlContent,
@@ -613,7 +612,7 @@ export async function sendInvoiceGeneratedEmail(
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Billing Services"),
+        from: getDefaultFromAddress("AgeWellRI LLC Billing Services"),
         to,
         subject,
         html: htmlContent,
@@ -909,10 +908,10 @@ export async function sendPlanPurchaseConfirmationEmail(
       </table>
     </div>
 
-    <!-- Included Care & Service Breakdown Card -->
+    <!-- Included safety & Service Breakdown Card -->
     <div class="highlight-card" style="background: #FFFFFF; border: 1px solid #CBD5E1;">
       <div style="font-size: 12px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.75px; margin-bottom: 10px; border-bottom: 1px solid #E2E8F0; padding-bottom: 6px;">
-        🛡️ Included Care Services &amp; Quotas
+        🛡️ Included safety Services &amp; Quotas
       </div>
       ${planDescription ? `<div style="font-size: 13px; color: #334155; margin-bottom: 8px; font-style: italic;">${planDescription}</div>` : ""}
       ${servicesListHtml}
@@ -948,7 +947,7 @@ export async function sendPlanPurchaseConfirmationEmail(
     <!-- Next Steps -->
     <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 12px; color: #475569; line-height: 1.6;">
       <strong style="color: #243746; font-size: 13px;">What to Expect Next:</strong><br>
-      1. <strong>Care Specialist Assignment:</strong> A dedicated, certified Rhode Island AgeWell Specialist is being matched with your home.<br>
+      1. <strong>safety Specialist Assignment:</strong> A dedicated, certified Rhode Island AgeWell Specialist is being matched with your home.<br>
       2. <strong>First Visit Scheduling:</strong> Your coordinator will reach out to schedule your initial Comprehensive Home Safety Audit, or you can book online anytime.<br>
       3. <strong>Live Family Portal:</strong> Family members  can view real-time visit reports and photo logs from any device.<br>
       <br>
@@ -973,7 +972,7 @@ export async function sendPlanPurchaseConfirmationEmail(
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Care Coordination"),
+        from: getDefaultFromAddress("AgeWellRI LLC"),
         to: recipientString,
         subject,
         html: htmlContent,
@@ -1068,7 +1067,7 @@ export async function sendWelcomeInvitationEmail(
     </div>
 
     <div style="background: #F8FAFC; border: 1px solid #D9E4EC; border-radius: 12px; padding: 14px; font-size: 12px; color: #64748B; line-height: 1.5;">
-      <strong>Note for Family Members:</strong> If you are managing care for a loved one, you can specify your legal authority (e.g., Power of Attorney or Authorized Representative) during the onboarding steps.<br><br>
+      <strong>Note for Family Members:</strong> If you are managing safety for a loved one, you can specify your legal authority (e.g., Power of Attorney or Authorized Representative) during the onboarding steps.<br><br>
       Questions? Contact our team anytime: <strong>${supportPhone}</strong> | <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>
     </div>
   `;
@@ -1359,10 +1358,10 @@ export async function sendAgreementExecutedEmail(
       </table>
     </div>
 
-    <!-- 3. Included Care Services & Visit Quotas Card -->
+    <!-- 3. Included safety Services & Visit Quotas Card -->
     <div class="highlight-card" style="background: #FFFFFF; border: 1px solid #CBD5E1;">
       <div style="font-size: 12px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.75px; margin-bottom: 10px; border-bottom: 1px solid #E2E8F0; padding-bottom: 6px;">
-        🛡️ Included Care Services &amp; Visit Allocations
+        🛡️ Included safety Services &amp; Visit Allocations
       </div>
       ${planDescription ? `<div style="font-size: 13px; color: #334155; margin-bottom: 8px; font-style: italic;">${planDescription}</div>` : ""}
       ${servicesListHtml}
@@ -1396,7 +1395,7 @@ export async function sendAgreementExecutedEmail(
     <!-- 6. Next Steps & Support -->
     <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 12px; color: #475569; line-height: 1.6;">
       <strong style="color: #243746; font-size: 13px;">What to Expect Next:</strong><br>
-      • Your dedicated AgeWellRI Care Coordinator will contact you prior to <strong>${firstBillingDateFormatted}</strong> to introduce your care team and schedule your first home visit.<br>
+      • Your dedicated AgeWellRI LLC will contact you prior to <strong>${firstBillingDateFormatted}</strong> to introduce your safety team and schedule your first home visit.<br>
       • A permanent digital copy of your signed agreement and billing records is stored in your <a href="${portalUrl}/dashboard/agreements" style="color: #294B68; font-weight: 700;">Client Portal</a>.<br><br>
       Questions or need support? Contact our team: <strong>${supportPhone}</strong> | <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>
     </div>
@@ -1418,7 +1417,7 @@ export async function sendAgreementExecutedEmail(
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Care Coordination"),
+        from: getDefaultFromAddress("AgeWellRI LLC"),
         to: recipientString,
         subject,
         html: htmlContent,
@@ -1537,7 +1536,7 @@ export async function sendReportAvailableEmail(
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Care Coordination"),
+        from: getDefaultFromAddress("AgeWellRI LLC"),
         to: recipientString,
         subject,
         html: htmlContent,
@@ -1587,7 +1586,7 @@ export async function sendMONTHLYRenewalActiveEmail(
     allocatedVisits = [],
     totalVisits = 4,
     portalUrl = process.env.FRONTEND_URL || "https://agewellri.com",
-    supportPhone = "(401) 555-CARE",
+    supportPhone = "(401) 212-3002",
     supportEmail = "agewellri@gmail.com",
   } = options;
 
@@ -1657,8 +1656,8 @@ export async function sendMONTHLYRenewalActiveEmail(
     </div>
 
     <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 12px; color: #475569; line-height: 1.6;">
-      <strong>Care Scheduling Notice:</strong><br>
-      You can select your preferred dates, times, and specialists directly from your member portal. If you need any assistance scheduling, our care coordination team is available at <strong>${supportPhone}</strong> or <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>.
+      <strong>safety Scheduling Notice:</strong><br>
+      You can select your preferred dates, times, and specialists directly from your member portal. If you need any assistance scheduling, our agewellri team is available at <strong>${supportPhone}</strong> or <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>.
     </div>
   `;
 
@@ -1678,7 +1677,7 @@ export async function sendMONTHLYRenewalActiveEmail(
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Care Coordination"),
+        from: getDefaultFromAddress("AgeWellRI LLC"),
         to: recipientString,
         subject,
         html: htmlContent,
@@ -1777,7 +1776,7 @@ export async function sendFamilyMemberCredentialsEmail(
       <ul style="margin: 8px 0 0 0; padding-left: 20px;">
         <li>View upcoming and past home safety visits</li>
         <li>Review official specialist inspection reports and photos</li>
-        <li>Oversee care coordination and safety records just like the primary member</li>
+        <li>Oversee safety records just like the primary member</li>
       </ul>
     </div>
 
@@ -1915,7 +1914,7 @@ export async function sendFamilyMemberInvitationEmail(
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Family Care"),
+        from: getDefaultFromAddress("AgeWellRI Family Safety"),
         to,
         subject,
         html: htmlContent,
@@ -2137,7 +2136,7 @@ export async function sendSubscriptionCancelledEmail(
 
     <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 13px; color: #294B68; line-height: 1.6; margin-bottom: 24px;">
       <strong>We're sorry to see you go — you're always welcome back.</strong><br>
-      You can sign in again anytime to reactivate your plan or manage your care coordination services.
+      You can sign in again anytime to reactivate your plan or manage your safety coordination services.
     </div>
 
     <div style="text-align: center; margin: 24px 0;">
@@ -2167,7 +2166,7 @@ export async function sendSubscriptionCancelledEmail(
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Billing Services"),
+        from: getDefaultFromAddress("AgeWellRI LLC Billing Services"),
         to: recipientString,
         subject,
         html: htmlContent,
@@ -2299,7 +2298,7 @@ export async function sendSubscriptionReactivatedEmail(
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Billing Services"),
+        from: getDefaultFromAddress("AgeWellRI LLC Billing Services"),
         to: recipientString,
         subject,
         html: htmlContent,
