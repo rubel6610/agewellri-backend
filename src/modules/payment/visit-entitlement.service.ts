@@ -43,7 +43,7 @@ export interface ClientVisitEntitlementsResponse {
 export async function ensureVisitAllocationsForPeriod(
   subscriptionPeriodId: string,
   planId?: string | null,
-  _hasCleaningAddon: boolean = false
+  _hasCleaningAddon: boolean = false,
 ): Promise<void> {
   const period = await prisma.subscriptionPeriod.findUnique({
     where: { id: subscriptionPeriodId },
@@ -100,7 +100,7 @@ export async function ensureVisitAllocationsForPeriod(
  */
 export function formatPeriodEntitlements(
   period: any,
-  appointments: any[] = []
+  appointments: any[] = [],
 ): VisitEntitlementItem[] {
   if (!period || !period.allocations || period.allocations.length === 0) {
     return [];
@@ -123,15 +123,15 @@ export function formatPeriodEntitlements(
   return period.allocations.map((alloc: any) => {
     const scheduledCount = periodAppts.filter((a: any) =>
       ["SCHEDULED", "CONFIRMED", "RESCHEDULED"].includes(
-        a.status?.toUpperCase()
-      )
+        a.status?.toUpperCase(),
+      ),
     ).length;
 
     const completedCount =
       alloc.usedCount > 0
         ? alloc.usedCount
         : periodAppts.filter(
-            (a: any) => a.status?.toUpperCase() === "COMPLETED"
+            (a: any) => a.status?.toUpperCase() === "COMPLETED",
           ).length;
 
     const allocated = alloc.allocatedCount || 0;
@@ -165,7 +165,7 @@ export function formatPeriodEntitlements(
  * GET current visit entitlements for an authenticated Client user
  */
 export async function getClientVisitEntitlements(
-  userId: string
+  userId: string,
 ): Promise<ClientVisitEntitlementsResponse> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -223,7 +223,7 @@ export async function getClientVisitEntitlements(
       await ensureVisitAllocationsForPeriod(
         newPeriod.id,
         activeSub?.planId,
-        Boolean(client?.hasCleaningAddon)
+        Boolean(client?.hasCleaningAddon),
       );
 
       const refreshedPeriod = await prisma.subscriptionPeriod.findUnique({
@@ -245,7 +245,7 @@ export async function getClientVisitEntitlements(
     await ensureVisitAllocationsForPeriod(
       currentPeriod.id,
       activeSub?.planId,
-      Boolean(client?.hasCleaningAddon)
+      Boolean(client?.hasCleaningAddon),
     );
 
     const refreshedPeriod = await prisma.subscriptionPeriod.findUnique({
@@ -262,7 +262,7 @@ export async function getClientVisitEntitlements(
 
   let entitlements = formatPeriodEntitlements(
     currentPeriod,
-    client?.appointments || []
+    client?.appointments || [],
   );
 
   // If entitlements array is empty, derive dynamically from active subscription plan
@@ -288,19 +288,19 @@ export async function getClientVisitEntitlements(
 
   const totalAllocated = entitlements.reduce(
     (sum, item) => sum + item.allocated,
-    0
+    0,
   );
   const totalScheduled = entitlements.reduce(
     (sum, item) => sum + item.scheduled,
-    0
+    0,
   );
   const totalCompleted = entitlements.reduce(
     (sum, item) => sum + item.completed,
-    0
+    0,
   );
   const totalRemaining = entitlements.reduce(
     (sum, item) => sum + item.remaining,
-    0
+    0,
   );
 
   const rawPlanName =
@@ -344,7 +344,7 @@ export async function getClientVisitEntitlements(
  * GET visit entitlements for any Client by ID (Admin authorization)
  */
 export async function getAdminClientVisitEntitlements(
-  clientId: string
+  clientId: string,
 ): Promise<ClientVisitEntitlementsResponse> {
   const client = await prisma.client.findUnique({
     where: { id: clientId },
@@ -383,7 +383,7 @@ export async function getAdminClientVisitEntitlements(
     await ensureVisitAllocationsForPeriod(
       currentPeriod.id,
       activeSub?.planId,
-      client.hasCleaningAddon
+      client.hasCleaningAddon,
     );
 
     const refreshedPeriod = await prisma.subscriptionPeriod.findUnique({
@@ -400,24 +400,24 @@ export async function getAdminClientVisitEntitlements(
 
   const entitlements = formatPeriodEntitlements(
     currentPeriod,
-    client.appointments || []
+    client.appointments || [],
   );
 
   const totalAllocated = entitlements.reduce(
     (sum, item) => sum + item.allocated,
-    0
+    0,
   );
   const totalScheduled = entitlements.reduce(
     (sum, item) => sum + item.scheduled,
-    0
+    0,
   );
   const totalCompleted = entitlements.reduce(
     (sum, item) => sum + item.completed,
-    0
+    0,
   );
   const totalRemaining = entitlements.reduce(
     (sum, item) => sum + item.remaining,
-    0
+    0,
   );
 
   const planName =

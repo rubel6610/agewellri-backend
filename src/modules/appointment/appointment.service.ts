@@ -478,6 +478,7 @@ async function validateAndExecuteContractualScheduling(
   const completedCount = existingAppts.filter(
     (a: any) => a.status === AppointmentStatus.COMPLETED,
   ).length;
+
   const remainingCount = Math.max(
     0,
     totalAllocated - (scheduledCount + completedCount),

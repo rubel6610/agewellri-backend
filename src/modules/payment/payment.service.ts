@@ -5,7 +5,6 @@ import {
   PaymentStatus,
   BillingInterval,
   BillingMethod,
-  ServiceTypeCategory,
   RenewalStatus,
 } from "@prisma/client";
 import prisma from "../../lib/prisma";
@@ -1242,6 +1241,7 @@ export async function reactivateSubscriptionRenewal(userId: string) {
   const nextBillingDate = sub.nextRenewalDate || sub.currentPeriodEnd;
   const recurringAmount =
     sub.contractedPrice ?? sub.plan?.price ?? null;
+    sub.contractedPrice ?? sub.plan?.price ?? null;
 
   if (recipientEmail) {
     try {
@@ -1302,6 +1302,7 @@ export async function reactivateSubscriptionRenewal(userId: string) {
 
 /**
  * Client Billing Overview for /dashboard/billing
+ * Displays the client's contracted ServicePlan and price terms.
  * Displays the client's contracted ServicePlan and price terms.
  */
 export async function getBillingOverview(userId: string) {
@@ -1696,6 +1697,7 @@ export async function handleStripeWebhook(
               });
             }
 
+            // Provision fresh visit allocations idempotently from active plan
             // Provision fresh visit allocations idempotently from active plan
             await ensureVisitAllocationsForPeriod(
               newPeriod.id,
