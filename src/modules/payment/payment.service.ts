@@ -2981,3 +2981,65 @@ export async function adminUpdateSubscriptionStatus(
     subscription: updated,
   };
 }
+
+/**
+ * Admin: Delete an Invoice / Billing Record
+ */
+export async function deleteInvoice(
+  invoiceId: string,
+  actorUserId?: string,
+) {
+  const invoice = await prisma.invoice.findUnique({
+    where: { id: invoiceId },
+    include: {
+      client: {
+        include: {
+          user: true,
+        },
+      },
+      subscription: true,
+    },
+  });
+
+  if (!invoice) {
+    throw new Error(`Invoice with ID ${invoiceId} not found.`);
+  }
+
+  // Unlink or clean up relations referencing this invoice
+  await prisma.payment.updateMany({
+    where: { invoiceId },
+    data: { invoiceId: null },
+  });
+
+  await prisma.renewal.updateMany({
+    where: { invoiceId },
+    data: { invoiceId: null },
+  });
+
+  const deleted = await prisma.invoice.delete({
+    where: { id: invoiceId },
+  });
+
+  await createBillingAuditLog({
+    actorUserId,
+    action: "INVOICE_DELETED",
+    entityType: "Invoice",
+    entityId: invoiceId,
+    metadata: {
+      invoiceNumber: invoice.invoiceNumber,
+      amount: invoice.amount,
+      status: invoice.status,
+      billingMethod: invoice.billingMethod,
+      clientId: invoice.clientId,
+      clientName: `${invoice.client?.user?.firstName || ""} ${invoice.client?.user?.lastName || ""}`.trim(),
+      deletedAt: new Date(),
+    },
+  });
+
+  return {
+    success: true,
+    message: `Invoice ${invoice.invoiceNumber} has been permanently deleted.`,
+    invoice: deleted,
+  };
+}
+

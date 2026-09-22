@@ -768,3 +768,37 @@ export async function handleAdminUpdateSubscriptionStatus(
     next(error);
   }
 }
+
+/**
+ * DELETE /api/v1/payments/admin/invoices/:id
+ * Admin delete invoice / billing record endpoint.
+ */
+export async function handleAdminDeleteInvoice(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      res
+        .status(403)
+        .json({ success: false, message: "Admin authorization required." });
+      return;
+    }
+
+    const invoiceId = Array.isArray(req.params.id)
+      ? req.params.id[0]
+      : (req.params.id as string);
+
+    const result = await paymentService.deleteInvoice(invoiceId, req.user.id);
+
+    res.status(200).json({
+      success: true,
+      message: result.message || "Invoice deleted successfully.",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
