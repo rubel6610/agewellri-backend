@@ -42,32 +42,75 @@ export function invalidateSpecialistsCache() {
  * List all specialists directly from database (100% real-time).
  */
 export async function getAllSpecialists(_forceRefresh = true) {
-  const result: any = await (prisma as any).$runCommandRaw({
-    find: "Technician",
-    filter: { isArchived: { $ne: true } },
-  });
+  try {
+    if ((prisma as any).technician?.findMany) {
+      const docs = await (prisma as any).technician.findMany({
+        where: { isArchived: false },
+        orderBy: { displayOrder: "asc" },
+      });
+      return docs.map((doc: any) => ({
+        id: String(doc.id),
+        name: doc.name || "Specialist",
+        email: doc.email || null,
+        phone: doc.phone || null,
+        title: doc.title || "Home Safety Specialist",
+        specialties: doc.specialties || [],
+        shssCertified: Boolean(doc.shssCertified),
+        shssRenewalDate: doc.shssRenewalDate || null,
+        cprCertified: Boolean(doc.cprCertified),
+        aedCertified: Boolean(doc.aedCertified),
+        backgroundChecked: Boolean(doc.backgroundChecked),
+        bilingualSpanish: Boolean(doc.bilingualSpanish),
+        color: doc.color || "#294B68",
+        status: doc.status || "ACTIVE",
+        notes: doc.notes || null,
+        displayOrder: doc.displayOrder ?? 0,
+        activeAssignmentsCount: 0,
+        createdAt: doc.createdAt || new Date(),
+        updatedAt: doc.updatedAt || new Date(),
+      }));
+    }
+  } catch (err) {
+    console.warn("Falling back to raw query for technicians:", err);
+  }
 
-  const docs = result?.cursor?.firstBatch || [];
+  try {
+    const result: any = await (prisma as any).$runCommandRaw({
+      find: "Technician",
+      filter: { isArchived: { $ne: true } },
+    });
 
-  const mapped = docs
-    .map((doc: any) => ({
-      id: doc._id?.$oid || String(doc._id),
-      name: doc.name || "Specialist",
-      email: doc.email || null,
-      phone: doc.phone || null,
-      title: doc.title || "Home Safety Specialist",
-      specialties: doc.specialties || ["Safety Oversight", "Fall Hazard Mitigation"],
-      color: doc.color || "#294B68",
-      status: doc.status || "ACTIVE",
-      notes: doc.notes || null,
-      displayOrder: doc.displayOrder ?? 0,
-      activeAssignmentsCount: 0,
-      createdAt: doc.createdAt?.$date || doc.createdAt || new Date(),
-      updatedAt: doc.updatedAt?.$date || doc.updatedAt || new Date(),
-    }))
-    .sort((a: any, b: any) => a.displayOrder - b.displayOrder);
+    const docs = result?.cursor?.firstBatch || [];
 
-  return mapped;
+    const mapped = docs
+      .map((doc: any) => ({
+        id: doc._id?.$oid || String(doc._id),
+        name: doc.name || "Specialist",
+        email: doc.email || null,
+        phone: doc.phone || null,
+        title: doc.title || "Home Safety Specialist",
+        specialties: doc.specialties || [],
+        shssCertified: Boolean(doc.shssCertified),
+        shssRenewalDate: doc.shssRenewalDate || null,
+        cprCertified: Boolean(doc.cprCertified),
+        aedCertified: Boolean(doc.aedCertified),
+        backgroundChecked: Boolean(doc.backgroundChecked),
+        bilingualSpanish: Boolean(doc.bilingualSpanish),
+        color: doc.color || "#294B68",
+        status: doc.status || "ACTIVE",
+        notes: doc.notes || null,
+        displayOrder: doc.displayOrder ?? 0,
+        activeAssignmentsCount: 0,
+        createdAt: doc.createdAt?.$date || doc.createdAt || new Date(),
+        updatedAt: doc.updatedAt?.$date || doc.updatedAt || new Date(),
+      }))
+      .sort((a: any, b: any) => a.displayOrder - b.displayOrder);
+
+    return mapped;
+  } catch (rawErr) {
+    console.warn("Could not fetch specialists:", rawErr);
+    return [];
+  }
 }
 
 /**
@@ -91,7 +134,13 @@ export async function createSpecialist(input: CreateSpecialistInput, actorUserId
     email: input.email || null,
     phone: input.phone || null,
     title: input.title || "Home Safety Specialist",
-    specialties: input.specialties || ["Home Safety Checks", "Fall Prevention"],
+    specialties: input.specialties || [],
+    shssCertified: Boolean(input.shssCertified),
+    shssRenewalDate: input.shssRenewalDate || null,
+    cprCertified: Boolean(input.cprCertified),
+    aedCertified: Boolean(input.aedCertified),
+    backgroundChecked: Boolean(input.backgroundChecked),
+    bilingualSpanish: Boolean(input.bilingualSpanish),
     color: input.color || "#294B68",
     status: input.status || "ACTIVE",
     notes: input.notes || null,
@@ -132,6 +181,12 @@ export async function updateSpecialist(
   if (input.phone !== undefined) updateFields.phone = input.phone;
   if (input.title !== undefined) updateFields.title = input.title;
   if (input.specialties !== undefined) updateFields.specialties = input.specialties;
+  if (input.shssCertified !== undefined) updateFields.shssCertified = input.shssCertified;
+  if (input.shssRenewalDate !== undefined) updateFields.shssRenewalDate = input.shssRenewalDate;
+  if (input.cprCertified !== undefined) updateFields.cprCertified = input.cprCertified;
+  if (input.aedCertified !== undefined) updateFields.aedCertified = input.aedCertified;
+  if (input.backgroundChecked !== undefined) updateFields.backgroundChecked = input.backgroundChecked;
+  if (input.bilingualSpanish !== undefined) updateFields.bilingualSpanish = input.bilingualSpanish;
   if (input.color !== undefined) updateFields.color = input.color;
   if (input.status !== undefined) updateFields.status = input.status;
   if (input.notes !== undefined) updateFields.notes = input.notes;
@@ -170,25 +225,19 @@ export async function updateSpecialist(
  */
 export async function deleteSpecialist(specialistId: string, actorUserId?: string) {
   try {
-    await (prisma as any).$runCommandRaw({
-      update: "Technician",
-      updates: [
-        {
-          q: {
-            $or: [
-              { _id: { $oid: specialistId } },
-              { _id: specialistId },
-            ],
-          },
-          u: { $set: { isArchived: true, status: "INACTIVE", updatedAt: new Date() } },
-        },
-      ],
-    });
-  } catch (rawErr: any) {
+    if ((prisma as any).technician?.update) {
+      await (prisma as any).technician.update({
+        where: { id: specialistId },
+        data: { isArchived: true, status: "INACTIVE", updatedAt: new Date() },
+      });
+    } else {
+      throw new Error("fallback to raw");
+    }
+  } catch {
     try {
       await (prisma as any).$runCommandRaw({
-        delete: "Technician",
-        deletes: [
+        update: "Technician",
+        updates: [
           {
             q: {
               $or: [
@@ -196,11 +245,28 @@ export async function deleteSpecialist(specialistId: string, actorUserId?: strin
                 { _id: specialistId },
               ],
             },
-            limit: 1,
+            u: { $set: { isArchived: true, status: "INACTIVE", updatedAt: new Date() } },
           },
         ],
       });
-    } catch {}
+    } catch (rawErr: any) {
+      try {
+        await (prisma as any).$runCommandRaw({
+          delete: "Technician",
+          deletes: [
+            {
+              q: {
+                $or: [
+                  { _id: { $oid: specialistId } },
+                  { _id: specialistId },
+                ],
+              },
+              limit: 1,
+            },
+          ],
+        });
+      } catch {}
+    }
   }
 
   await createSpecialistAuditLog({
@@ -288,19 +354,19 @@ export async function seedDefaultSpecialists() {
 
     await createSpecialist({
       name: "Sarah Miller",
-      title: "Senior Environmental & Cleaning Specialist",
+      title: "Senior Environmental & Safety Specialist",
       phone: "(401) 555-0168",
       email: "sarah.miller@agewellri.com",
-      specialties: ["HEPA Allergen Cleaning", "Pathway Clearance", "Sanitization"],
+      specialties: ["Environmental Safety", "Pathway Clearance", "Hazard Mitigation"],
       color: "#3F8F6B",
       status: "ACTIVE",
       displayOrder: 2,
-      notes: "Lead cleaning specialist for South County residences.",
+      notes: "Senior environmental safety specialist for South County residences.",
     });
 
     await createSpecialist({
       name: "David Chen",
-      title: "Safety Specialist & Care Assessor",
+      title: "Safety Specialist",
       phone: "(401) 555-0192",
       email: "david.chen@agewellri.com",
       specialties: ["Wellness Check-ins", "Lighting & Rug Safety", "Home Hazard Mitigation"],

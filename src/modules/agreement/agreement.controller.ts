@@ -245,3 +245,138 @@ export async function handleSendAgreementReminder(
     });
   }
 }
+
+/**
+ * POST /api/v1/agreements/upload-authority-document
+ * Upload POA / legal authority document
+ */
+export async function handleUploadAuthorityDocument(
+  req: AuthenticatedRequest,
+  res: Response,
+  _next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.file) {
+      sendResponse(res, {
+        statusCode: 400,
+        success: false,
+        message: "No document file was uploaded.",
+      });
+      return;
+    }
+
+    const fileUrl = `/uploads/authority-documents/${req.file.filename}`;
+    sendResponse(res, {
+      statusCode: 200,
+      success: true,
+      message: "Authority document uploaded successfully.",
+      data: {
+        fileUrl,
+        originalName: req.file.originalname,
+        size: req.file.size,
+      },
+    });
+  } catch (error: any) {
+    sendResponse(res, {
+      statusCode: 500,
+      success: false,
+      message: error.message || "Failed to upload authority document.",
+    });
+  }
+}
+
+/**
+ * DELETE /api/v1/agreements/admin/:id
+ * Admin delete agreement
+ */
+export async function handleDeleteAgreement(
+  req: AuthenticatedRequest,
+  res: Response,
+  _next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      sendResponse(res, {
+        statusCode: 403,
+        success: false,
+        message: "Access restricted to administrators.",
+      });
+      return;
+    }
+
+    const result = await agreementService.deleteAgreement(req.user.id, req.params.id as string);
+    sendResponse(res, {
+      statusCode: 200,
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (error: any) {
+    sendResponse(res, {
+      statusCode: 400,
+      success: false,
+      message: error.message || "Failed to delete service agreement.",
+    });
+  }
+}
+
+/**
+ * GET /api/v1/agreements/:id/authority-document/download
+ * GET /api/v1/agreements/my-agreement/authority-document/download
+ * GET /api/v1/agreements/authority-document/download?file=...
+ * Download or stream Legal Authority Document
+ */
+export async function handleDownloadAuthorityDocument(
+  req: AuthenticatedRequest,
+  res: Response,
+  _next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user) {
+      sendResponse(res, {
+        statusCode: 401,
+        success: false,
+        message: "Authentication required.",
+      });
+      return;
+    }
+
+    const identifier =
+      (req.params.id as string) ||
+      (req.query.file as string) ||
+      (req.query.filename as string) ||
+      (req.path.includes("my-agreement") ? "my-agreement" : "my-agreement");
+
+    const isInline =
+      req.query.inline === "true" ||
+      req.path.endsWith("/file") ||
+      req.path.endsWith("/view");
+
+    const fileInfo = await agreementService.getAuthorityDocumentForDownload(
+      identifier,
+      req.user
+    );
+
+    res.setHeader("Content-Type", fileInfo.mimeType);
+    res.setHeader(
+      "Content-Disposition",
+      `${isInline ? "inline" : "attachment"}; filename="${encodeURIComponent(fileInfo.fileName)}"`
+    );
+
+    res.sendFile(fileInfo.filePath);
+  } catch (error: any) {
+    const isForbidden =
+      error.message?.includes("permission") ||
+      error.message?.includes("restricted");
+    const isNotFound =
+      error.message?.includes("not found") ||
+      error.message?.includes("missing") ||
+      error.message?.includes("attached");
+    res.status(isForbidden ? 403 : isNotFound ? 404 : 500).json({
+      success: false,
+      message: error.message || "Failed to download authority document.",
+    });
+  }
+}
+
+

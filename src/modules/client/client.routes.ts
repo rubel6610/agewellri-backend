@@ -5,9 +5,22 @@ import {
   handleGetAllAdminClients,
   handleGetAdminClientById,
   handleGetAdminDashboardStats,
+  handleGetClientAccessMethods,
+  handleAddClientAccessMethod,
+  handleUpdateClientAccessMethod,
+  handleDeleteClientAccessMethod,
+  handleSetDefaultClientAccessMethod,
+  handleDeleteAdminClient,
 } from "./client.controller";
 
 const router = Router();
+
+// Member Portal: Client Access Methods Management
+router.get("/access-methods", authenticate, handleGetClientAccessMethods);
+router.post("/access-methods", authenticate, handleAddClientAccessMethod);
+router.put("/access-methods/:id", authenticate, handleUpdateClientAccessMethod);
+router.delete("/access-methods/:id", authenticate, handleDeleteClientAccessMethod);
+router.patch("/access-methods/:id/default", authenticate, handleSetDefaultClientAccessMethod);
 
 // Admin Dashboard Analytics & KPI Statistics (Real-time live data)
 router.get(
@@ -27,6 +40,12 @@ router.get(
   "/admin/:id",
   authenticate,
   handleGetAdminClientById
+);
+
+router.delete(
+  "/admin/:id",
+  authenticate,
+  handleDeleteAdminClient
 );
 
 export default router;

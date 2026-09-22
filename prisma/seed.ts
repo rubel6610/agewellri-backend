@@ -12,11 +12,11 @@ const prisma = new PrismaClient();
 async function main() {
   console.log("🌱 Starting Admin, Plans, Specialists and State Agreements Seeding...");
 
-  const adminEmail = (process.env.ADMIN_EMAIL || "admin@yopmail.com").toLowerCase().trim();
-  const adminPassword = process.env.ADMIN_PASSWORD || "Admin123!";
-  const firstName = process.env.ADMIN_FIRST_NAME || "System";
-  const lastName = process.env.ADMIN_LAST_NAME || "Admin";
-  const phone = process.env.ADMIN_PHONE || "(401) 712-3012";
+  const adminEmail = process.env.ADMIN_EMAIL!.toLowerCase().trim();
+  const adminPassword = process.env.ADMIN_PASSWORD!;
+  const firstName = process.env.ADMIN_FIRST_NAME!;
+  const lastName = process.env.ADMIN_LAST_NAME!;
+  const phone = process.env.ADMIN_PHONE;
 
   const passwordHash = await bcrypt.hash(adminPassword, 12);
 
@@ -54,9 +54,9 @@ async function main() {
   console.log(`🆔 ID:       ${adminUser.id}`);
   console.log("=======================================================\n");
 
-  console.log("📦 Seeding initial dynamic service plans & catalog...");
+  console.log("📦 Initializing service catalog types...");
   await seedInitialPlansAndServices();
-  console.log("✅ Service plans & services catalog ready!");
+  console.log("✅ Service types ready!");
 
   console.log("👷 Seeding default Rhode Island safety specialists...");
   await seedDefaultSpecialists();

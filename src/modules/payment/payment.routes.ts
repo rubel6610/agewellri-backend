@@ -20,6 +20,7 @@ import {
   handleAdminCancelSubscription,
   handleAdminReactivateSubscription,
   handleAdminUpdateSubscriptionStatus,
+  handleAdminDeleteInvoice,
   handleWebhook,
   handleGetClientVisitEntitlements,
   handleGetAdminClientVisitEntitlements,
@@ -46,6 +47,7 @@ router.post("/subscription/reactivate-renewal", authenticate, handleReactivateRe
 // Protected Admin routes (Requires valid JWT and ADMIN role)
 router.get("/admin/overview", authenticate, handleGetAdminOverview);
 router.get("/admin/invoices", authenticate, handleGetAdminInvoices);
+router.delete("/admin/invoices/:id", authenticate, handleAdminDeleteInvoice);
 router.get("/admin/subscriptions", authenticate, handleGetAdminSubscriptions);
 router.post("/admin/subscription/:id/cancel", authenticate, handleAdminCancelSubscription);
 router.post("/admin/subscription/:id/reactivate", authenticate, handleAdminReactivateSubscription);

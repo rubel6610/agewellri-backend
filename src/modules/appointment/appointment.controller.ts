@@ -7,6 +7,13 @@ import {
   RescheduleAppointmentSchema,
   UpdateAppointmentStatusSchema,
 } from "./appointment.validation";
+import { formatToHumanReadable } from "../../middlewares/error.middleware";
+
+function formatClientErrorMessage(error: any): string {
+  if (!error) return "An unexpected error occurred.";
+  const msg = error.message || String(error);
+  return formatToHumanReadable(msg);
+}
 
 /**
  * POST /api/v1/appointments/schedule
@@ -43,7 +50,7 @@ export async function handleScheduleClientAppointment(
     if (error instanceof Error) {
       res.status(400).json({
         success: false,
-        message: error.message,
+        message: formatClientErrorMessage(error),
       });
       return;
     }
@@ -86,7 +93,7 @@ export async function handleScheduleAdminAppointment(
     if (error instanceof Error) {
       res.status(400).json({
         success: false,
-        message: error.message,
+        message: formatClientErrorMessage(error),
       });
       return;
     }
@@ -118,7 +125,7 @@ export async function handleGetClientAppointments(
     });
   } catch (error: any) {
     if (error instanceof Error) {
-      res.status(400).json({ success: false, message: error.message });
+      res.status(400).json({ success: false, message: formatClientErrorMessage(error) });
       return;
     }
     next(error);
@@ -160,7 +167,7 @@ export async function handleGetAdminAppointments(
     });
   } catch (error: any) {
     if (error instanceof Error) {
-      res.status(400).json({ success: false, message: error.message });
+      res.status(400).json({ success: false, message: formatClientErrorMessage(error) });
       return;
     }
     next(error);
@@ -192,7 +199,7 @@ export async function handleGetAppointmentById(
     });
   } catch (error: any) {
     if (error instanceof Error) {
-      res.status(400).json({ success: false, message: error.message });
+      res.status(400).json({ success: false, message: formatClientErrorMessage(error) });
       return;
     }
     next(error);
@@ -242,7 +249,7 @@ export async function handleRescheduleAppointment(
     if (error instanceof Error) {
       res.status(400).json({
         success: false,
-        message: error.message,
+        message: formatClientErrorMessage(error),
       });
       return;
     }
@@ -283,7 +290,7 @@ export async function handleCancelAppointment(
     });
   } catch (error: any) {
     if (error instanceof Error) {
-      res.status(400).json({ success: false, message: error.message });
+      res.status(400).json({ success: false, message: formatClientErrorMessage(error) });
       return;
     }
     next(error);
@@ -331,7 +338,7 @@ export async function handleUpdateAppointmentStatus(
     if (error instanceof Error) {
       res.status(400).json({
         success: false,
-        message: error.message,
+        message: formatClientErrorMessage(error),
       });
       return;
     }
@@ -380,7 +387,7 @@ export async function handleAcceptVisitRequest(
     if (error instanceof Error) {
       res.status(400).json({
         success: false,
-        message: error.message,
+        message: formatClientErrorMessage(error),
       });
       return;
     }
@@ -421,7 +428,7 @@ export async function handleDeclineVisitRequest(
     if (error instanceof Error) {
       res.status(400).json({
         success: false,
-        message: error.message,
+        message: formatClientErrorMessage(error),
       });
       return;
     }

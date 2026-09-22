@@ -61,7 +61,6 @@ export const submitAgreementSchema = z.object({
   signerRole: z.enum([
     "RESIDENT",
     "FAMILY_MEMBER",
-    "CAREGIVER",
     "POWER_OF_ATTORNEY",
     "AUTHORIZED_REPRESENTATIVE",
   ]).default("RESIDENT"),
@@ -83,7 +82,7 @@ export const submitAgreementSchema = z.object({
   // Dynamic Plan & Billing
   planId: z.string().optional().nullable(),
   planVersionId: z.string().optional().nullable(),
-  selectedPlan: z.string().default("GUARDIAN_PLUS"),
+  selectedPlan: z.string().optional().nullable(),
   hasCleaningAddon: z.boolean().default(false),
   billingMethod: z.enum(["AUTOMATIC", "INVOICE"]).default("AUTOMATIC"),
   paymentMethodId: z.string().optional().nullable(),

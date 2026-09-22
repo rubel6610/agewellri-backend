@@ -4,14 +4,10 @@ model Subscription {
   client                  Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
   planId                  String?            @db.ObjectId
   plan                    ServicePlan?       @relation(fields: [planId], references: [id], onDelete: SetNull)
-  planVersionId           String?            @db.ObjectId
-  planVersion             PlanVersion?       @relation(fields: [planVersionId], references: [id], onDelete: SetNull)
-  planPriceId             String?            @db.ObjectId
-  planPrice               PlanPrice?         @relation(fields: [planPriceId], references: [id], onDelete: SetNull)
   contractedPrice         Float?
   currency                String             @default("USD")
   status                  SubscriptionStatus @default(PENDING)
-  billingInterval         BillingInterval    @default(QUARTERLY)
+  billingInterval         BillingInterval    @default(MONTHLY)
   billingMethod           BillingMethod      @default(AUTOMATIC)
   currentPeriodStart      DateTime
   currentPeriodEnd        DateTime
@@ -66,12 +62,11 @@ model VisitAllocation {
   id                   String             @id @default(auto()) @map("_id") @db.ObjectId
   subscriptionPeriodId String             @db.ObjectId
   subscriptionPeriod   SubscriptionPeriod @relation(fields: [subscriptionPeriodId], references: [id], onDelete: Cascade)
-  serviceTypeId        String?            @db.ObjectId
-  serviceType          ServiceType?       @relation(fields: [serviceTypeId], references: [id], onDelete: SetNull)
+  serviceName          String             @default("")
   allocatedCount       Int
   usedCount            Int                @default(0)
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 
-  @@unique([subscriptionPeriodId, serviceTypeId])
+  @@index([subscriptionPeriodId])
 }

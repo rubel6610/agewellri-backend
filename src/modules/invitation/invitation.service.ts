@@ -4,11 +4,16 @@ import prisma from "../../lib/prisma";
 import { hashPassword } from "../../utils/password";
 import { generateAuthTokens } from "../../utils/jwt";
 import { sendWelcomeInvitationEmail } from "../../utils/email";
+import { generateNextClientNumber } from "../../utils/client-number.util";
 import {
   CreateInvitationInput,
   AcceptInvitationInput,
   SaveOnboardingProgressInput,
 } from "./invitation.validation";
+import {
+  createNotification,
+  notifyAdmins,
+} from "../notification/notification.service";
 
 function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -76,7 +81,7 @@ export async function sendWelcomeInvitation(
         invitationLink,
         expiresAt,
         state: input.state,
-        planName: input.planName,
+        planName: input.planName || undefined,
       });
     } catch (emailErr) {
       console.warn("[WARN] Invitation email delivery failed (link still generated):", emailErr);
@@ -213,36 +218,51 @@ export async function acceptInvitation(input: AcceptInvitationInput) {
 
   // Create User & Client
   const passwordHash = await hashPassword(input.password);
-  const clientCount = await prisma.client.count();
-  const clientNumber = `AW-${1001 + clientCount}`;
-
-  user = await (prisma.user.create as any)({
-    data: {
-      email,
-      passwordHash,
-      firstName: input.firstName.trim(),
-      lastName: input.lastName.trim(),
-      phone: input.phone.trim(),
-      role: UserRole.CLIENT,
-      status: UserStatus.ACTIVE,
-      emailVerifiedAt: new Date(),
-      client: {
-        create: {
-          clientNumber,
-          address: input.address?.trim() || "TBD",
-          city: input.city?.trim() || "Providence",
-          state: input.state?.trim() || "RI",
-          postalCode: input.postalCode?.trim() || "02906",
-          country: "USA",
-          onboardingStatus: OnboardingStatus.ACCOUNT_CREATED,
-          onboardingStep: 1,
+  let attempts = 0;
+  const maxAttempts = 5;
+  while (attempts < maxAttempts) {
+    try {
+      const clientNumber = await generateNextClientNumber();
+      user = await (prisma.user.create as any)({
+        data: {
+          email,
+          passwordHash,
+          firstName: input.firstName.trim(),
+          lastName: input.lastName.trim(),
+          phone: input.phone.trim(),
+          role: UserRole.CLIENT,
+          status: UserStatus.ACTIVE,
+          emailVerifiedAt: new Date(),
+          client: {
+            create: {
+              clientNumber,
+              address: input.address?.trim() || "TBD",
+              city: input.city?.trim() || "Providence",
+              state: input.state?.trim() || "RI",
+              postalCode: input.postalCode?.trim() || "02906",
+              country: "USA",
+              onboardingStatus: OnboardingStatus.ACCOUNT_CREATED,
+              onboardingStep: 1,
+            },
+          },
         },
-      },
-    },
-    include: {
-      client: true,
-    },
-  });
+        include: {
+          client: true,
+        },
+      });
+      break;
+    } catch (err: any) {
+      attempts++;
+      if (
+        (err?.code === "P2002" || err?.message?.includes("Unique constraint failed")) &&
+        attempts < maxAttempts
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 10 + Math.floor(Math.random() * 40)));
+        continue;
+      }
+      throw err;
+    }
+  }
 
   if (!user) {
     throw new Error("Failed to create member account.");
@@ -267,13 +287,19 @@ export async function acceptInvitation(input: AcceptInvitationInput) {
 
   // Notifications & Audit Log
   try {
-    await (prisma.notification.create as any)({
-      data: {
-        userId: user.id,
-        type: NotificationType.ACCOUNT_CREATED,
-        title: "Welcome to AgeWellRI",
-        message: "Your member account was successfully created via welcome invitation. Please complete your service agreement.",
-      },
+    await createNotification({
+      userId: user.id,
+      type: "ACCOUNT_CREATED",
+      title: "Welcome to AgeWellRI",
+      message: "Your member account was successfully created via welcome invitation. Please complete your service agreement.",
+      metadata: { clientId: user.client?.id },
+    });
+
+    await notifyAdmins({
+      type: "ACCOUNT_CREATED",
+      title: "New Client Registration (Invitation Accepted)",
+      message: `New client registration received for ${input.firstName} ${input.lastName}.`,
+      metadata: { clientId: user.client?.id, email: user.email },
     });
 
     await (prisma.auditLog.create as any)({
@@ -377,7 +403,7 @@ export async function resendInvitation(adminUserId: string, invitationId: string
     email: oldInvitation.email,
     clientId: oldInvitation.clientId,
     state: "RI",
-    planName: "Guardian Plus",
+    planName: (oldInvitation as any).client?.selectedPlan || undefined,
     expiresInDays: 7,
   });
 }

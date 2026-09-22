@@ -8,15 +8,16 @@ const options: swaggerJSDoc.Options = {
     info: {
       title: "AgeWellRI Backend API",
       version: "1.0.0",
-      description: "Comprehensive REST API Documentation for the AgeWellRI Platform",
+      description:
+        "Comprehensive REST API Documentation for the AgeWellRI Platform",
       contact: {
         name: "AgeWellRI API Support",
-        email: "support@agewellri.com",
+        email: "agewellri@gmail.com",
       },
     },
     servers: [
       {
-        url: "http://localhost:"+process.env.PORT,
+        url: "http://localhost:" + process.env.PORT,
         description: "Local Development Server",
       },
     ],
@@ -26,7 +27,8 @@ const options: swaggerJSDoc.Options = {
           type: "http",
           scheme: "bearer",
           bearerFormat: "JWT",
-          description: "Enter your JWT Bearer token in the format: Bearer <token>",
+          description:
+            "Enter your JWT Bearer token in the format: Bearer <token>",
         },
       },
       schemas: {
@@ -44,12 +46,20 @@ const options: swaggerJSDoc.Options = {
           type: "object",
           required: ["email", "password", "firstName", "lastName"],
           properties: {
-            email: { type: "string", format: "email", example: "client@example.com" },
+            email: {
+              type: "string",
+              format: "email",
+              example: "client@example.com",
+            },
             password: { type: "string", minLength: 6, example: "Password123!" },
             firstName: { type: "string", example: "Eleanor" },
             lastName: { type: "string", example: "Vance" },
             phone: { type: "string", example: "401-555-0199" },
-            role: { type: "string", enum: ["CLIENT", "ADMIN", "OWNER", "TECHNICIAN"], default: "CLIENT" },
+            role: {
+              type: "string",
+              enum: ["CLIENT", "ADMIN", "OWNER", "TECHNICIAN"],
+              default: "CLIENT",
+            },
             address: { type: "string", example: "100 Ocean Drive" },
             city: { type: "string", example: "Providence" },
             state: { type: "string", example: "RI" },
@@ -60,7 +70,11 @@ const options: swaggerJSDoc.Options = {
           type: "object",
           required: ["email", "password"],
           properties: {
-            email: { type: "string", format: "email", example: "client@example.com" },
+            email: {
+              type: "string",
+              format: "email",
+              example: "client@example.com",
+            },
             password: { type: "string", example: "Password123!" },
           },
         },
@@ -69,7 +83,11 @@ const options: swaggerJSDoc.Options = {
           required: ["oldPassword", "newPassword"],
           properties: {
             oldPassword: { type: "string", example: "OldPassword123!" },
-            newPassword: { type: "string", minLength: 6, example: "NewPassword123!" },
+            newPassword: {
+              type: "string",
+              minLength: 6,
+              example: "NewPassword123!",
+            },
           },
         },
         UpdateProfileInput: {
@@ -94,7 +112,8 @@ const options: swaggerJSDoc.Options = {
         post: {
           tags: ["Authentication"],
           summary: "Register a new user account",
-          description: "Registers a user. If role is CLIENT, auto-creates a Client profile with a unique clientNumber.",
+          description:
+            "Registers a user. If role is CLIENT, auto-creates a Client profile with a unique clientNumber.",
           requestBody: {
             required: true,
             content: {
@@ -120,7 +139,8 @@ const options: swaggerJSDoc.Options = {
         post: {
           tags: ["Authentication"],
           summary: "Authenticate user & issue JWT token",
-          description: "Validates user credentials, updates last login timestamp, and returns a signed JWT access token.",
+          description:
+            "Validates user credentials, updates last login timestamp, and returns a signed JWT access token.",
           requestBody: {
             required: true,
             content: {
@@ -146,7 +166,8 @@ const options: swaggerJSDoc.Options = {
         get: {
           tags: ["Authentication"],
           summary: "Get current authenticated user profile",
-          description: "Fetches user details and linked Client or Technician profile for the currently logged-in user.",
+          description:
+            "Fetches user details and linked Client or Technician profile for the currently logged-in user.",
           security: [{ bearerAuth: [] }],
           responses: {
             "200": {
@@ -165,7 +186,8 @@ const options: swaggerJSDoc.Options = {
         patch: {
           tags: ["Authentication"],
           summary: "Update user profile (email is immutable)",
-          description: "Updates user profile information such as name, phone, service address, and emergency contact details. Email cannot be changed.",
+          description:
+            "Updates user profile information such as name, phone, service address, and emergency contact details. Email cannot be changed.",
           security: [{ bearerAuth: [] }],
           requestBody: {
             required: true,
@@ -193,7 +215,8 @@ const options: swaggerJSDoc.Options = {
         post: {
           tags: ["Authentication"],
           summary: "Sign & Submit Initial Client Service Agreement",
-          description: "Submits client agreement details, signature, and updates onboarding status to AGREEMENT_SIGNED.",
+          description:
+            "Submits client agreement details, signature, and updates onboarding status to AGREEMENT_SIGNED.",
           security: [{ bearerAuth: [] }],
           responses: {
             "201": {
@@ -213,7 +236,8 @@ const options: swaggerJSDoc.Options = {
         post: {
           tags: ["Authentication"],
           summary: "Send Password Reset OTP Code",
-          description: "Sends a 6-digit verification code to the registered email address via Nodemailer.",
+          description:
+            "Sends a 6-digit verification code to the registered email address via Nodemailer.",
           requestBody: {
             required: true,
             content: {
@@ -236,7 +260,8 @@ const options: swaggerJSDoc.Options = {
         post: {
           tags: ["Authentication"],
           summary: "Verify Password Reset OTP",
-          description: "Verifies whether the 6-digit OTP is valid and within the 10-minute expiry window.",
+          description:
+            "Verifies whether the 6-digit OTP is valid and within the 10-minute expiry window.",
           requestBody: {
             required: true,
             content: {
@@ -262,7 +287,8 @@ const options: swaggerJSDoc.Options = {
         post: {
           tags: ["Authentication"],
           summary: "Reset Password with Verified OTP",
-          description: "Resets account password to new password after validating the 6-digit OTP code.",
+          description:
+            "Resets account password to new password after validating the 6-digit OTP code.",
           requestBody: {
             required: true,
             content: {
@@ -273,7 +299,11 @@ const options: swaggerJSDoc.Options = {
                   properties: {
                     email: { type: "string", format: "email" },
                     otp: { type: "string", example: "123456" },
-                    newPassword: { type: "string", format: "password", minLength: 8 },
+                    newPassword: {
+                      type: "string",
+                      format: "password",
+                      minLength: 8,
+                    },
                   },
                 },
               },
@@ -289,7 +319,8 @@ const options: swaggerJSDoc.Options = {
         post: {
           tags: ["Authentication"],
           summary: "Refresh Access Token & Session",
-          description: "Exchanges a valid refresh token for a newly signed access token and user session.",
+          description:
+            "Exchanges a valid refresh token for a newly signed access token and user session.",
           requestBody: {
             required: true,
             content: {
@@ -298,7 +329,10 @@ const options: swaggerJSDoc.Options = {
                   type: "object",
                   required: ["refreshToken"],
                   properties: {
-                    refreshToken: { type: "string", description: "Long-lived refresh token" },
+                    refreshToken: {
+                      type: "string",
+                      description: "Long-lived refresh token",
+                    },
                   },
                 },
               },
@@ -315,7 +349,8 @@ const options: swaggerJSDoc.Options = {
         patch: {
           tags: ["Authentication"],
           summary: "Change user password",
-          description: "Allows an authenticated user to update their account password.",
+          description:
+            "Allows an authenticated user to update their account password.",
           security: [{ bearerAuth: [] }],
           requestBody: {
             required: true,
@@ -327,7 +362,9 @@ const options: swaggerJSDoc.Options = {
           },
           responses: {
             "200": { description: "Password updated successfully" },
-            "400": { description: "Incorrect current password or invalid input" },
+            "400": {
+              description: "Incorrect current password or invalid input",
+            },
             "401": { description: "Unauthorized" },
           },
         },
@@ -336,7 +373,8 @@ const options: swaggerJSDoc.Options = {
         get: {
           tags: ["Payments & Stripe"],
           summary: "Get Stripe Publishable Key",
-          description: "Returns the Stripe publishable key to initialize frontend Stripe Elements SDK.",
+          description:
+            "Returns the Stripe publishable key to initialize frontend Stripe Elements SDK.",
           responses: {
             "200": { description: "Stripe configuration retrieved" },
           },
@@ -346,7 +384,8 @@ const options: swaggerJSDoc.Options = {
         post: {
           tags: ["Payments & Stripe"],
           summary: "Create Stripe SetupIntent",
-          description: "Generates a SetupIntent clientSecret for saving a card during Agreement signing or billing management.",
+          description:
+            "Generates a SetupIntent clientSecret for saving a card during Agreement signing or billing management.",
           security: [{ bearerAuth: [] }],
           requestBody: {
             content: {
@@ -354,7 +393,7 @@ const options: swaggerJSDoc.Options = {
                 schema: {
                   type: "object",
                   properties: {
-                    plan: { type: "string", enum: ["ESSENTIAL_GUARD", "GUARDIAN_PLUS"] },
+                    plan: { type: "string", example: "Home Safety Oversight" },
                     hasCleaningAddon: { type: "boolean" },
                   },
                 },
@@ -371,7 +410,8 @@ const options: swaggerJSDoc.Options = {
         post: {
           tags: ["Payments & Stripe"],
           summary: "Create Stripe PaymentIntent",
-          description: "Generates a PaymentIntent clientSecret for charging a specific amount directly.",
+          description:
+            "Generates a PaymentIntent clientSecret for charging a specific amount directly.",
           security: [{ bearerAuth: [] }],
           requestBody: {
             required: true,
@@ -383,8 +423,14 @@ const options: swaggerJSDoc.Options = {
                   properties: {
                     amount: { type: "number", example: 99.0 },
                     currency: { type: "string", example: "usd" },
-                    description: { type: "string", example: "Quarterly Safety Membership" },
-                    selectedPlan: { type: "string", enum: ["ESSENTIAL_GUARD", "GUARDIAN_PLUS"] },
+                    description: {
+                      type: "string",
+                      example: "Monthly Safety Membership",
+                    },
+                    selectedPlan: {
+                      type: "string",
+                      example: "Home Safety Oversight",
+                    },
                   },
                 },
               },
@@ -401,7 +447,8 @@ const options: swaggerJSDoc.Options = {
         post: {
           tags: ["Payments & Stripe"],
           summary: "Attach and save PaymentMethod",
-          description: "Attaches a confirmed Stripe payment method (pm_...) to the client customer record.",
+          description:
+            "Attaches a confirmed Stripe payment method (pm_...) to the client customer record.",
           security: [{ bearerAuth: [] }],
           requestBody: {
             required: true,
@@ -411,7 +458,10 @@ const options: swaggerJSDoc.Options = {
                   type: "object",
                   required: ["paymentMethodId"],
                   properties: {
-                    paymentMethodId: { type: "string", example: "pm_card_visa" },
+                    paymentMethodId: {
+                      type: "string",
+                      example: "pm_card_visa",
+                    },
                     setAsDefault: { type: "boolean", default: true },
                   },
                 },
@@ -429,7 +479,8 @@ const options: swaggerJSDoc.Options = {
         get: {
           tags: ["Payments & Stripe"],
           summary: "List saved payment methods",
-          description: "Retrieves all saved cards attached to the authenticated client's Stripe customer account.",
+          description:
+            "Retrieves all saved cards attached to the authenticated client's Stripe customer account.",
           security: [{ bearerAuth: [] }],
           responses: {
             "200": { description: "List of payment methods retrieved" },
@@ -441,7 +492,8 @@ const options: swaggerJSDoc.Options = {
         get: {
           tags: ["Payments & Stripe"],
           summary: "Get Billing Overview & Invoices",
-          description: "Returns client active subscription plan, stored card details, renewal date, and invoice history.",
+          description:
+            "Returns client active subscription plan, stored card details, renewal date, and invoice history.",
           security: [{ bearerAuth: [] }],
           responses: {
             "200": { description: "Billing information retrieved" },
@@ -453,7 +505,8 @@ const options: swaggerJSDoc.Options = {
         post: {
           tags: ["Payments & Stripe"],
           summary: "Process Agreement Payment & Activate Membership",
-          description: "Attaches Stripe payment method, provisions the client's quarterly subscription, visit allocations, and generates the initial invoice.",
+          description:
+            "Attaches Stripe payment method, provisions the client's subscription, visit allocations, and generates the initial invoice.",
           security: [{ bearerAuth: [] }],
           requestBody: {
             content: {
@@ -461,9 +514,15 @@ const options: swaggerJSDoc.Options = {
                 schema: {
                   type: "object",
                   properties: {
-                    paymentMethodId: { type: "string", example: "pm_card_visa" },
+                    paymentMethodId: {
+                      type: "string",
+                      example: "pm_card_visa",
+                    },
                     setupIntentId: { type: "string", example: "seti_12345" },
-                    selectedPlan: { type: "string", enum: ["ESSENTIAL_GUARD", "GUARDIAN_PLUS"], default: "ESSENTIAL_GUARD" },
+                    selectedPlan: {
+                      type: "string",
+                      example: "Home Safety Oversight",
+                    },
                     hasCleaningAddon: { type: "boolean", default: false },
                   },
                 },
@@ -471,7 +530,10 @@ const options: swaggerJSDoc.Options = {
             },
           },
           responses: {
-            "200": { description: "Agreement payment processed and membership activated" },
+            "200": {
+              description:
+                "Agreement payment processed and membership activated",
+            },
             "400": { description: "Invalid input" },
             "401": { description: "Unauthorized" },
           },

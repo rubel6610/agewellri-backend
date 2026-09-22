@@ -7,14 +7,19 @@ export const submitAgreementSchema = z.object({
   state: z.string().min(1, "State is required").default("RI"),
   postalCode: z.string().min(1, "Postal code is required"),
   phone: z.string().min(1, "Phone number is required"),
-  dob: z.string().min(1, "Date of birth is required"),
+  dob: z.string().optional().nullable(),
   email: z.string().email("Valid email required").optional(),
 
   // Signer party & legal authority
+  signingTrack: z.enum(["TRACK_A", "TRACK_B"]).optional().nullable(),
+  representativeCapacity: z.enum(["ATTORNEY_IN_FACT", "GUARDIAN", "CONSERVATOR"]).optional().nullable(),
+  repCapacity: z.enum(["ATTORNEY_IN_FACT", "GUARDIAN", "CONSERVATOR"]).optional().nullable(),
+  repFullName: z.string().optional().nullable(),
+  repRelationship: z.string().optional().nullable(),
+  authorityDocumentUrl: z.string().optional().nullable(),
   signerRole: z.enum([
     "RESIDENT",
     "FAMILY_MEMBER",
-    "CAREGIVER",
     "POWER_OF_ATTORNEY",
     "AUTHORIZED_REPRESENTATIVE",
   ]).default("RESIDENT"),
@@ -29,9 +34,18 @@ export const submitAgreementSchema = z.object({
   primaryContactEmail: z.string().email().optional().nullable(),
   primaryContactRelation: z.string().optional().nullable(),
 
-  // Emergency contact (mandatory secondary family contact)
-  emergencyContactName: z.string().min(1, "Emergency contact name is required"),
-  emergencyContactPhone: z.string().min(1, "Emergency contact phone is required"),
+  // Authorized Recipients (Step 4)
+  authorizedRecipients: z.array(
+    z.object({
+      name: z.string(),
+      relationship: z.string(),
+      email: z.string(),
+    })
+  ).optional().nullable(),
+
+  // Emergency contact (optional/fallback)
+  emergencyContactName: z.string().optional().nullable(),
+  emergencyContactPhone: z.string().optional().nullable(),
   emergencyContactEmail: z.string().email().optional().nullable(),
   emergencyContactRelation: z.string().optional().nullable(),
 
@@ -39,11 +53,19 @@ export const submitAgreementSchema = z.object({
   homeAccessType: z.enum(["LOCKBOX", "RESIDENT_ANSWERS", "DIGITAL_CODE", "OTHER"]).default("RESIDENT_ANSWERS"),
   homeAccessInstructions: z.string().optional().nullable(),
   homeAccessCode: z.string().optional().nullable(),
+  homeAccessAuthorized: z.boolean().optional().nullable(),
+
+  // Required Authorizations (Step 7)
+  authorizations: z.object({
+    emergencyRightOfEntry: z.boolean().optional(),
+    residentAutonomyAcknowledgment: z.boolean().optional(),
+    automaticBillingAuthorization: z.boolean().optional(),
+  }).optional().nullable(),
 
   // Dynamic Plan & Billing
   planId: z.string().optional().nullable(),
   planVersionId: z.string().optional().nullable(),
-  selectedPlan: z.string().default("GUARDIAN_PLUS"),
+  selectedPlan: z.string().optional().nullable(),
   hasCleaningAddon: z.boolean().default(false),
   billingMethod: z.enum(["AUTOMATIC", "INVOICE"]).default("AUTOMATIC"),
   paymentMethodId: z.string().optional().nullable(),

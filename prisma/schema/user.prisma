@@ -24,4 +24,5 @@ model User {
   auditLogs           AuditLog[]
   createdInvitations  Invitation[]   @relation("CreatedInvitations")
   createdAppointments Appointment[]  @relation("CreatedAppointments")
+  familyMemberships   FamilyMember[]
 }

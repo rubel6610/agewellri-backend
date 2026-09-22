@@ -4,6 +4,7 @@ import prisma from "../../lib/prisma";
 import { hashPassword, comparePassword } from "../../utils/password";
 import { generateAuthTokens, verifyRefreshToken } from "../../utils/jwt";
 import { sendPasswordResetOtpEmail } from "../../utils/email";
+import { generateNextClientNumber } from "../../utils/client-number.util";
 import { processAgreementPayment } from "../payment/payment.service";
 import { CancellationDeadlineService } from "../agreement/cancellation-deadline.service";
 import {
@@ -19,11 +20,14 @@ import {
   ResetPasswordInput,
   RefreshTokenInput,
 } from "./auth.validation";
+import {
+  createNotification,
+  notifyAdmins,
+} from "../notification/notification.service";
 
 export type SignerRoleType =
   | "RESIDENT"
   | "FAMILY_MEMBER"
-  | "CAREGIVER"
   | "POWER_OF_ATTORNEY"
   | "AUTHORIZED_REPRESENTATIVE";
 
@@ -47,14 +51,14 @@ export function computeAgreementFlags(user: { role: UserRole; client?: any }) {
   const client = user.client;
   const hasCompleted = Boolean(
     client?.hasCompletedAgreement ||
-      client?.onboardingStatus === OnboardingStatus.AGREEMENT_SIGNED ||
-      client?.onboardingStatus === OnboardingStatus.ACTIVE ||
-      client?.onboardingStatus === OnboardingStatus.PAYMENT_PENDING ||
-      client?.onboardingStatus === OnboardingStatus.PAYMENT_COMPLETED ||
-      (client?.agreements &&
-        client.agreements.some(
-          (a: any) => a.status === "SIGNED" || a.status === "EXECUTED"
-        ))
+    client?.onboardingStatus === OnboardingStatus.AGREEMENT_SIGNED ||
+    client?.onboardingStatus === OnboardingStatus.ACTIVE ||
+    client?.onboardingStatus === OnboardingStatus.PAYMENT_PENDING ||
+    client?.onboardingStatus === OnboardingStatus.PAYMENT_COMPLETED ||
+    (client?.agreements &&
+      client.agreements.some(
+        (a: any) => a.status === "SIGNED" || a.status === "EXECUTED",
+      )),
   );
 
   return {
@@ -92,22 +96,37 @@ export async function registerUser(input: RegisterInput) {
 
   let client = null;
   if (user.role === UserRole.CLIENT) {
-    const clientCount = await prisma.client.count();
-    const clientNumber = `AW-${1001 + clientCount}`;
-
-    client = await prisma.client.create({
-      data: {
-        userId: user.id,
-        clientNumber: clientNumber,
-        address: input.address || "",
-        city: input.city || "",
-        state: input.state || "",
-        postalCode: input.postalCode || "",
-        country: "USA",
-        onboardingStatus: OnboardingStatus.ACCOUNT_CREATED,
-        hasCompletedAgreement: false,
-      },
-    });
+    let attempts = 0;
+    const maxAttempts = 5;
+    while (attempts < maxAttempts) {
+      try {
+        const clientNumber = await generateNextClientNumber();
+        client = await prisma.client.create({
+          data: {
+            userId: user.id,
+            clientNumber: clientNumber,
+            address: input.address || "",
+            city: input.city || "",
+            state: input.state || "",
+            postalCode: input.postalCode || "",
+            country: "USA",
+            onboardingStatus: OnboardingStatus.ACCOUNT_CREATED,
+            hasCompletedAgreement: false,
+          },
+        });
+        break;
+      } catch (err: any) {
+        attempts++;
+        if (
+          (err?.code === "P2002" || err?.message?.includes("Unique constraint failed")) &&
+          attempts < maxAttempts
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 10 + Math.floor(Math.random() * 40)));
+          continue;
+        }
+        throw err;
+      }
+    }
   }
 
   const authTokens = generateAuthTokens({
@@ -117,6 +136,28 @@ export async function registerUser(input: RegisterInput) {
   });
 
   const fullUserProfile = await getUserProfile(user.id);
+
+  // Dispatch Welcome In-App Notification and Admin Alert
+  try {
+    if (user.role === UserRole.CLIENT) {
+      await createNotification({
+        userId: user.id,
+        type: "ACCOUNT_CREATED",
+        title: "Welcome to AgeWellRI",
+        message: "Your AgeWellRI account has been created successfully. Please complete your service agreement.",
+        metadata: { clientId: client?.id },
+      });
+
+      await notifyAdmins({
+        type: "ACCOUNT_CREATED",
+        title: "New Client Registration",
+        message: `New client registration received for ${input.firstName} ${input.lastName}.`,
+        metadata: { clientId: client?.id, email: user.email },
+      });
+    }
+  } catch (notifErr) {
+    console.warn("⚠️ Notification dispatch notice on registration:", notifErr);
+  }
 
   return {
     token: authTokens.token,
@@ -138,7 +179,10 @@ export async function loginUser(input: LoginInput) {
     throw new Error("Invalid email or password.");
   }
 
-  const isPasswordValid = await comparePassword(input.password, user.passwordHash);
+  const isPasswordValid = await comparePassword(
+    input.password,
+    user.passwordHash,
+  );
   if (!isPasswordValid) {
     throw new Error("Invalid email or password.");
   }
@@ -181,17 +225,25 @@ export async function requestSmsOtp(input: RequestSmsOtpInput) {
     },
   });
 
-  const user = users.find((u) => u.phone && u.phone.replace(/\D/g, "").includes(cleanPhone.slice(-10)));
+  const user = users.find(
+    (u) =>
+      u.phone && u.phone.replace(/\D/g, "").includes(cleanPhone.slice(-10)),
+  );
 
   if (!user) {
-    throw new Error("No registered account found with this phone number. Please sign in with email or register.");
+    throw new Error(
+      "No registered account found with this phone number. Please sign in with email or register.",
+    );
   }
 
   // Rate limit: 60s cooldown
   if (user.smsOtpLastSentAt) {
-    const elapsedSeconds = (Date.now() - new Date(user.smsOtpLastSentAt).getTime()) / 1000;
+    const elapsedSeconds =
+      (Date.now() - new Date(user.smsOtpLastSentAt).getTime()) / 1000;
     if (elapsedSeconds < 60) {
-      throw new Error(`Please wait ${Math.ceil(60 - elapsedSeconds)} seconds before requesting a new code.`);
+      throw new Error(
+        `Please wait ${Math.ceil(60 - elapsedSeconds)} seconds before requesting a new code.`,
+      );
     }
   }
 
@@ -233,18 +285,27 @@ export async function verifySmsOtp(input: VerifySmsOtpInput) {
     },
   });
 
-  const user = users.find((u) => u.phone && u.phone.replace(/\D/g, "").includes(cleanPhone.slice(-10)));
+  const user = users.find(
+    (u) =>
+      u.phone && u.phone.replace(/\D/g, "").includes(cleanPhone.slice(-10)),
+  );
 
   if (!user || !user.smsOtpHash || !user.smsOtpExpires) {
-    throw new Error("No active verification code found. Please request a new code.");
+    throw new Error(
+      "No active verification code found. Please request a new code.",
+    );
   }
 
   if (new Date() > new Date(user.smsOtpExpires)) {
-    throw new Error("Verification code has expired. Please request a new code.");
+    throw new Error(
+      "Verification code has expired. Please request a new code.",
+    );
   }
 
   if ((user.smsOtpAttempts || 0) >= 5) {
-    throw new Error("Too many failed attempts. Please request a new verification code.");
+    throw new Error(
+      "Too many failed attempts. Please request a new verification code.",
+    );
   }
 
   const isValid = await bcrypt.compare(input.otp.trim(), user.smsOtpHash);
@@ -253,7 +314,9 @@ export async function verifySmsOtp(input: VerifySmsOtpInput) {
       where: { id: user.id },
       data: { smsOtpAttempts: { increment: 1 } },
     });
-    throw new Error("Invalid verification code. Please check the code and try again.");
+    throw new Error(
+      "Invalid verification code. Please check the code and try again.",
+    );
   }
 
   await (prisma.user.update as any)({
@@ -282,12 +345,18 @@ export async function verifySmsOtp(input: VerifySmsOtpInput) {
   };
 }
 
-import { submitServiceAgreement } from "../agreement/agreement.service";
+import {
+  submitServiceAgreement,
+  getClientAgreement,
+} from "../agreement/agreement.service";
 
 /**
  * Submit Client Service Agreement with dynamic plan resolution and state cancellation deadline.
  */
-export async function submitAgreement(userId: string, input: SubmitAgreementInput) {
+export async function submitAgreement(
+  userId: string,
+  input: SubmitAgreementInput,
+) {
   return submitServiceAgreement(userId, input);
 }
 
@@ -295,70 +364,9 @@ export async function submitAgreement(userId: string, input: SubmitAgreementInpu
  * Fetch full active client agreement for the current user.
  */
 export async function getMyAgreement(userId: string) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: {
-      client: {
-        include: {
-          agreements: {
-            orderBy: { createdAt: "desc" },
-            take: 1,
-          },
-        },
-      },
-    },
-  });
-
-  if (!user || !user.client) {
-    throw new Error("Client account not found.");
-  }
-
-  const client = user.client as any;
-  const latestAgreement = client?.agreements?.[0] as any;
-  const fullName = `${user.firstName} ${user.lastName}`.trim();
-
-  return {
-    id: latestAgreement?.id,
-    templateVersion: latestAgreement?.templateVersion,
-    status: latestAgreement?.status || (client?.hasCompletedAgreement ? "SIGNED" : "DRAFT"),
-    selectedPlan: latestAgreement?.selectedPlan || client?.selectedPlan || null,
-    planPrice:
-      latestAgreement?.planPrice ??
-      client?.subscriptions?.[0]?.contractedPrice ??
-      client?.plan?.price ??
-      0,
-    hasCleaningAddon: latestAgreement?.hasCleaningAddon || client?.hasCleaningAddon || false,
-    clientFullName: fullName,
-    clientPrintedName: latestAgreement?.clientPrintedName || fullName,
-    authorizedRepName: latestAgreement?.authorizedRepName || client?.primaryContactName || null,
-    relationshipToClient: latestAgreement?.relationshipToClient || client?.primaryContactRelation || null,
-    clientSignature: latestAgreement?.clientSignature || null,
-    agreementDate: latestAgreement?.agreementDate || latestAgreement?.signedAt || latestAgreement?.createdAt || new Date(),
-    signedAt: latestAgreement?.signedAt || null,
-    executedAt: latestAgreement?.executedAt || null,
-    address: client?.address,
-    city: client?.city,
-    state: client?.state,
-    postalCode: client?.postalCode,
-    phone: user.phone,
-    dob: client?.dateOfBirth,
-    email: user.email,
-    primaryContactName: client?.primaryContactName,
-    primaryContactPhone: client?.primaryContactPhone,
-    primaryContactEmail: client?.primaryContactEmail,
-    primaryContactRelation: client?.primaryContactRelation,
-    emergencyContactName: client?.emergencyContactName,
-    emergencyContactPhone: client?.emergencyContactPhone,
-    emergencyContactRelation: client?.emergencyContactRelation,
-    clientNumber: client?.clientNumber,
-    stripePaymentMethodId: latestAgreement?.stripePaymentMethodId || client?.stripePaymentMethodId || null,
-    stripeSetupIntentId: latestAgreement?.stripeSetupIntentId || null,
-    cardBrand: client?.cardBrand || null,
-    cardLast4: client?.cardLast4 || null,
-  };
+  const agreement = await getClientAgreement(userId);
+  return agreement;
 }
-
-
 
 /**
  * Get full user profile including client, flags, and permissions.
@@ -389,7 +397,49 @@ export async function getUserProfile(userId: string) {
     throw new Error("User not found.");
   }
 
-  const flags = computeAgreementFlags(user);
+  const db = prisma as any;
+  let familyMember: any = null;
+  let activeClient = user.client;
+
+  // If user does not have a primary client record, check if they are an authorized Family Member
+  if (!activeClient && user.role === UserRole.CLIENT) {
+    familyMember = await db.familyMember.findFirst({
+      where: {
+        userId,
+        portalAccess: true,
+      },
+      include: {
+        client: {
+          include: {
+            agreements: {
+              orderBy: { createdAt: "desc" },
+              take: 1,
+            },
+            subscriptions: {
+              include: {
+                plan: true,
+              },
+              orderBy: { createdAt: "desc" },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+
+    if (familyMember && familyMember.client) {
+      activeClient = familyMember.client;
+    }
+  }
+
+  let flags = computeAgreementFlags({ ...user, client: activeClient });
+  // Family members are authorized observers and never require agreement completion
+  if (familyMember) {
+    flags = {
+      hasCompletedAgreement: true,
+      requiresAgreement: false,
+    };
+  }
 
   return {
     id: user.id,
@@ -400,37 +450,50 @@ export async function getUserProfile(userId: string) {
     role: user.role,
     status: user.status,
     permissions: user.permissions || [],
+    isFamilyMember: Boolean(familyMember),
+    isPrimary: !familyMember,
     hasCompletedAgreement: flags.hasCompletedAgreement,
     requiresAgreement: flags.requiresAgreement,
-    client: user.client
+    familyMember: familyMember
       ? {
-          id: user.client.id,
-          clientNumber: user.client.clientNumber,
-          address: user.client.address,
-          city: user.client.city,
-          state: user.client.state,
-          postalCode: user.client.postalCode,
-          country: user.client.country,
-          dateOfBirth: user.client.dateOfBirth,
-          signerRole: user.client.signerRole,
-          legalAuthority: user.client.legalAuthority,
-          primaryContactName: user.client.primaryContactName,
-          primaryContactPhone: user.client.primaryContactPhone,
-          primaryContactEmail: user.client.primaryContactEmail,
-          primaryContactRelation: user.client.primaryContactRelation,
-          emergencyContactName: user.client.emergencyContactName,
-          emergencyContactPhone: user.client.emergencyContactPhone,
-          emergencyContactRelation: user.client.emergencyContactRelation,
-          homeAccessType: user.client.homeAccessType,
-          homeAccessInstructions: user.client.homeAccessInstructions,
-          selectedPlan: user.client.selectedPlan,
-          hasCleaningAddon: user.client.hasCleaningAddon,
-          onboardingStatus: user.client.onboardingStatus,
-          hasCompletedAgreement: user.client.hasCompletedAgreement,
-          cardBrand: user.client.cardBrand,
-          cardLast4: user.client.cardLast4,
-          cardExpMonth: user.client.cardExpMonth,
-          cardExpYear: user.client.cardExpYear,
+          id: familyMember.id,
+          name: familyMember.name,
+          relationship: familyMember.relationship,
+          email: familyMember.email,
+          reportAccess: familyMember.reportAccess,
+          portalAccess: familyMember.portalAccess,
+          billingAccess: familyMember.billingAccess,
+        }
+      : null,
+    client: activeClient
+      ? {
+          id: activeClient.id,
+          clientNumber: activeClient.clientNumber,
+          address: activeClient.address,
+          city: activeClient.city,
+          state: activeClient.state,
+          postalCode: activeClient.postalCode,
+          country: activeClient.country,
+          dateOfBirth: activeClient.dateOfBirth,
+          signerRole: activeClient.signerRole,
+          legalAuthority: activeClient.legalAuthority,
+          primaryContactName: activeClient.primaryContactName,
+          primaryContactPhone: activeClient.primaryContactPhone,
+          primaryContactEmail: activeClient.primaryContactEmail,
+          primaryContactRelation: activeClient.primaryContactRelation,
+          emergencyContactName: activeClient.emergencyContactName,
+          emergencyContactPhone: activeClient.emergencyContactPhone,
+          emergencyContactRelation: activeClient.emergencyContactRelation,
+          homeAccessType: activeClient.homeAccessType,
+          homeAccessInstructions: activeClient.homeAccessInstructions,
+          selectedPlan: activeClient.selectedPlan,
+          hasCleaningAddon: activeClient.hasCleaningAddon,
+          onboardingStatus: activeClient.onboardingStatus,
+          hasCompletedAgreement: activeClient.hasCompletedAgreement,
+          cardBrand: activeClient.cardBrand,
+          cardLast4: activeClient.cardLast4,
+          cardExpMonth: activeClient.cardExpMonth,
+          cardExpYear: activeClient.cardExpYear,
         }
       : null,
   };
@@ -439,7 +502,10 @@ export async function getUserProfile(userId: string) {
 /**
  * Update user and client profile.
  */
-export async function updateUserProfile(userId: string, input: UpdateProfileInput) {
+export async function updateUserProfile(
+  userId: string,
+  input: UpdateProfileInput,
+) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: { client: true },
@@ -466,12 +532,19 @@ export async function updateUserProfile(userId: string, input: UpdateProfileInpu
     if (input.address !== undefined) clientUpdateData.address = input.address;
     if (input.city !== undefined) clientUpdateData.city = input.city;
     if (input.state !== undefined) clientUpdateData.state = input.state;
-    if (input.postalCode !== undefined) clientUpdateData.postalCode = input.postalCode;
-    if (input.emergencyContactName !== undefined) clientUpdateData.emergencyContactName = input.emergencyContactName;
-    if (input.emergencyContactPhone !== undefined) clientUpdateData.emergencyContactPhone = input.emergencyContactPhone;
-    if (input.emergencyContactRelation !== undefined) clientUpdateData.emergencyContactRelation = input.emergencyContactRelation;
-    if (input.homeAccessType !== undefined) clientUpdateData.homeAccessType = input.homeAccessType;
-    if (input.homeAccessInstructions !== undefined) clientUpdateData.homeAccessInstructions = input.homeAccessInstructions;
+    if (input.postalCode !== undefined)
+      clientUpdateData.postalCode = input.postalCode;
+    if (input.emergencyContactName !== undefined)
+      clientUpdateData.emergencyContactName = input.emergencyContactName;
+    if (input.emergencyContactPhone !== undefined)
+      clientUpdateData.emergencyContactPhone = input.emergencyContactPhone;
+    if (input.emergencyContactRelation !== undefined)
+      clientUpdateData.emergencyContactRelation =
+        input.emergencyContactRelation;
+    if (input.homeAccessType !== undefined)
+      clientUpdateData.homeAccessType = input.homeAccessType;
+    if (input.homeAccessInstructions !== undefined)
+      clientUpdateData.homeAccessInstructions = input.homeAccessInstructions;
 
     if (Object.keys(clientUpdateData).length > 0) {
       await (prisma.client.update as any)({
@@ -487,7 +560,10 @@ export async function updateUserProfile(userId: string, input: UpdateProfileInpu
 /**
  * Change password for authenticated user.
  */
-export async function changeUserPassword(userId: string, input: ChangePasswordInput) {
+export async function changeUserPassword(
+  userId: string,
+  input: ChangePasswordInput,
+) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
   });
@@ -496,7 +572,10 @@ export async function changeUserPassword(userId: string, input: ChangePasswordIn
     throw new Error("User not found.");
   }
 
-  const isPasswordValid = await comparePassword(input.oldPassword, user.passwordHash);
+  const isPasswordValid = await comparePassword(
+    input.oldPassword,
+    user.passwordHash,
+  );
   if (!isPasswordValid) {
     throw new Error("Incorrect current password.");
   }
@@ -519,7 +598,10 @@ export async function forgotPassword(input: ForgotPasswordInput) {
   });
 
   if (!user) {
-    return { success: true, message: "If an account exists, a reset code has been sent." };
+    return {
+      success: true,
+      message: "If an account exists, a reset code has been sent.",
+    };
   }
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -544,7 +626,10 @@ export async function forgotPassword(input: ForgotPasswordInput) {
     console.warn("⚠️ Reset email error:", emailErr);
   }
 
-  return { success: true, message: "A verification code has been sent to your email." };
+  return {
+    success: true,
+    message: "A verification code has been sent to your email.",
+  };
 }
 
 /**
@@ -601,7 +686,10 @@ export async function resetPassword(input: ResetPasswordInput) {
     },
   });
 
-  return { success: true, message: "Password reset successfully. You may now sign in." };
+  return {
+    success: true,
+    message: "Password reset successfully. You may now sign in.",
+  };
 }
 
 /**

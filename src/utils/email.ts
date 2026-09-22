@@ -14,7 +14,7 @@ export interface SendRenewalReminderEmailOptions {
   planName: string;
   renewalDate: Date;
   recurringPrice: number;
-  billingInterval: "MONTHLY" | "QUARTERLY" | "ANNUAL" | string;
+  billingInterval: "MONTHLY" | "ONE_TIME" | string;
   billingMethod: "AUTOMATIC" | "INVOICE" | string;
   cardBrand?: string;
   cardLast4?: string;
@@ -91,7 +91,7 @@ export interface SendPlanPurchaseConfirmationEmailOptions {
   hasCleaningAddon?: boolean;
   amount: number;
   currency?: string;
-  billingInterval?: "MONTHLY" | "QUARTERLY" | "ANNUAL" | "ONE_TIME" | string;
+  billingInterval?: "MONTHLY" | "ONE_TIME" | string;
   billingMethod?: "AUTOMATIC" | "INVOICE" | string;
   paymentStatus?: "PAID" | "PENDING_INVOICE" | string;
   cardBrand?: string;
@@ -130,11 +130,11 @@ function createTransporter() {
   return null;
 }
 
-function getDefaultFromAddress(senderTitle = "AgeWellRI Care Coordination") {
+function getDefaultFromAddress(senderTitle = "AgeWellRI LLC") {
   return (
     process.env.SMTP_FROM ||
     process.env.EMAIL_FROM ||
-    `"${senderTitle}" <${process.env.SMTP_USER || process.env.EMAIL_USER || "billing@agewellri.com"}>`
+    `"${senderTitle}" <${process.env.SMTP_USER || process.env.EMAIL_USER || "agewellri@gmail.com"}>`
   );
 }
 
@@ -173,15 +173,14 @@ function wrapHtmlEmail(title: string, contentHtml: string): string {
         <div class="container">
           <div class="header">
             <h1>AgeWellRI</h1>
-            <p>Home Safety & Care Coordination</p>
+            <p>Home Safety Coordination</p>
           </div>
           <div class="content">
             ${contentHtml}
           </div>
           <div class="footer">
-            &copy; ${new Date().getFullYear()} AgeWellRI. Westerly, Rhode Island.<br>
-            Protecting independence and safety for Rhode Island seniors.<br>
-            Questions? Contact Support: <a href="mailto:billing@agewellri.com">billing@agewellri.com</a> | (401) 555-0199
+            &copy; ${new Date().getFullYear()} AgeWellRI LLC. Westerly, Rhode Island.<br>
+            Questions? Contact Support: <a href="mailto:agewellri@gmail.com">agewellri@gmail.com</a> | (401) 212-3002
           </div>
         </div>
       </body>
@@ -197,7 +196,11 @@ export async function sendPasswordResetOtpEmail({
   name,
   otp,
   expiresInMinutes = 10,
-}: SendOtpEmailOptions): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
+}: SendOtpEmailOptions): Promise<{
+  success: boolean;
+  messageId?: string;
+  mode: "smtp" | "console";
+}> {
   const from = getDefaultFromAddress("AgeWellRI Security");
   const displayName = name || "Valued Member";
 
@@ -235,7 +238,9 @@ export async function sendPasswordResetOtpEmail({
         html: htmlContent,
       });
 
-      console.log(`[EMAIL SERVICE] OTP sent to ${to}, MessageID: ${info.messageId}`);
+      console.log(
+        `[EMAIL SERVICE] OTP sent to ${to}, MessageID: ${info.messageId}`,
+      );
       return { success: true, messageId: info.messageId, mode: "smtp" };
     } catch (error: any) {
       console.warn(`[EMAIL SERVICE] SMTP error: ${error.message}`);
@@ -250,7 +255,7 @@ export async function sendPasswordResetOtpEmail({
  * 7/14/30-Day Automated Renewal Reminder Email
  */
 export async function sendBillingRenewalReminderEmail(
-  options: SendRenewalReminderEmailOptions
+  options: SendRenewalReminderEmailOptions,
 ): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
   const {
     to,
@@ -264,9 +269,9 @@ export async function sendBillingRenewalReminderEmail(
     cardBrand,
     cardLast4,
     daysBeforeNotice,
-    portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
-    supportPhone = "(401) 555-0199",
-    supportEmail = "billing@agewellri.com",
+    portalUrl = process.env.FRONTEND_URL || "0",
+    supportPhone = "(401) 212-3002",
+    supportEmail = "agewellri@gmail.com",
   } = options;
 
   const formattedDate = new Date(renewalDate).toLocaleDateString("en-US", {
@@ -276,20 +281,14 @@ export async function sendBillingRenewalReminderEmail(
   });
 
   const intervalLabel =
-    billingInterval === "MONTHLY"
-      ? "Monthly"
-      : billingInterval === "ANNUAL"
-      ? "Annual"
-      : "Quarterly";
+    billingInterval === "ONE_TIME" ? "One-Time Service" : "Monthly";
 
   const isAuto = billingMethod === "AUTOMATIC";
 
   const subject =
-    billingInterval === "MONTHLY"
-      ? `Upcoming Bill Notice: Your AgeWellRI Monthly Service Plan`
-      : billingInterval === "ANNUAL"
-      ? `Annual Service Renewal Notice: Your AgeWellRI Membership Plan`
-      : `Upcoming Renewal Notice: Your AgeWellRI Quarterly Service Contract`;
+    billingInterval === "ONE_TIME"
+      ? `AgeWellRI One-Time Service Confirmation`
+      : `Upcoming Renewal Notice: Your AgeWellRI Monthly Service Contract`;
 
   const content = `
     <div class="greeting">Hello ${representativeName ? `${representativeName} (on behalf of ${clientName})` : clientName},</div>
@@ -323,7 +322,7 @@ export async function sendBillingRenewalReminderEmail(
     <div class="message">
       ${
         isAuto
-          ? `Your card on file will be automatically billed on <strong>${formattedDate}</strong>. No action is required to maintain continuous safety oversight and home care coordination.`
+          ? `Your card on file will be automatically billed on <strong>${formattedDate}</strong>. No action is required to maintain continuous safety oversight and home safety coordination.`
           : `An invoice statement with online payment instructions will be available in your portal on <strong>${formattedDate}</strong>.`
       }
     </div>
@@ -341,22 +340,28 @@ export async function sendBillingRenewalReminderEmail(
   const htmlContent = wrapHtmlEmail(subject, content);
 
   console.log(`\n======================================================`);
-  console.log(`📬 [EMAIL SERVICE] Renewal Reminder (${daysBeforeNotice} days) sent to ${to}`);
-  console.log(`Plan: ${planName} | Renewal: ${formattedDate} | Amount: $${recurringPrice}`);
+  console.log(
+    `📬 [EMAIL SERVICE] Renewal Reminder (${daysBeforeNotice} days) sent to ${to}`,
+  );
+  console.log(
+    `Plan: ${planName} | Renewal: ${formattedDate} | Amount: $${recurringPrice}`,
+  );
   console.log(`======================================================\n`);
 
   const transporter = createTransporter();
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Billing Services"),
+        from: getDefaultFromAddress("AgeWellRI LLC Billing Services"),
         to,
         subject,
         html: htmlContent,
       });
       return { success: true, messageId: info.messageId, mode: "smtp" };
     } catch (err: any) {
-      console.warn(`[EMAIL SERVICE] Renewal reminder SMTP error: ${err.message}`);
+      console.warn(
+        `[EMAIL SERVICE] Renewal reminder SMTP error: ${err.message}`,
+      );
       return { success: true, mode: "console" };
     }
   }
@@ -368,7 +373,7 @@ export async function sendBillingRenewalReminderEmail(
  * Payment Confirmation Success Email
  */
 export async function sendPaymentSuccessEmail(
-  options: SendPaymentSuccessEmailOptions
+  options: SendPaymentSuccessEmailOptions,
 ): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
   const {
     to,
@@ -444,21 +449,25 @@ export async function sendPaymentSuccessEmail(
 
   console.log(`\n======================================================`);
   console.log(`💳 [EMAIL SERVICE] Payment Success Receipt sent to ${to}`);
-  console.log(`Amount: $${amount} | Plan: ${planName} | Date: ${paidDateFormatted}`);
+  console.log(
+    `Amount: $${amount} | Plan: ${planName} | Date: ${paidDateFormatted}`,
+  );
   console.log(`======================================================\n`);
 
   const transporter = createTransporter();
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Billing Services"),
+        from: getDefaultFromAddress("AgeWellRI LLC Billing Services"),
         to,
         subject,
         html: htmlContent,
       });
       return { success: true, messageId: info.messageId, mode: "smtp" };
     } catch (err: any) {
-      console.warn(`[EMAIL SERVICE] Payment success SMTP error: ${err.message}`);
+      console.warn(
+        `[EMAIL SERVICE] Payment success SMTP error: ${err.message}`,
+      );
       return { success: true, mode: "console" };
     }
   }
@@ -470,7 +479,7 @@ export async function sendPaymentSuccessEmail(
  * Payment Failure Alert Email
  */
 export async function sendPaymentFailureEmail(
-  options: SendPaymentFailureEmailOptions
+  options: SendPaymentFailureEmailOptions,
 ): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
   const {
     to,
@@ -527,14 +536,16 @@ export async function sendPaymentFailureEmail(
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Billing Services"),
+        from: getDefaultFromAddress("AgeWellRI LLC Billing Services"),
         to,
         subject,
         html: htmlContent,
       });
       return { success: true, messageId: info.messageId, mode: "smtp" };
     } catch (err: any) {
-      console.warn(`[EMAIL SERVICE] Payment failure SMTP error: ${err.message}`);
+      console.warn(
+        `[EMAIL SERVICE] Payment failure SMTP error: ${err.message}`,
+      );
       return { success: true, mode: "console" };
     }
   }
@@ -546,7 +557,7 @@ export async function sendPaymentFailureEmail(
  * Invoice Statement Generated Email
  */
 export async function sendInvoiceGeneratedEmail(
-  options: SendInvoiceGeneratedEmailOptions
+  options: SendInvoiceGeneratedEmailOptions,
 ): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
   const {
     to,
@@ -601,7 +612,7 @@ export async function sendInvoiceGeneratedEmail(
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Billing Services"),
+        from: getDefaultFromAddress("AgeWellRI LLC Billing Services"),
         to,
         subject,
         html: htmlContent,
@@ -620,9 +631,13 @@ export async function sendInvoiceGeneratedEmail(
  * Alert Admin of Critical Billing Failures
  */
 export async function sendAdminBillingAlertEmail(
-  options: SendAdminBillingAlertOptions
+  options: SendAdminBillingAlertOptions,
 ): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
-  const adminEmail = options.adminEmail || process.env.ADMIN_EMAIL || process.env.SMTP_USER || "billing-ops@agewellri.com";
+  const adminEmail =
+    options.adminEmail ||
+    process.env.ADMIN_EMAIL ||
+    process.env.SMTP_USER ||
+    "billing-ops@agewellri.com";
   const subject = `🚨 [BILLING ALERT] ${options.alertType}: ${options.clientName}`;
 
   const content = `
@@ -652,7 +667,9 @@ export async function sendAdminBillingAlertEmail(
   const htmlContent = wrapHtmlEmail(subject, content);
 
   console.log(`\n======================================================`);
-  console.log(`🚨 [EMAIL SERVICE] Admin Billing Alert for ${adminEmail}: ${options.alertType} on ${options.clientName}`);
+  console.log(
+    `🚨 [EMAIL SERVICE] Admin Billing Alert for ${adminEmail}: ${options.alertType} on ${options.clientName}`,
+  );
   console.log(`======================================================\n`);
 
   const transporter = createTransporter();
@@ -679,7 +696,7 @@ export async function sendAdminBillingAlertEmail(
  * Sent immediately after payment is confirmed or invoice billing agreement is finalized.
  */
 export async function sendPlanPurchaseConfirmationEmail(
-  options: SendPlanPurchaseConfirmationEmailOptions
+  options: SendPlanPurchaseConfirmationEmailOptions,
 ): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
   const {
     to,
@@ -695,7 +712,7 @@ export async function sendPlanPurchaseConfirmationEmail(
     hasCleaningAddon = false,
     amount,
     currency = "USD",
-    billingInterval = "QUARTERLY",
+    billingInterval = "MONTHLY",
     billingMethod = "AUTOMATIC",
     paymentStatus = "PAID",
     cardBrand,
@@ -708,19 +725,13 @@ export async function sendPlanPurchaseConfirmationEmail(
     cancellationDeadline,
     cancellationDeadlineRule,
     portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
-    supportPhone = "(401) 555-0199",
-    supportEmail = "billing@agewellri.com",
+    supportPhone = "(401) 212-3002",
+    supportEmail = "agewellri@gmail.com",
   } = options;
 
   const isPaid = paymentStatus === "PAID";
   const intervalLabel =
-    billingInterval === "MONTHLY"
-      ? "Monthly"
-      : billingInterval === "ANNUAL"
-      ? "Annual"
-      : billingInterval === "ONE_TIME"
-      ? "One-Time Service"
-      : "Quarterly (Every 3 Months)";
+    billingInterval === "ONE_TIME" ? "One-Time Service" : "Monthly";
 
   const paidDateFormatted = paidAt
     ? new Date(paidAt).toLocaleDateString("en-US", {
@@ -755,8 +766,8 @@ export async function sendPlanPurchaseConfirmationEmail(
           year: "numeric",
         })
       : billingInterval === "ONE_TIME"
-      ? "N/A (Single Purchase)"
-      : null;
+        ? "N/A (Single Purchase)"
+        : null;
 
   const cancellationDeadlineFormatted = cancellationDeadline
     ? new Date(cancellationDeadline).toLocaleDateString("en-US", {
@@ -771,9 +782,10 @@ export async function sendPlanPurchaseConfirmationEmail(
     ? `Confirmation & Receipt: Your AgeWellRI ${planName} Plan is Active`
     : `Agreement Confirmed & Invoice Issued: AgeWellRI ${planName}`;
 
-  const displayName = signerName && signerName !== clientName
-    ? `${signerName} (on behalf of ${clientName})`
-    : clientName;
+  const displayName =
+    signerName && signerName !== clientName
+      ? `${signerName} (on behalf of ${clientName})`
+      : clientName;
 
   // Build Services breakdown rows
   let servicesListHtml = "";
@@ -787,7 +799,7 @@ export async function sendPlanPurchaseConfirmationEmail(
             <span style="color: #243746; font-weight: 700;">• ${s.serviceName}:</span>
             <span style="color: #294B68; font-weight: 800; background: #EAF3F8; padding: 2px 8px; border-radius: 6px;">${s.allocatedVisits} ${s.unit || "visits"}</span>
           </div>
-        `
+        `,
           )
           .join("")}
       </div>
@@ -896,20 +908,13 @@ export async function sendPlanPurchaseConfirmationEmail(
       </table>
     </div>
 
-    <!-- Included Care & Service Breakdown Card -->
+    <!-- Included safety & Service Breakdown Card -->
     <div class="highlight-card" style="background: #FFFFFF; border: 1px solid #CBD5E1;">
       <div style="font-size: 12px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.75px; margin-bottom: 10px; border-bottom: 1px solid #E2E8F0; padding-bottom: 6px;">
-        🛡️ Included Care Services &amp; Quotas
+        🛡️ Included Safety Services &amp; Quotas
       </div>
       ${planDescription ? `<div style="font-size: 13px; color: #334155; margin-bottom: 8px; font-style: italic;">${planDescription}</div>` : ""}
       ${servicesListHtml}
-      ${
-        hasCleaningAddon
-          ? `<div style="margin-top: 8px; font-size: 13px; color: #166534; font-weight: 700; background: #F0FDF4; padding: 6px 10px; border-radius: 6px;">
-              ✨ Home Cleaning Add-on: Included (+6 Additional Visits)
-             </div>`
-          : ""
-      }
       ${featuresListHtml}
     </div>
 
@@ -935,9 +940,9 @@ export async function sendPlanPurchaseConfirmationEmail(
     <!-- Next Steps -->
     <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 12px; color: #475569; line-height: 1.6;">
       <strong style="color: #243746; font-size: 13px;">What to Expect Next:</strong><br>
-      1. <strong>Care Specialist Assignment:</strong> A dedicated, certified Rhode Island AgeWell Specialist is being matched with your home.<br>
+      1. <strong>safety Specialist Assignment:</strong> A dedicated, certified Rhode Island AgeWell Specialist is being matched with your home.<br>
       2. <strong>First Visit Scheduling:</strong> Your coordinator will reach out to schedule your initial Comprehensive Home Safety Audit, or you can book online anytime.<br>
-      3. <strong>Live Family Portal:</strong> Family members and caregivers can view real-time visit reports and photo logs from any device.<br>
+      3. <strong>Live Family Portal:</strong> Family members  can view real-time visit reports and photo logs from any device.<br>
       <br>
       Need assistance? Contact our local Westerly, RI team: <strong>${supportPhone}</strong> | <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>
     </div>
@@ -948,22 +953,28 @@ export async function sendPlanPurchaseConfirmationEmail(
   const recipientString = Array.isArray(to) ? to.join(", ") : to;
 
   console.log(`\n======================================================`);
-  console.log(`💳 [EMAIL SERVICE] Plan Purchase Confirmation Email dispatched to: ${recipientString}`);
-  console.log(`Plan: ${planName} | Amount: $${amount} | Status: ${paymentStatus} | Method: ${billingMethod}`);
+  console.log(
+    `💳 [EMAIL SERVICE] Plan Purchase Confirmation Email dispatched to: ${recipientString}`,
+  );
+  console.log(
+    `Plan: ${planName} | Amount: $${amount} | Status: ${paymentStatus} | Method: ${billingMethod}`,
+  );
   console.log(`======================================================\n`);
 
   const transporter = createTransporter();
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Care Coordination"),
+        from: getDefaultFromAddress("AgeWellRI LLC"),
         to: recipientString,
         subject,
         html: htmlContent,
       });
       return { success: true, messageId: info.messageId, mode: "smtp" };
     } catch (err: any) {
-      console.warn(`[EMAIL SERVICE] Plan purchase confirmation SMTP error: ${err.message}`);
+      console.warn(
+        `[EMAIL SERVICE] Plan purchase confirmation SMTP error: ${err.message}`,
+      );
       return { success: true, mode: "console" };
     }
   }
@@ -987,7 +998,7 @@ export interface SendWelcomeInvitationEmailOptions {
  * Send Welcome Invitation Email to client / family member
  */
 export async function sendWelcomeInvitationEmail(
-  options: SendWelcomeInvitationEmailOptions
+  options: SendWelcomeInvitationEmailOptions,
 ): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
   const {
     to,
@@ -996,8 +1007,8 @@ export async function sendWelcomeInvitationEmail(
     expiresAt,
     planName,
     state = "RI",
-    supportPhone = "(401) 555-0199",
-    supportEmail = "support@agewellri.com",
+    supportPhone = "(401) 212-3002",
+    supportEmail = "agewellri@gmail.com",
   } = options;
 
   const formattedExpiry = new Date(expiresAt).toLocaleDateString("en-US", {
@@ -1021,7 +1032,7 @@ export async function sendWelcomeInvitationEmail(
       <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
         <tr>
           <td style="padding: 6px 0; color: #64748B;">Service Region:</td>
-          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${state === "RI" ? "Rhode Island" : state === "CT" ? "Connecticut" : state === "MA" ? "Massachusetts" : state}</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${state === "RI" ? "Rhode Island" : ""}</td>
         </tr>
         ${
           planName
@@ -1039,7 +1050,7 @@ export async function sendWelcomeInvitationEmail(
     </div>
 
     <div class="message">
-      Click the button below to get started. You will be able to confirm whether you are signing as the Resident or as an Authorized Family Member / Caregiver, review the state-specific agreement, and activate your safety coverage.
+      Click the button below to get started. You will be able to confirm whether you are signing as the Resident or as an Authorized Family Member  review the state-specific agreement, and activate your safety coverage.
     </div>
 
     <div style="text-align: center; margin: 28px 0;">
@@ -1049,7 +1060,7 @@ export async function sendWelcomeInvitationEmail(
     </div>
 
     <div style="background: #F8FAFC; border: 1px solid #D9E4EC; border-radius: 12px; padding: 14px; font-size: 12px; color: #64748B; line-height: 1.5;">
-      <strong>Note for Family Members &amp; Caregivers:</strong> If you are managing care for a loved one, you can specify your legal authority (e.g., Power of Attorney or Authorized Representative) during the onboarding steps.<br><br>
+      <strong>Note for Family Members:</strong> If you are managing safety for a loved one, you can specify your legal authority (e.g., Power of Attorney or Authorized Representative) during the onboarding steps.<br><br>
       Questions? Contact our team anytime: <strong>${supportPhone}</strong> | <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>
     </div>
   `;
@@ -1065,14 +1076,16 @@ export async function sendWelcomeInvitationEmail(
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Care Coordination"),
+        from: getDefaultFromAddress("AgeWellRI LLC"),
         to,
         subject,
         html: htmlContent,
       });
       return { success: true, messageId: info.messageId, mode: "smtp" };
     } catch (err: any) {
-      console.warn(`[EMAIL SERVICE] Welcome invitation SMTP error: ${err.message}`);
+      console.warn(
+        `[EMAIL SERVICE] Welcome invitation SMTP error: ${err.message}`,
+      );
       return { success: true, mode: "console" };
     }
   }
@@ -1083,42 +1096,79 @@ export async function sendWelcomeInvitationEmail(
 export interface SendAgreementExecutedEmailOptions {
   to: string | string[];
   clientName: string;
+  clientNumber?: string;
   signerName?: string;
   signerRole?: string;
   legalAuthority?: string;
+  serviceAddress?: string;
   state: string;
   templateVersion: string;
   signedDate: Date;
   cancellationDeadline: Date;
   cancellationDeadlineRule?: string;
   selectedPlan?: string;
+  planName?: string;
+  planCode?: string;
+  planDescription?: string;
+  features?: string[];
+  services?: Array<{
+    serviceName: string;
+    allocatedVisits: number;
+    unit?: string;
+    description?: string;
+  }>;
+  hasCleaningAddon?: boolean;
+  amount?: number;
+  currency?: string;
+  billingInterval?: "MONTHLY" | "ONE_TIME" | string;
+  billingMethod?: "AUTOMATIC" | "INVOICE" | string;
+  cardBrand?: string;
+  cardLast4?: string;
+  invoiceNumber?: string;
+  firstBillingDate?: Date | null;
   portalUrl?: string;
   supportPhone?: string;
   supportEmail?: string;
 }
 
 /**
- * Send Executed Agreement Notification Email to Client / Signer
+ * Send Executed Agreement & Membership Plan Confirmation Email (All-In-One)
  */
 export async function sendAgreementExecutedEmail(
-  options: SendAgreementExecutedEmailOptions
+  options: SendAgreementExecutedEmailOptions,
 ): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
   const {
     to,
     clientName,
+    clientNumber,
     signerName,
     signerRole,
     legalAuthority,
+    serviceAddress,
     state,
     templateVersion,
     signedDate,
     cancellationDeadline,
     cancellationDeadlineRule,
     selectedPlan = "AgeWellRI Membership",
+    planName,
+    planDescription,
+    features = [],
+    services = [],
+    hasCleaningAddon = false,
+    amount,
+    currency = "USD",
+    billingMethod = "AUTOMATIC",
+    cardBrand,
+    cardLast4,
+    invoiceNumber,
+    firstBillingDate,
     portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
-    supportPhone = "(401) 555-0199",
-    supportEmail = "billing@agewellri.com",
+    supportPhone = "(401) 212-3002",
+    supportEmail = "agewellri@gmail.com",
   } = options;
+
+  const resolvedPlanName = planName || selectedPlan || "AgeWellRI Membership";
 
   const signedDateFormatted = new Date(signedDate).toLocaleDateString("en-US", {
     month: "long",
@@ -1126,30 +1176,88 @@ export async function sendAgreementExecutedEmail(
     year: "numeric",
   });
 
-  const deadlineFormatted = new Date(cancellationDeadline).toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
+  const deadlineFormatted = new Date(cancellationDeadline).toLocaleDateString(
+    "en-US",
+    {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    },
+  );
 
-  const isRep = signerName && signerName !== clientName;
-  const displayName = isRep ? `${signerName} (on behalf of ${clientName})` : clientName;
+  const firstBillingDateFormatted = firstBillingDate
+    ? new Date(firstBillingDate).toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "the 1st of next month";
 
-  const subject = `Your Executed AgeWellRI Service Agreement (${state} - ${templateVersion})`;
+  const isRep = Boolean(signerName && signerName !== clientName);
+  const displayName = isRep
+    ? `${signerName} (on behalf of ${clientName})`
+    : clientName;
+
+  const subject = `Your Executed AgeWellRI Service Agreement & Plan Confirmation (${state} - ${templateVersion})`;
 
   let stateLawName = "Rhode Island Law (RIGL § 6-28-3)";
   if (state === "CT") stateLawName = "Connecticut Law (CGS § 42-134a)";
   else if (state === "MA") stateLawName = "Massachusetts Law (MGL c. 93 § 48)";
 
+  // Build Services breakdown rows
+  let servicesListHtml = "";
+  if (services && services.length > 0) {
+    servicesListHtml = `
+      <div style="margin-top: 8px;">
+        ${services
+          .map(
+            (s) => `
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 1px dashed #E2E8F0; font-size: 13px;">
+            <span style="color: #243746; font-weight: 700;">• ${s.serviceName}:</span>
+            <span style="color: #294B68; font-weight: 800; background: #EAF3F8; padding: 2px 8px; border-radius: 6px;">${s.allocatedVisits} ${s.unit || "visits"}</span>
+          </div>
+        `,
+          )
+          .join("")}
+      </div>
+    `;
+  } else {
+    servicesListHtml = `
+      <div style="padding: 6px 0; font-size: 13px; color: #475569;">
+        • Complete Senior Safety Oversight &amp; Home Wellness Visits
+      </div>
+    `;
+  }
+
+  // Build Features list
+  let featuresListHtml = "";
+  if (features && features.length > 0) {
+    featuresListHtml = `
+      <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #E2E8F0;">
+        <div style="font-size: 11px; font-weight: 800; color: #64748B; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Key Plan Inclusions:</div>
+        <ul style="margin: 0; padding-left: 18px; font-size: 12px; color: #475569; line-height: 1.6;">
+          ${features.map((f) => `<li>${f}</li>`).join("")}
+        </ul>
+      </div>
+    `;
+  }
+
   const content = `
     <div class="greeting">Hello ${displayName},</div>
-    <div class="message">
-      Thank you for completing your <strong>AgeWellRI Member Service Agreement</strong>. Your agreement has been fully signed and executed by both parties (including pre-signed execution by AgeWellRI Care Services).
+
+    <div style="background: #EBF8F2; border: 1px solid #86EFAC; border-radius: 12px; padding: 16px 20px; margin: 16px 0 24px 0;">
+      <div style="font-size: 13px; font-weight: 800; color: #166534; text-transform: uppercase; letter-spacing: 0.5px;">
+        ✓ Service Agreement Executed &amp; Membership Active
+      </div>
+      <div style="font-size: 13px; color: #334155; margin-top: 6px; line-height: 1.5;">
+        Thank you for partnering with AgeWellRI. Your <strong>Member Service Agreement</strong> has been fully executed by both parties. Your recurring monthly membership for <strong>${resolvedPlanName}</strong> is confirmed. You were <strong>not charged today ($0.00 charged at signup)</strong>, and your first billing and scheduled service start date is <strong>${firstBillingDateFormatted}</strong>.
+      </div>
     </div>
 
+    <!-- 1. Executed Agreement Details Card -->
     <div class="highlight-card">
-      <div style="font-size: 13px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; border-bottom: 1px solid #D9E4EC; padding-bottom: 6px;">
+      <div style="font-size: 12px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.75px; margin-bottom: 12px; border-bottom: 1px solid #D9E4EC; padding-bottom: 6px;">
         📄 Executed Agreement Details
       </div>
       <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
@@ -1158,10 +1266,26 @@ export async function sendAgreementExecutedEmail(
           <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${clientName}</td>
         </tr>
         ${
+          clientNumber
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Client ID:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${clientNumber}</td>
+              </tr>`
+            : ""
+        }
+        ${
           isRep
             ? `<tr>
                 <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Authorized Signer:</td>
                 <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${signerName} (${signerRole || "Family Representative"}${legalAuthority ? ` - ${legalAuthority}` : ""})</td>
+              </tr>`
+            : ""
+        }
+        ${
+          serviceAddress
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Service Address:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 700; text-align: right;">${serviceAddress}</td>
               </tr>`
             : ""
         }
@@ -1174,17 +1298,71 @@ export async function sendAgreementExecutedEmail(
           <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${signedDateFormatted}</td>
         </tr>
         <tr>
-          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Selected Plan:</td>
-          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${selectedPlan}</td>
-        </tr>
-        <tr>
-          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Status:</td>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Agreement Status:</td>
           <td style="padding: 6px 0; color: #166534; font-weight: 900; text-align: right;">EXECUTED ✓</td>
         </tr>
       </table>
     </div>
 
-    <!-- Official 3-Business-Day Cancellation Notice -->
+    <!-- 2. Membership & Billing Schedule Card -->
+    <div class="highlight-card">
+      <div style="font-size: 12px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.75px; margin-bottom: 12px; border-bottom: 1px solid #D9E4EC; padding-bottom: 6px;">
+        💳 Membership &amp; Billing Schedule
+      </div>
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Selected Membership Plan:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${resolvedPlanName}</td>
+        </tr>
+        ${
+          amount !== undefined
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Monthly Membership Fee:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">$${amount.toFixed(2)} ${currency} / month</td>
+              </tr>`
+            : ""
+        }
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Charged Today:</td>
+          <td style="padding: 6px 0; color: #166534; font-weight: 900; font-size: 14px; text-align: right;">$0.00 (No Charge Today)</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">First Billing &amp; Service Start:</td>
+          <td style="padding: 6px 0; color: #1E40AF; font-weight: 800; text-align: right;">${firstBillingDateFormatted}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Payment Method:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">
+            ${
+              billingMethod === "INVOICE"
+                ? "Direct Invoice Statement (Due in 14 days)"
+                : `Automatic Monthly (${cardBrand || "Card"} ending in ${cardLast4 || "••••"})`
+            }
+          </td>
+        </tr>
+        ${
+          invoiceNumber
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Initial Invoice Reference:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${invoiceNumber}</td>
+              </tr>`
+            : ""
+        }
+      </table>
+    </div>
+
+    <!-- 3. Included safety Services & Visit Quotas Card -->
+    <div class="highlight-card" style="background: #FFFFFF; border: 1px solid #CBD5E1;">
+      <div style="font-size: 12px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.75px; margin-bottom: 10px; border-bottom: 1px solid #E2E8F0; padding-bottom: 6px;">
+        🛡️ Included safety Services &amp; Visit Allocations
+      </div>
+      ${planDescription ? `<div style="font-size: 13px; color: #334155; margin-bottom: 8px; font-style: italic;">${planDescription}</div>` : ""}
+      ${servicesListHtml}
+     
+      ${featuresListHtml}
+    </div>
+
+    <!-- 4. Official 3-Business-Day Cancellation Notice -->
     <div style="background: #F8FAFC; border-left: 4px solid #5E8FB2; border-radius: 0 8px 8px 0; padding: 14px 18px; margin: 20px 0; font-size: 12px; color: #475569; line-height: 1.6;">
       <strong style="color: #243746; font-size: 13px;">Official Notice of Right of Cancellation (${stateLawName}):</strong><br>
       Under state law, you may cancel this transaction without penalty not later than midnight of the third business day after agreement signing.<br>
@@ -1192,15 +1370,26 @@ export async function sendAgreementExecutedEmail(
       <span style="font-size: 11px; color: #64748B;">${cancellationDeadlineRule || "Sundays and recognized legal holidays are excluded from calculation."}</span>
     </div>
 
-    <div style="text-align: center; margin: 28px 0;">
-      <a href="${portalUrl}/dashboard/agreements" class="btn-primary">
+    <!-- 5. CTA Action Buttons -->
+    <div style="text-align: center; margin: 28px 0 16px 0;">
+      <a href="${portalUrl}/dashboard/agreements" class="btn-primary" style="margin: 0 6px 8px 6px;">
         View Executed Agreement &amp; Download PDF →
+      </a>
+      <a href="${portalUrl}/dashboard" class="btn-primary" style="background-color: #3F8F6B; margin: 0 6px 8px 6px;">
+        Access Client Portal
+      </a>
+    </div>
+    <div style="text-align: center; margin-bottom: 24px;">
+      <a href="${portalUrl}/dashboard/billing" class="btn-secondary">
+        View Billing &amp; Invoices
       </a>
     </div>
 
+    <!-- 6. Next Steps & Support -->
     <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 12px; color: #475569; line-height: 1.6;">
-      <strong>What's Next?</strong><br>
-      A permanent digital copy of your signed agreement is stored securely in your member portal. You can view, print, or download your agreement anytime from your <a href="${portalUrl}/dashboard/agreements" style="color: #294B68; font-weight: 700;">Client Portal Documents</a>.<br><br>
+      <strong style="color: #243746; font-size: 13px;">What to Expect Next:</strong><br>
+      • Your dedicated AgeWellRI LLC will contact you prior to <strong>${firstBillingDateFormatted}</strong> to introduce your safety team and schedule your first home visit.<br>
+      • A permanent digital copy of your signed agreement and billing records is stored in your <a href="${portalUrl}/dashboard/agreements" style="color: #294B68; font-weight: 700;">Client Portal</a>.<br><br>
       Questions or need support? Contact our team: <strong>${supportPhone}</strong> | <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>
     </div>
   `;
@@ -1209,22 +1398,28 @@ export async function sendAgreementExecutedEmail(
   const recipientString = Array.isArray(to) ? to.join(", ") : to;
 
   console.log(`\n======================================================`);
-  console.log(`📜 [EMAIL SERVICE] Agreement Executed Email dispatched to: ${recipientString}`);
-  console.log(`Client: ${clientName} | State: ${state} | Deadline: ${deadlineFormatted}`);
+  console.log(
+    `📜 [EMAIL SERVICE] Executed Agreement & Plan Confirmation Email dispatched to: ${recipientString}`,
+  );
+  console.log(
+    `Client: ${clientName} | Plan: ${resolvedPlanName}${amount ? ` ($${amount}/mo)` : ""} | First Billing: ${firstBillingDateFormatted} | Deadline: ${deadlineFormatted}`,
+  );
   console.log(`======================================================\n`);
 
   const transporter = createTransporter();
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Care Coordination"),
+        from: getDefaultFromAddress("AgeWellRI LLC"),
         to: recipientString,
         subject,
         html: htmlContent,
       });
       return { success: true, messageId: info.messageId, mode: "smtp" };
     } catch (err: any) {
-      console.warn(`[EMAIL SERVICE] Agreement executed SMTP error: ${err.message}`);
+      console.warn(
+        `[EMAIL SERVICE] Agreement executed SMTP error: ${err.message}`,
+      );
       return { success: true, mode: "console" };
     }
   }
@@ -1248,7 +1443,7 @@ export interface SendReportAvailableEmailOptions {
  * Send Visit Report Available Notification Email to Client
  */
 export async function sendReportAvailableEmail(
-  options: SendReportAvailableEmailOptions
+  options: SendReportAvailableEmailOptions,
 ): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
   const {
     to,
@@ -1258,8 +1453,8 @@ export async function sendReportAvailableEmail(
     specialistName = "AgeWellRI Specialist",
     reportTitle = "Completed Visit Report",
     portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
-    supportPhone = "(401) 555-0199",
-    supportEmail = "support@agewellri.com",
+    supportPhone = "(401) 212-3002",
+    supportEmail = "agewellri@gmail.com",
   } = options;
 
   const formattedDate = new Date(visitDate).toLocaleDateString("en-US", {
@@ -1322,22 +1517,28 @@ export async function sendReportAvailableEmail(
   const recipientString = Array.isArray(to) ? to.join(", ") : to;
 
   console.log(`\n======================================================`);
-  console.log(`📑 [EMAIL SERVICE] Visit Report Available Email dispatched to: ${recipientString}`);
-  console.log(`Client: ${clientName} | Service: ${serviceType} | Date: ${formattedDate}`);
+  console.log(
+    `📑 [EMAIL SERVICE] Visit Report Available Email dispatched to: ${recipientString}`,
+  );
+  console.log(
+    `Client: ${clientName} | Service: ${serviceType} | Date: ${formattedDate}`,
+  );
   console.log(`======================================================\n`);
 
   const transporter = createTransporter();
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Care Coordination"),
+        from: getDefaultFromAddress("AgeWellRI LLC"),
         to: recipientString,
         subject,
         html: htmlContent,
       });
       return { success: true, messageId: info.messageId, mode: "smtp" };
     } catch (err: any) {
-      console.warn(`[EMAIL SERVICE] Report available SMTP error: ${err.message}`);
+      console.warn(
+        `[EMAIL SERVICE] Report available SMTP error: ${err.message}`,
+      );
       return { success: true, mode: "console" };
     }
   }
@@ -1345,22 +1546,27 @@ export async function sendReportAvailableEmail(
   return { success: true, mode: "console" };
 }
 
-export interface SendQuarterlyRenewalActiveEmailOptions {
+export interface SendMONTHLYRenewalActiveEmailOptions {
   to: string | string[];
   clientName: string;
   planName: string;
   periodStartDate: Date;
   periodEndDate: Date;
   periodNumber?: number;
-  allocatedVisits?: Array<{ serviceName: string; count: number; durationMinutes?: number }>;
+  billingInterval?: string;
+  allocatedVisits?: Array<{
+    serviceName: string;
+    count: number;
+    durationMinutes?: number;
+  }>;
   totalVisits?: number;
   portalUrl?: string;
   supportPhone?: string;
   supportEmail?: string;
 }
 
-export async function sendQuarterlyRenewalActiveEmail(
-  options: SendQuarterlyRenewalActiveEmailOptions
+export async function sendMONTHLYRenewalActiveEmail(
+  options: SendMONTHLYRenewalActiveEmailOptions,
 ): Promise<{ success: boolean; messageId?: string; mode: string }> {
   const {
     to,
@@ -1369,14 +1575,16 @@ export async function sendQuarterlyRenewalActiveEmail(
     periodStartDate,
     periodEndDate,
     periodNumber,
+    billingInterval = "MONTHLY",
     allocatedVisits = [],
-    totalVisits = 12,
+    totalVisits = 4,
     portalUrl = process.env.FRONTEND_URL || "https://agewellri.com",
-    supportPhone = "(401) 555-CARE",
-    supportEmail = "support@agewellri.com",
+    supportPhone = "(401) 212-3002",
+    supportEmail = "agewellri@gmail.com",
   } = options;
 
-  const subject = `Your New AgeWellRI Service Quarter is Active — Schedule Your Visits`;
+  const intervalTitle = "Monthly";
+  const subject = `Your New AgeWellRI Monthly Service Period is Active — Schedule Your Visits`;
 
   const formattedStart = periodStartDate.toLocaleDateString("en-US", {
     month: "short",
@@ -1398,7 +1606,7 @@ export async function sendQuarterlyRenewalActiveEmail(
           <td style="padding: 8px 0; color: #243746; font-weight: 700; font-size: 13px;">${v.serviceName}:</td>
           <td style="padding: 8px 0; color: #294B68; font-weight: 800; font-size: 13px; text-align: right;">${v.count} Included Visits</td>
         </tr>
-      `
+      `,
           )
           .join("")
       : `
@@ -1410,16 +1618,16 @@ export async function sendQuarterlyRenewalActiveEmail(
 
   const content = `
     <h2 style="font-size: 20px; font-weight: 800; color: #243746; margin: 0 0 12px 0;">
-      Your New Service Quarter Is Active!
+      Your New Service Period Is Active!
     </h2>
     <p style="font-size: 14px; color: #475569; line-height: 1.6; margin-bottom: 20px;">
       Hello <strong>${clientName}</strong>,<br><br>
-      Your <strong>${planName}</strong> subscription has successfully renewed for the upcoming service quarter (<strong>${formattedStart} – ${formattedEnd}</strong>). Your fresh visit allocations are ready to be scheduled.
+      Your <strong>${planName}</strong> subscription has successfully renewed for the upcoming service period (<strong>${formattedStart} – ${formattedEnd}</strong>). Your fresh visit allocations are ready to be scheduled.
     </p>
 
     <div class="highlight-card">
       <div style="font-size: 13px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; border-bottom: 1px solid #D9E4EC; padding-bottom: 6px;">
-        🗓️ New Quarter Visit Entitlements
+        🗓️ Active Period Visit Entitlements
       </div>
       <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
         <tr>
@@ -1427,7 +1635,7 @@ export async function sendQuarterlyRenewalActiveEmail(
           <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${planName}</td>
         </tr>
         <tr>
-          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Service Quarter:</td>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Service Period:</td>
           <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${formattedStart} – ${formattedEnd}</td>
         </tr>
         ${visitRowsHtml}
@@ -1441,8 +1649,8 @@ export async function sendQuarterlyRenewalActiveEmail(
     </div>
 
     <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 12px; color: #475569; line-height: 1.6;">
-      <strong>Care Scheduling Notice:</strong><br>
-      You can select your preferred dates, times, and specialists directly from your member portal. If you need any assistance scheduling, our care coordination team is available at <strong>${supportPhone}</strong> or <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>.
+      <strong>safety Scheduling Notice:</strong><br>
+      You can select your preferred dates, times, and specialists directly from your member portal. If you need any assistance scheduling, our agewellri team is available at <strong>${supportPhone}</strong> or <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>.
     </div>
   `;
 
@@ -1450,22 +1658,28 @@ export async function sendQuarterlyRenewalActiveEmail(
   const recipientString = Array.isArray(to) ? to.join(", ") : to;
 
   console.log(`\n======================================================`);
-  console.log(`🎉 [EMAIL SERVICE] Quarterly Renewal Active Email dispatched to: ${recipientString}`);
-  console.log(`Client: ${clientName} | Plan: ${planName} | Quarter: ${formattedStart} – ${formattedEnd}`);
+  console.log(
+    `🎉 [EMAIL SERVICE] Renewal Active Email dispatched to: ${recipientString}`,
+  );
+  console.log(
+    `Client: ${clientName} | Plan: ${planName} | Period: ${formattedStart} – ${formattedEnd}`,
+  );
   console.log(`======================================================\n`);
 
   const transporter = createTransporter();
   if (transporter) {
     try {
       const info = await transporter.sendMail({
-        from: getDefaultFromAddress("AgeWellRI Care Coordination"),
+        from: getDefaultFromAddress("AgeWellRI LLC"),
         to: recipientString,
         subject,
         html: htmlContent,
       });
       return { success: true, messageId: info.messageId, mode: "smtp" };
     } catch (err: any) {
-      console.warn(`[EMAIL SERVICE] Quarterly renewal active SMTP error: ${err.message}`);
+      console.warn(
+        `[EMAIL SERVICE] MONTHLY renewal active SMTP error: ${err.message}`,
+      );
       return { success: true, mode: "console" };
     }
   }
@@ -1473,6 +1687,623 @@ export async function sendQuarterlyRenewalActiveEmail(
   return { success: true, mode: "console" };
 }
 
+export interface SendFamilyMemberInvitationEmailOptions {
+  to: string;
+  familyMemberName: string;
+  clientName: string;
+  relationship: string;
+  invitationLink: string;
+  expiresAt: Date;
+  permissions: {
+    reportAccess: boolean;
+    portalAccess: boolean;
+    billingAccess: boolean;
+  };
+  supportPhone?: string;
+  supportEmail?: string;
+}
 
+export interface SendFamilyMemberCredentialsEmailOptions {
+  to: string;
+  familyMemberName: string;
+  clientName: string;
+  relationship: string;
+  loginEmail: string;
+  password: string;
+  loginUrl?: string;
+  supportPhone?: string;
+  supportEmail?: string;
+}
 
+export async function sendFamilyMemberCredentialsEmail(
+  options: SendFamilyMemberCredentialsEmailOptions,
+): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
+  const {
+    to,
+    familyMemberName,
+    clientName,
+    relationship,
+    loginEmail,
+    password,
+    loginUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/login`,
+    supportPhone = "(401) 212-3002",
+    supportEmail = "agewellri@gmail.com",
+  } = options;
 
+  const subject = `Your AgeWellRI Portal Login Credentials (Access for ${clientName})`;
+
+  const content = `
+    <div class="greeting">Hello ${familyMemberName},</div>
+    <div class="message">
+      <strong>${clientName}</strong> has granted you direct access to their <strong>AgeWellRI Member &amp; Family Portal</strong> as their designated <strong>${relationship}</strong>.
+    </div>
+
+    <div class="highlight-card" style="background: #F0F5F9; border: 2px solid #294B68; border-radius: 14px; padding: 20px; margin: 20px 0;">
+      <div style="font-size: 13px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; border-bottom: 1px solid #D9E4EC; padding-bottom: 8px;">
+        🔑 Your Portal Login Credentials
+      </div>
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr>
+          <td style="padding: 8px 0; color: #64748B; font-weight: 600;">Sign In Page:</td>
+          <td style="padding: 8px 0; color: #294B68; font-weight: 800; text-align: right;"><a href="${loginUrl}" style="color: #294B68; font-weight: 800; text-decoration: underline;">${loginUrl}</a></td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; color: #64748B; font-weight: 600;">Login Email:</td>
+          <td style="padding: 8px 0; color: #243746; font-weight: 800; text-align: right; font-family: monospace; font-size: 15px;">${loginEmail}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; color: #64748B; font-weight: 600;">Password:</td>
+          <td style="padding: 8px 0; color: #294B68; font-weight: 900; text-align: right; font-family: monospace; font-size: 16px; background: #EAF3F8; padding: 4px 10px; border-radius: 6px; display: inline-block;">${password}</td>
+        </tr>
+      </table>
+    </div>
+
+    <div style="text-align: center; margin: 28px 0;">
+      <a href="${loginUrl}" class="btn-primary" style="display: inline-block; padding: 14px 32px; background: #294B68; color: #ffffff !important; text-decoration: none; font-weight: 800; font-size: 15px; border-radius: 12px; box-shadow: 0 4px 12px rgba(41,75,104,0.25);">
+        Log In to Member Portal →
+      </a>
+    </div>
+
+    <div style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 20px;">
+      <strong>What you can do in the portal:</strong>
+      <ul style="margin: 8px 0 0 0; padding-left: 20px;">
+        <li>View upcoming and past home safety visits</li>
+        <li>Review official specialist inspection reports and photos</li>
+        <li>Oversee safety records just like the primary member</li>
+      </ul>
+    </div>
+
+    <div style="background: #F8FAFC; border-radius: 12px; padding: 16px; font-size: 12px; color: #64748B; line-height: 1.6; border: 1px solid #D9E4EC;">
+      <strong>Security Recommendation:</strong> For your security, you may change your password anytime under Profile Settings after logging in.<br><br>
+      AgeWellRI Rhode Island Support: <strong>${supportPhone}</strong> | <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>
+    </div>
+  `;
+
+  const htmlContent = wrapHtmlEmail(subject, content);
+
+  console.log(`\n======================================================`);
+  console.log(
+    `🔑 [EMAIL SERVICE] Family Member Credentials Email dispatched to: ${to}`,
+  );
+  console.log(
+    `Member: ${familyMemberName} | Client: ${clientName} | Password: ${password}`,
+  );
+  console.log(`======================================================\n`);
+
+  const transporter = createTransporter();
+  if (transporter) {
+    try {
+      const info = await transporter.sendMail({
+        from: getDefaultFromAddress("AgeWellRI Member Support"),
+        to,
+        subject,
+        html: htmlContent,
+      });
+      return { success: true, messageId: info.messageId, mode: "smtp" };
+    } catch (err: any) {
+      console.warn(`[EMAIL SERVICE] Credentials SMTP error: ${err.message}`);
+      return { success: true, mode: "console" };
+    }
+  }
+
+  return { success: true, mode: "console" };
+}
+
+export interface SendFamilyMemberInvitationEmailOptions {
+  to: string;
+  familyMemberName: string;
+  clientName: string;
+  relationship: string;
+  invitationLink: string;
+  expiresAt: Date;
+  permissions: {
+    reportAccess: boolean;
+    portalAccess: boolean;
+    billingAccess: boolean;
+  };
+  supportPhone?: string;
+  supportEmail?: string;
+}
+
+export async function sendFamilyMemberInvitationEmail(
+  options: SendFamilyMemberInvitationEmailOptions,
+): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
+  const {
+    to,
+    familyMemberName,
+    clientName,
+    relationship,
+    invitationLink,
+    expiresAt,
+    permissions,
+    supportPhone = "(401) 712-3012",
+    supportEmail = "agewellri@gmail.com",
+  } = options;
+
+  const formattedExpiry = new Date(expiresAt).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  const subject = `You've been invited to the AgeWellRI Family Portal for ${clientName}`;
+
+  const permissionBadges = [];
+  if (permissions.reportAccess)
+    permissionBadges.push("📄 View Safety Reports & Photo Documentation");
+  if (permissions.portalAccess)
+    permissionBadges.push("🔑 Client Portal Access");
+  if (permissions.billingAccess)
+    permissionBadges.push("💳 View & Pay Invoices / Billing");
+
+  const permissionsListHtml = permissionBadges
+    .map(
+      (p) =>
+        `<tr><td style="padding: 6px 0; color: #166534; font-weight: 700; font-size: 13px;">✓ ${p}</td></tr>`,
+    )
+    .join("");
+
+  const content = `
+    <div class="greeting">Hello ${familyMemberName},</div>
+    <div class="message">
+      <strong>${clientName}</strong> has invited you to join their <strong>AgeWellRI Member &amp; Family Portal</strong> as their designated <strong>${relationship}</strong>.
+    </div>
+
+    <div class="highlight-card">
+      <div style="font-size: 13px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; border-bottom: 1px solid #D9E4EC; padding-bottom: 6px;">
+        🛡️ Granted Family Access Permissions
+      </div>
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        ${permissionsListHtml || '<tr><td style="padding: 6px 0; color: #64748B;">Standard Family Access</td></tr>'}
+      </table>
+    </div>
+
+    <div style="text-align: center; margin: 28px 0;">
+      <a href="${invitationLink}" class="btn-primary" style="display: inline-block; padding: 14px 28px; background: #294B68; color: #ffffff; text-decoration: none; font-weight: 800; font-size: 14px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+        Activate Family Portal Account →
+      </a>
+    </div>
+
+    <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 12px; color: #475569; line-height: 1.6;">
+      <strong>Security &amp; Expiration Notice:</strong><br>
+      This invitation link is unique to you and will expire on <strong>${formattedExpiry}</strong>. If you did not expect this invitation, please contact our support team.<br><br>
+      AgeWellRI Rhode Island Support: <strong>${supportPhone}</strong> | <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>
+    </div>
+  `;
+
+  const htmlContent = wrapHtmlEmail(subject, content);
+
+  console.log(`\n======================================================`);
+  console.log(
+    `💌 [EMAIL SERVICE] Family Member Invitation Email dispatched to: ${to}`,
+  );
+  console.log(
+    `Family Member: ${familyMemberName} | Client: ${clientName} | Link: ${invitationLink}`,
+  );
+  console.log(`======================================================\n`);
+
+  const transporter = createTransporter();
+  if (transporter) {
+    try {
+      const info = await transporter.sendMail({
+        from: getDefaultFromAddress("AgeWellRI Family Safety"),
+        to,
+        subject,
+        html: htmlContent,
+      });
+      return { success: true, messageId: info.messageId, mode: "smtp" };
+    } catch (err: any) {
+      console.warn(
+        `[EMAIL SERVICE] Family member invitation SMTP error: ${err.message}`,
+      );
+      return { success: true, mode: "console" };
+    }
+  }
+
+  return { success: true, mode: "console" };
+}
+
+export interface SendReportToFamilyRecipientEmailOptions {
+  to: string | string[];
+  recipientName: string;
+  clientName: string;
+  serviceType: string;
+  visitDate: Date;
+  specialistName?: string;
+  reportTitle?: string;
+  customNote?: string | null;
+  reportId: string;
+  portalUrl?: string;
+  supportPhone?: string;
+  supportEmail?: string;
+}
+
+export async function sendReportToFamilyRecipientEmail(
+  options: SendReportToFamilyRecipientEmailOptions,
+): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
+  const {
+    to,
+    recipientName,
+    clientName,
+    serviceType,
+    visitDate,
+    specialistName = "AgeWellRI Specialist",
+    reportTitle = "Completed Safety Visit Report",
+    customNote,
+    reportId,
+    portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
+    supportPhone = "(401) 712-3012",
+    supportEmail = "agewellri@gmail.com",
+  } = options;
+
+  const formattedDate = new Date(visitDate).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  const subject = `Home Safety Visit Report for ${clientName} (${formattedDate})`;
+
+  const customNoteHtml = customNote
+    ? `
+      <div style="background: #FEF3C7; border-left: 4px solid #D97706; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; color: #92400E;">
+        <strong>Personal Note from ${clientName}:</strong><br>
+        "${customNote}"
+      </div>
+    `
+    : "";
+
+  const content = `
+    <div class="greeting">Hello ${recipientName},</div>
+    <div class="message">
+      A new visit report for <strong>${clientName}</strong> has been shared with you regarding their completed <strong>${serviceType}</strong> on <strong>${formattedDate}</strong>.
+    </div>
+
+    ${customNoteHtml}
+
+    <div class="highlight-card">
+      <div style="font-size: 13px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; border-bottom: 1px solid #D9E4EC; padding-bottom: 6px;">
+        📄 Safety Visit Summary
+      </div>
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Resident:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${clientName}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Service:</td>
+          <td style="padding: 6px 0; color: #294B68; font-weight: 800; text-align: right;">${serviceType}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Visit Date:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${formattedDate}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Specialist:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${specialistName}</td>
+        </tr>
+      </table>
+    </div>
+
+    <div style="text-align: center; margin: 28px 0;">
+      <a href="${portalUrl}/dashboard/reports/${reportId}" class="btn-primary" style="display: inline-block; padding: 14px 28px; background: #294B68; color: #ffffff; text-decoration: none; font-weight: 800; font-size: 14px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+        View Full Report &amp; Photos →
+      </a>
+    </div>
+
+    <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 12px; color: #475569; line-height: 1.6;">
+      <strong>Authorized Recipient Communication:</strong><br>
+      You are receiving this update because you are registered as an authorized family contact for ${clientName}.<br><br>
+      AgeWellRI Support: <strong>${supportPhone}</strong> | <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>
+    </div>
+  `;
+
+  const htmlContent = wrapHtmlEmail(subject, content);
+  const recipientString = Array.isArray(to) ? to.join(", ") : to;
+
+  console.log(`\n======================================================`);
+  console.log(
+    `📑 [EMAIL SERVICE] Report Sent to Family Member dispatched to: ${recipientString}`,
+  );
+  console.log(
+    `Recipient: ${recipientName} | Client: ${clientName} | Report: ${reportTitle}`,
+  );
+  console.log(`======================================================\n`);
+
+  const transporter = createTransporter();
+  if (transporter) {
+    try {
+      const info = await transporter.sendMail({
+        from: getDefaultFromAddress("AgeWellRI Safety Oversight"),
+        to: recipientString,
+        subject,
+        html: htmlContent,
+      });
+      return { success: true, messageId: info.messageId, mode: "smtp" };
+    } catch (err: any) {
+      console.warn(
+        `[EMAIL SERVICE] Report to family SMTP error: ${err.message}`,
+      );
+      return { success: true, mode: "console" };
+    }
+  }
+
+  return { success: true, mode: "console" };
+}
+
+export interface SendSubscriptionCancelledEmailOptions {
+  to: string | string[];
+  clientName: string;
+  planName: string;
+  serviceEndDate: Date | string;
+  portalUrl?: string;
+  supportPhone?: string;
+  supportEmail?: string;
+}
+
+/**
+ * Subscription Cancellation Confirmation Email
+ */
+export async function sendSubscriptionCancelledEmail(
+  options: SendSubscriptionCancelledEmailOptions,
+): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
+  const {
+    to,
+    clientName,
+    planName,
+    serviceEndDate,
+    portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
+    supportPhone = "(401) 712-3012",
+    supportEmail = "agewellri@gmail.com",
+  } = options;
+
+  const formattedEndDate =
+    typeof serviceEndDate === "string" && isNaN(Date.parse(serviceEndDate))
+      ? serviceEndDate
+      : new Date(serviceEndDate).toLocaleDateString("en-US", {
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        });
+
+  const subject = "Your AgeWellRI Plan Cancellation Has Been Received";
+
+  const content = `
+    <div class="greeting">Hello ${clientName},</div>
+    <div class="message" style="font-size: 15px; font-weight: 700; color: #243746; margin-bottom: 12px;">
+      Your cancellation has been received.
+    </div>
+    <div class="message" style="margin-bottom: 20px;">
+      Your service will end on <strong>${formattedEndDate}</strong>. You won't be charged again.
+    </div>
+
+    <div class="highlight-card" style="border-left: 4px solid #C28A3A; background: #FFFBEB;">
+      <div style="font-size: 13px; font-weight: 800; color: #92400E; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; border-bottom: 1px solid #FDE68A; padding-bottom: 6px;">
+        📋 Cancellation Details
+      </div>
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Client:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${clientName}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Plan:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${planName}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Service End Date:</td>
+          <td style="padding: 6px 0; color: #92400E; font-weight: 800; text-align: right;">${formattedEndDate}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Auto-Renewal Status:</td>
+          <td style="padding: 6px 0; color: #92400E; font-weight: 800; text-align: right;">Turned Off (No Future Charges)</td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="message" style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 16px;">
+      A confirmation of your cancellation has been recorded. Your scheduled safety visits and support continue through the end of your current paid period (<strong>${formattedEndDate}</strong>).
+    </div>
+
+    <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 13px; color: #294B68; line-height: 1.6; margin-bottom: 24px;">
+      <strong>We're sorry to see you go — you're always welcome back.</strong><br>
+      You can sign in again anytime to reactivate your plan or manage your safety coordination services.
+    </div>
+
+    <div style="text-align: center; margin: 24px 0;">
+      <a href="${portalUrl}/dashboard/billing" class="btn-primary" style="display: inline-block; padding: 14px 28px; background: #294B68; color: #ffffff; text-decoration: none; font-weight: 800; font-size: 14px; border-radius: 12px;">
+        View Client Portal →
+      </a>
+    </div>
+
+    <div style="font-size: 12px; color: #64748B; line-height: 1.5; border-top: 1px solid #D9E4EC; padding-top: 16px;">
+      Questions or need assistance? Our local Rhode Island team is here for you at <strong>${supportPhone}</strong> or <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>.
+    </div>
+  `;
+
+  const htmlContent = wrapHtmlEmail(subject, content);
+  const recipientString = Array.isArray(to) ? to.join(", ") : to;
+
+  console.log(`\n======================================================`);
+  console.log(
+    `🛑 [EMAIL SERVICE] Cancellation Confirmation dispatched to: ${recipientString}`,
+  );
+  console.log(
+    `Client: ${clientName} | Plan: ${planName} | Service Ends: ${formattedEndDate}`,
+  );
+  console.log(`======================================================\n`);
+
+  const transporter = createTransporter();
+  if (transporter) {
+    try {
+      const info = await transporter.sendMail({
+        from: getDefaultFromAddress("AgeWellRI LLC Billing Services"),
+        to: recipientString,
+        subject,
+        html: htmlContent,
+      });
+      return { success: true, messageId: info.messageId, mode: "smtp" };
+    } catch (err: any) {
+      console.warn(
+        `[EMAIL SERVICE] Subscription cancelled SMTP error: ${err.message}`,
+      );
+      return { success: true, mode: "console" };
+    }
+  }
+
+  return { success: true, mode: "console" };
+}
+
+export interface SendSubscriptionReactivatedEmailOptions {
+  to: string | string[];
+  clientName: string;
+  planName: string;
+  nextBillingDate?: Date | string | null;
+  recurringAmount?: number | string | null;
+  portalUrl?: string;
+  supportPhone?: string;
+  supportEmail?: string;
+}
+
+/**
+ * Subscription Reactivation Confirmation Email
+ */
+export async function sendSubscriptionReactivatedEmail(
+  options: SendSubscriptionReactivatedEmailOptions,
+): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
+  const {
+    to,
+    clientName,
+    planName,
+    nextBillingDate,
+    recurringAmount,
+    portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
+    supportPhone = "(401) 712-3012",
+    supportEmail = "agewellri@gmail.com",
+  } = options;
+
+  const formattedBillingDate = nextBillingDate
+    ? typeof nextBillingDate === "string" && isNaN(Date.parse(nextBillingDate))
+      ? nextBillingDate
+      : new Date(nextBillingDate).toLocaleDateString("en-US", {
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        })
+    : null;
+
+  const subject = "Your AgeWellRI Plan Has Been Reactivated";
+
+  const content = `
+    <div class="greeting">Hello ${clientName},</div>
+    <div class="message" style="font-size: 15px; font-weight: 700; color: #166534; margin-bottom: 12px;">
+      Your AgeWellRI plan has been successfully reactivated.
+    </div>
+
+    <div class="highlight-card" style="border-left: 4px solid #16A34A; background: #F0FDF4;">
+      <div style="font-size: 13px; font-weight: 800; color: #166534; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; border-bottom: 1px solid #BBF7D0; padding-bottom: 6px;">
+        🛡️ Reactivated Membership Plan
+      </div>
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Client:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${clientName}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Plan:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${planName}</td>
+        </tr>
+        ${
+          formattedBillingDate
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Next Billing Date:</td>
+                <td style="padding: 6px 0; color: #166534; font-weight: 800; text-align: right;">${formattedBillingDate}</td>
+              </tr>`
+            : ""
+        }
+        ${
+          recurringAmount
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Recurring Amount:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${typeof recurringAmount === "number" ? `$${recurringAmount.toFixed(2)} USD` : recurringAmount}</td>
+              </tr>`
+            : ""
+        }
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Auto-Renewal Status:</td>
+          <td style="padding: 6px 0; color: #166534; font-weight: 800; text-align: right;">Active (Auto-Pay)</td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="message" style="font-size: 13px; color: #475569; line-height: 1.6; margin-bottom: 16px;">
+      Your service will continue according to your active subscription.<br><br>
+      Auto-renewal is now turned back on, and your upcoming billing will proceed according to your subscription schedule.<br><br>
+      You can continue using your AgeWellRI services as scheduled.
+    </div>
+
+    <div style="text-align: center; margin: 24px 0;">
+      <a href="${portalUrl}/dashboard/billing" class="btn-primary" style="display: inline-block; padding: 14px 28px; background: #294B68; color: #ffffff; text-decoration: none; font-weight: 800; font-size: 14px; border-radius: 12px;">
+        Manage Subscription &amp; Visits →
+      </a>
+    </div>
+
+    <div style="font-size: 12px; color: #64748B; line-height: 1.5; border-top: 1px solid #D9E4EC; padding-top: 16px;">
+      Questions or need assistance? Our local team is here to help at <strong>${supportPhone}</strong> or <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>.
+    </div>
+  `;
+
+  const htmlContent = wrapHtmlEmail(subject, content);
+  const recipientString = Array.isArray(to) ? to.join(", ") : to;
+
+  console.log(`\n======================================================`);
+  console.log(
+    `✅ [EMAIL SERVICE] Reactivation Confirmation dispatched to: ${recipientString}`,
+  );
+  console.log(
+    `Client: ${clientName} | Plan: ${planName} | Next Billing: ${formattedBillingDate || "Scheduled"}`,
+  );
+  console.log(`======================================================\n`);
+
+  const transporter = createTransporter();
+  if (transporter) {
+    try {
+      const info = await transporter.sendMail({
+        from: getDefaultFromAddress("AgeWellRI LLC Billing Services"),
+        to: recipientString,
+        subject,
+        html: htmlContent,
+      });
+      return { success: true, messageId: info.messageId, mode: "smtp" };
+    } catch (err: any) {
+      console.warn(
+        `[EMAIL SERVICE] Subscription reactivated SMTP error: ${err.message}`,
+      );
+      return { success: true, mode: "console" };
+    }
+  }
+
+  return { success: true, mode: "console" };
+}

@@ -9,6 +9,7 @@ import {
   sendBillingRenewalReminderEmail,
   sendInvoiceGeneratedEmail,
 } from "../../utils/email";
+import { notifyClientAndFamily } from "../notification/notification.service";
 
 /**
  * Core Renewal Reminder Processor.
@@ -19,10 +20,11 @@ export async function checkAndSendRenewalReminders() {
   console.log(`\n⏰ [RENEWAL SCHEDULER] Running renewal reminder checks at ${now.toISOString()}...`);
 
   try {
-    // 1. Fetch all active subscriptions with upcoming renewal dates
+    // 1. Fetch all active or scheduled subscriptions with upcoming renewal / first billing dates
     const subscriptions: any[] = await (prisma.subscription.findMany as any)({
       where: {
-        status: { in: [SubscriptionStatus.ACTIVE, "ACTIVE"] },
+        status: { in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.PENDING, "ACTIVE", "PENDING"] },
+        autoRenew: true,
         nextRenewalDate: {
           not: null,
           gte: now, // Must be today or future
@@ -47,25 +49,20 @@ export async function checkAndSendRenewalReminders() {
       const diffMs = renewalDate.getTime() - now.getTime();
       const daysUntilRenewal = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
-      const interval = (sub.billingInterval || "QUARTERLY") as BillingInterval;
+      const interval = (sub.billingInterval || "MONTHLY") as BillingInterval;
 
-      // Determine reminder threshold window based on interval
-      let thresholdDays = 14; // Default Quarterly = 14 days
-      if (interval === BillingInterval.MONTHLY) {
-        thresholdDays = 7;
-      } else if (interval === BillingInterval.ANNUAL) {
-        thresholdDays = 30;
-      }
+      // Authoritative requirement: reminder is sent exactly 15 days before the upcoming billing date
+      const thresholdDays = 15;
 
-      // Check if subscription falls within notification threshold
+      // Check if subscription falls within 15-day notification threshold
       if (daysUntilRenewal > thresholdDays || daysUntilRenewal < 0) {
         continue;
       }
 
       const clientUser = sub.client.user;
-      const clientName = `${clientUser.firstName || ""} ${clientUser.lastName || ""}`.trim() || "Valued Client";
-      const planName = sub.client?.selectedPlan || "Guardian Plus";
-      const contractedPrice = sub.contractedPrice ?? (planName.includes("Essential") ? 995 : 1892);
+      const clientName = clientUser ? `${clientUser.firstName || ""} ${clientUser.lastName || ""}`.trim() || "Valued Member" : "Valued Member";
+      const planName = sub.plan?.name || sub.client?.selectedPlan || "Service Plan";
+      const contractedPrice = sub.contractedPrice ?? sub.plan?.price ?? 0;
 
       // Determine recipients: Primary client and designated authorized contact
       const recipients: { email: string; role: string; name?: string }[] = [];
@@ -128,7 +125,33 @@ export async function checkAndSendRenewalReminders() {
             },
           });
 
-          // 5. Write Audit Log
+          // 5. In-App Notification for Client & Authorized Family
+          try {
+            const dateDisplay = new Date(renewalDate).toLocaleDateString("en-US", {
+              month: "long",
+              day: "numeric",
+              year: "numeric",
+            });
+            await notifyClientAndFamily(
+              sub.client.id,
+              {
+                type: "RENEWAL_REMINDER",
+                title: "Upcoming Plan Renewal",
+                message: `Your AgeWellRI plan (${planName}) will renew on ${dateDisplay}.`,
+                metadata: {
+                  subscriptionId: sub.id,
+                  renewalDate: renewalDate.toISOString(),
+                  amount: contractedPrice,
+                },
+                idempotencyKey: `renewal_reminder_${sub.id}_${renewalDate.toISOString().slice(0, 10)}`,
+              },
+              "billingAccess",
+            );
+          } catch (notifErr: any) {
+            console.warn("⚠️ Failed to dispatch in-app renewal reminder:", notifErr.message);
+          }
+
+          // 6. Write Audit Log
           try {
             await (prisma.auditLog.create as any)({
               data: {
@@ -174,6 +197,36 @@ export async function checkAndSendRenewalReminders() {
 }
 
 /**
+ * Background data sanitizer to ensure all legacy records adhere strictly to MONTHLY billing intervals.
+ */
+export async function sanitizeLegacyBillingIntervals() {
+  const collections = [
+    "Subscription",
+    "PlanVersion",
+    "ServicePlan",
+    "BillingNotificationLog",
+    "BillingNotificationRule",
+    "ServiceAgreement",
+    "Invoice",
+  ];
+
+  for (const coll of collections) {
+    try {
+      await (prisma as any).$runCommandRaw({
+        update: coll,
+        updates: [
+          {
+            q: { billingInterval: { $in: ["QUARTERLY", "ANNUAL", "THREE_MONTHS", "YEARLY"] } },
+            u: { $set: { billingInterval: "MONTHLY" } },
+            multi: true,
+          },
+        ],
+      });
+    } catch {}
+  }
+}
+
+/**
  * Start the background scheduler loop.
  * Runs on boot and every 6 hours thereafter.
  */
@@ -185,17 +238,23 @@ export function initRenewalScheduler() {
   }
 
   // Run initial check 10 seconds after server startup
-  setTimeout(() => {
-    checkAndSendRenewalReminders().catch((e) =>
-      console.warn("⚠️ Initial scheduler check notice:", e.message)
-    );
+  setTimeout(async () => {
+    try {
+      await sanitizeLegacyBillingIntervals();
+      await checkAndSendRenewalReminders();
+    } catch (e: any) {
+      console.warn("⚠️ Initial scheduler check notice:", e.message);
+    }
   }, 10000);
 
   // Run recurring check every 6 hours (21,600,000 ms)
-  schedulerIntervalId = setInterval(() => {
-    checkAndSendRenewalReminders().catch((e) =>
-      console.warn("⚠️ Scheduled reminder notice:", e.message)
-    );
+  schedulerIntervalId = setInterval(async () => {
+    try {
+      await sanitizeLegacyBillingIntervals();
+      await checkAndSendRenewalReminders();
+    } catch (e: any) {
+      console.warn("⚠️ Scheduled reminder notice:", e.message);
+    }
   }, 6 * 60 * 60 * 1000);
 
   console.log("⏰ [RENEWAL SCHEDULER] Background renewal reminder scheduler initialized (every 6 hours).");
