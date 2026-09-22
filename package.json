@@ -17,9 +17,9 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "tsc",
-    "start": "tsx src/server.ts",
-    "dev": "tsx watch src/server.ts",
+    "build": "node api.js && tsc",
+    "start": "node api.js && tsx src/server.ts",
+    "dev": "node api.js && tsx watch src/server.ts",
     "postinstall": "prisma generate",
     "seed:admin": "tsx prisma/seed.ts",
     "db:seed": "tsx prisma/seed.ts"
