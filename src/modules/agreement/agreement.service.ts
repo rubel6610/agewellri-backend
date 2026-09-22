@@ -611,7 +611,7 @@ export async function submitServiceAgreement(
       const planDisplay = targetPlan?.name || input.selectedPlan || "AgeWellRI Membership";
       const priceDisplay = `$${finalPrice}/month`;
 
-      const notificationMessage = `Your service agreement is complete and your subscription is active.\n• Your plan: ${planDisplay} — ${priceDisplay}\n• Service begins: ${commencementDateFormatted}\n• First billing: ${commencementDateFormatted} — you won't be charged today\n• A copy of your signed agreement has been emailed to you for your records.\nWe'll be in touch shortly to schedule your first visit. Questions? Call us anytime at (401) 212-3002.`;
+      const notificationMessage = `Your service agreement is complete and your subscription is active.\n• Your plan: ${planDisplay} — ${priceDisplay}\n• Service begins: ${commencementDateFormatted}\n• First billing: ${commencementDateFormatted} — you won't be charged today\n• A copy of your signed agreement has been emailed to you for your records.\nYou can schedule your first visit in your member portal. Questions? Reach us at (401) 212-3002 or agewellri@gmail.com, and we'll respond promptly.`;
 
       await notifyClientAndFamily(
         targetClientId,
