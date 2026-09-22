@@ -22,6 +22,7 @@ import {
   notifyClientAndFamily,
   notifyAdmins,
 } from "../notification/notification.service";
+import { calculatePeriodEndDate } from "../../utils/billing-dates.util";
 
 export function isValidObjectId(id?: string | null): boolean {
   if (!id || typeof id !== "string") return false;
@@ -102,10 +103,21 @@ export function parseDateAndTimeSlot(
   dateStr: string,
   timeSlotStr: string,
 ): { startAt: Date; endAt: Date } {
-  const baseDate = new Date(dateStr);
-  const year = baseDate.getFullYear();
-  const month = baseDate.getMonth();
-  const day = baseDate.getDate();
+  let year: number;
+  let month: number;
+  let day: number;
+
+  if (dateStr.includes("-")) {
+    const parts = dateStr.split("T")[0].split("-");
+    year = parseInt(parts[0], 10);
+    month = parseInt(parts[1], 10) - 1;
+    day = parseInt(parts[2], 10);
+  } else {
+    const baseDate = new Date(dateStr);
+    year = baseDate.getFullYear();
+    month = baseDate.getMonth();
+    day = baseDate.getDate();
+  }
 
   const timeMatches = timeSlotStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)/g);
 
@@ -354,13 +366,14 @@ async function validateAndExecuteContractualScheduling(
     );
   }
 
-  // 2. CONTRACTUAL INTEGRITY: Validate Active Subscription & Contracted ServicePlan
-  const activeSubscription = await (prisma.subscription.findFirst as any)({
+  // 2. CONTRACTUAL INTEGRITY: Validate Active or Enrolled Subscription & Contracted ServicePlan
+  let activeSubscription = await (prisma.subscription.findFirst as any)({
     where: {
       clientId: client.id,
       status: {
         in: [
           SubscriptionStatus.ACTIVE,
+          SubscriptionStatus.PENDING,
           SubscriptionStatus.CANCELLATION_REQUESTED,
         ],
       },
@@ -380,51 +393,79 @@ async function validateAndExecuteContractualScheduling(
   });
 
   if (!activeSubscription) {
-    const anySub = await (prisma.subscription.findFirst as any)({
-      where: { clientId: client.id },
-      orderBy: { createdAt: "desc" },
-    });
-
-    if (anySub?.status === SubscriptionStatus.PENDING) {
-      const startDateStr = anySub.currentPeriodStart
-        ? new Date(anySub.currentPeriodStart).toLocaleDateString("en-US", {
-            month: "long",
-            day: "numeric",
-            year: "numeric",
-          })
-        : "the 1st of next month";
-      throw new Error(
-        `Your membership coverage is scheduled to commence on ${startDateStr} (the 1st of the month following signup). Visits can be scheduled once your service period begins.`,
-      );
-    }
     throw new Error(
-      "No active subscription found for client. An active paid membership plan is required before scheduling visits.",
+      "No active or enrolled membership plan found for client. An enrolled plan is required before scheduling visits.",
     );
   }
 
-  // 3. CONTRACTUAL INTEGRITY: Validate Active Billing Period
-  const activePeriod = activeSubscription.periods?.[0];
+  // 3. CONTRACTUAL INTEGRITY: Resolve or Auto-Provision Subscription Period
+  let activePeriod = activeSubscription.periods?.[0];
   if (
     !activePeriod ||
     activePeriod.status === "EXPIRED" ||
     activePeriod.status === "CANCELLED"
   ) {
-    throw new Error(
-      "No active billing period found for the client's subscription. Payment and enrollment must be completed first.",
-    );
+    const periodStart = activeSubscription.currentPeriodStart || new Date();
+    const periodEnd =
+      activeSubscription.currentPeriodEnd ||
+      calculatePeriodEndDate(new Date(periodStart));
+
+    activePeriod = await (prisma.subscriptionPeriod.create as any)({
+      data: {
+        subscriptionId: activeSubscription.id,
+        periodNumber: 1,
+        startDate: periodStart,
+        endDate: periodEnd,
+        isCurrent: true,
+        status:
+          activeSubscription.status === SubscriptionStatus.ACTIVE
+            ? "ACTIVE"
+            : "PENDING",
+        amount: activeSubscription.contractedPrice,
+      },
+      include: {
+        allocations: true,
+      },
+    });
   }
 
   // Validate that requested appointment date is within or after the service period start date
-  const { startAt: requestedStart } = parseDateAndTimeSlot(
-    params.date,
-    params.timeSlot,
-  );
+  const { startAt: requestedStart, endAt: requestedEnd } =
+    params.startAt && params.endAt
+      ? { startAt: new Date(params.startAt), endAt: new Date(params.endAt) }
+      : parseDateAndTimeSlot(params.date, params.timeSlot);
+
+  // Validate working days: Sunday (0) and Wednesday (3) are non-service days (weekends)
+  const dayOfWeek = requestedStart.getDay();
+  if (dayOfWeek === 0 || dayOfWeek === 3) {
+    const dayName = dayOfWeek === 0 ? "Sunday" : "Wednesday";
+    throw new Error(
+      `Visits cannot be scheduled on ${dayName}s as they are non-service days. Working days are Monday, Tuesday, Thursday, Friday, and Saturday.`,
+    );
+  }
+
+  // Validate working hours: 8:00 AM to 6:00 PM (08:00 - 18:00)
+  const startHour = requestedStart.getHours();
+  const endHour = requestedEnd.getHours();
+  const endMin = requestedEnd.getMinutes();
+
+  if (startHour < 8 || endHour > 18 || (endHour === 18 && endMin > 0)) {
+    throw new Error(
+      "Visits must be scheduled within working hours (8:00 AM – 6:00 PM). Please select a time between 8:00 AM and 6:00 PM.",
+    );
+  }
+
   if (activePeriod && activePeriod.startDate) {
     const periodStart = new Date(activePeriod.startDate);
     periodStart.setHours(0, 0, 0, 0);
     if (requestedStart.getTime() < periodStart.getTime()) {
+      const commencementStr = periodStart.toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      });
       throw new Error(
-        `Visits cannot be scheduled prior to your service commencement date (${periodStart.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}).`,
+        `Visits must be scheduled on or after your service commencement date (${commencementStr}). Please select a date on or after ${commencementStr}.`,
       );
     }
   }
@@ -491,10 +532,8 @@ async function validateAndExecuteContractualScheduling(
   }
 
   // 7. Calculate startAt and endAt
-  const { startAt, endAt } =
-    params.startAt && params.endAt
-      ? { startAt: new Date(params.startAt), endAt: new Date(params.endAt) }
-      : parseDateAndTimeSlot(params.date, params.timeSlot);
+  const startAt = requestedStart;
+  const endAt = requestedEnd;
 
   // 8. Check client overlapping active appointments
   const clientConflict = await (prisma.appointment.findFirst as any)({
@@ -550,9 +589,7 @@ async function validateAndExecuteContractualScheduling(
       );
     }
 
-    const initialStatus = isAdmin
-      ? AppointmentStatus.SCHEDULED
-      : ("REQUESTED" as any);
+    const initialStatus = AppointmentStatus.SCHEDULED;
     const assignedTechId = isAdmin ? technician?.id || null : null;
 
     let accessMethodTitle = params.accessMethodTitle || null;
@@ -596,7 +633,6 @@ async function validateAndExecuteContractualScheduling(
     const createdAppt = await tx.appointment.create({
       data: {
         clientId: client.id,
-        planId: activeSubscription.planId || executedAgreement?.planId || null,
         serviceName,
         subscriptionPeriodId: activePeriod.id,
         technicianId: assignedTechId,
@@ -1004,6 +1040,26 @@ export async function rescheduleAppointment(
     input.startAt && input.endAt
       ? { startAt: new Date(input.startAt), endAt: new Date(input.endAt) }
       : parseDateAndTimeSlot(input.date, input.timeSlot);
+
+  // Validate working days: Sunday (0) and Wednesday (3) are non-service days (weekends)
+  const dayOfWeek = startAt.getDay();
+  if (dayOfWeek === 0 || dayOfWeek === 3) {
+    const dayName = dayOfWeek === 0 ? "Sunday" : "Wednesday";
+    throw new Error(
+      `Visits cannot be rescheduled to ${dayName}s as they are non-service days. Working days are Monday, Tuesday, Thursday, Friday, and Saturday.`,
+    );
+  }
+
+  // Validate working hours: 8:00 AM to 6:00 PM (08:00 - 18:00)
+  const startHour = startAt.getHours();
+  const endHour = endAt.getHours();
+  const endMin = endAt.getMinutes();
+
+  if (startHour < 8 || endHour > 18 || (endHour === 18 && endMin > 0)) {
+    throw new Error(
+      "Visits must be scheduled within working hours (8:00 AM – 6:00 PM). Please select a time between 8:00 AM and 6:00 PM.",
+    );
+  }
 
   const technicianId = input.technicianId || appt.technicianId;
 

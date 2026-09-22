@@ -33,6 +33,7 @@ import {
 import { resolveClientForUser } from "../family/family.service";
 import {
   getFirstBillingDate,
+  getEasternDateParts,
   getServiceCommencementDate,
   getStripeTrialEndTimestamp,
   isChargeAllowed,
@@ -691,7 +692,7 @@ export async function processAgreementPayment(
         subscriptionId: subscription.id,
         amount: pricing.totalPrice,
         currency: pricing.currency,
-        status: isInvoiceBilling ? InvoiceStatus.OPEN : InvoiceStatus.DRAFT,
+        status: InvoiceStatus.OPEN,
         billingMethod,
         dueDate: firstBillingDate,
       },
@@ -715,7 +716,7 @@ export async function processAgreementPayment(
         subscriptionId: subscription.id,
         amount: pricing.totalPrice,
         currency: pricing.currency,
-        status: isInvoiceBilling ? InvoiceStatus.OPEN : InvoiceStatus.DRAFT,
+        status: InvoiceStatus.OPEN,
         billingMethod,
         dueDate: firstBillingDate,
         issuedAt: now,
@@ -941,38 +942,26 @@ export async function cancelSubscriptionRenewal(
     // If already cancelled or cancellation requested (duplicate protection)
     if (
       activeSub.status === SubscriptionStatus.CANCELLED ||
-      activeSub.cancelAtPeriodEnd === true ||
-      activeSub.autoRenew === false
+      (activeSub.status === SubscriptionStatus.CANCELLATION_REQUESTED &&
+        activeSub.cancelAtPeriodEnd === true &&
+        activeSub.autoRenew === false)
     ) {
       const effectiveDate =
         activeSub.cancellationEffectiveAt || activeSub.currentPeriodEnd || now;
       return {
         success: true,
-        message: `Automatic renewal is already cancelled. Your active coverage remains in effect until ${new Date(effectiveDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}.`,
+        message: `Automatic renewal is already cancelled. Your active coverage remains in effect until ${formatBillingDate(effectiveDate)}.`,
         cancellationEffectiveAt: effectiveDate,
         autoRenew: false,
         cancelAtPeriodEnd: true,
       };
     }
 
-    const upcomingBillingDate =
-      activeSub.nextRenewalDate || activeSub.currentPeriodEnd || now;
-    const isEligible = isWithinCancellationCutoff(now, upcomingBillingDate, 10);
-
-    if (!isEligible) {
-      const cutoffDate = getCancellationCutoffDate(upcomingBillingDate, 10);
-      return {
-        success: false,
-        message: `Auto-renewal cancellation must be submitted at least 10 days before the end of the month (cutoff was ${formatBillingDate(cutoffDate)}). Your upcoming renewal for ${formatBillingDate(upcomingBillingDate)} is already scheduled.`,
-        cancellationEffectiveAt: activeSub.currentPeriodEnd,
-        autoRenew: activeSub.autoRenew,
-        cancelAtPeriodEnd: false,
-      };
-    }
-
     const effectiveDate =
       activeSub.currentPeriodEnd ||
-      new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      activeSub.nextRenewalDate ||
+      activeSub.currentPeriodStart ||
+      now;
 
     // Update Stripe Subscription to cancel at period end if exists
     if (activeSub.stripeSubscriptionId) {
@@ -1386,15 +1375,28 @@ export async function getBillingOverview(userId: string) {
     ? new Date(activeSub.currentPeriodStart)
     : defaultFirstBilling;
   const serviceCommencementDate = firstBillingDate;
-  const targetRenewalDate = activeSub?.nextRenewalDate
-    ? new Date(activeSub.nextRenewalDate)
-    : firstBillingDate;
+
+  const isPendingFirstBilling =
+    activeSub?.status === SubscriptionStatus.PENDING;
+
+  // Authoritative Renewal Date:
+  // For PENDING subscriptions, next payment occurs on firstBillingDate (1st of commencement month).
+  // For ACTIVE subscriptions, next monthly renewal is strictly the 1st of the following month (e.g. Nov 1, 2026 for an Oct cycle).
+  const calculatedNextRenewal = isPendingFirstBilling
+    ? firstBillingDate
+    : getFirstBillingDate(activeSub?.currentPeriodStart ? new Date(activeSub.currentPeriodStart) : now);
+
+  const targetRenewalDate =
+    activeSub?.nextRenewalDate &&
+    getEasternDateParts(new Date(activeSub.nextRenewalDate)).day === 1 &&
+    new Date(activeSub.nextRenewalDate) > (activeSub?.currentPeriodStart ? new Date(activeSub.currentPeriodStart) : now)
+      ? new Date(activeSub.nextRenewalDate)
+      : calculatedNextRenewal;
+
   const cancellationCutoffDate = getCancellationCutoffDate(
     targetRenewalDate,
     10,
   );
-  const isPendingFirstBilling =
-    activeSub?.status === SubscriptionStatus.PENDING;
 
   // Contracted terms preservation
   const contractedPlanName =
@@ -1425,9 +1427,7 @@ export async function getBillingOverview(userId: string) {
       ? `Commences ${formatBillingDate(serviceCommencementDate)}`
       : "Active Cycle";
 
-  const nextRenewal = activeSub?.nextRenewalDate
-    ? formatBillingDate(activeSub.nextRenewalDate)
-    : formatBillingDate(defaultFirstBilling);
+  const nextRenewal = formatBillingDate(targetRenewalDate);
 
   const formattedInvoices = (client.invoices || []).map((inv: any) => ({
     id: inv.id,
@@ -1448,7 +1448,7 @@ export async function getBillingOverview(userId: string) {
     }),
     description: contractedPlanName,
     amount: `$${inv.amount.toFixed(2)}`,
-    status: inv.status.toLowerCase(),
+    status: inv.status === InvoiceStatus.DRAFT ? "open" : inv.status.toLowerCase(),
     pdfUrl: inv.invoiceUrl || inv.stripeHostedInvoiceUrl || "#",
   }));
 
@@ -1470,6 +1470,17 @@ export async function getBillingOverview(userId: string) {
     client.appointments || [],
   );
 
+  const isCancelled =
+    activeSub?.cancelAtPeriodEnd === true ||
+    activeSub?.status === SubscriptionStatus.CANCELLATION_REQUESTED ||
+    activeSub?.status === SubscriptionStatus.CANCELLED;
+
+  const cancellationEffectiveDate = activeSub?.cancellationEffectiveAt
+    ? new Date(activeSub.cancellationEffectiveAt)
+    : activeSub?.currentPeriodEnd
+    ? new Date(activeSub.currentPeriodEnd)
+    : null;
+
   return {
     clientName: clientFullName,
     clientNumber,
@@ -1479,17 +1490,17 @@ export async function getBillingOverview(userId: string) {
     hasCleaningAddon: client.hasCleaningAddon,
     billingFrequency: "Monthly",
     billingMethod: activeSub?.billingMethod || "AUTOMATIC",
-    subscriptionStatus: activeSub?.status || "PENDING",
-    autoPayEnabled: activeSub?.autoRenew ?? true,
-    cancelAtPeriodEnd: activeSub?.cancelAtPeriodEnd ?? false,
-    cancellationEffectiveAt: activeSub?.cancellationEffectiveAt || null,
+    subscriptionStatus: activeSub?.status || (isCancelled ? "CANCELLATION_REQUESTED" : "PENDING"),
+    autoPayEnabled: isCancelled ? false : (activeSub?.autoRenew ?? true),
+    cancelAtPeriodEnd: isCancelled,
+    cancellationEffectiveAt: cancellationEffectiveDate ? cancellationEffectiveDate.toISOString() : null,
     currentPeriod: currentPeriodFormatted,
-    nextPaymentDate: nextRenewal,
+    nextPaymentDate: isCancelled && cancellationEffectiveDate ? formatBillingDate(cancellationEffectiveDate) : nextRenewal,
     nextPaymentAmount: `$${contractedPrice.toFixed(2)}`,
     firstBillingDate: formatBillingDate(firstBillingDate),
     serviceCommencementDate: formatBillingDate(serviceCommencementDate),
     cancellationCutoffDate: formatBillingDate(cancellationCutoffDate),
-    isPendingFirstBilling,
+    isPendingFirstBilling: isPendingFirstBilling && !isCancelled,
     paymentMethod: {
       brand: client.cardBrand || "VISA",
       last4: client.cardLast4 || "4242",
@@ -1705,13 +1716,15 @@ export async function handleStripeWebhook(
               activeSub.client?.hasCleaningAddon,
             );
 
+            const nextRenewalCalculated = getFirstBillingDate(newPeriodStart);
+
             // Update Subscription timestamps & status
             await (prisma.subscription.update as any)({
               where: { id: activeSub.id },
               data: {
                 currentPeriodStart: newPeriodStart,
                 currentPeriodEnd: newPeriodEnd,
-                nextRenewalDate: newPeriodEnd,
+                nextRenewalDate: nextRenewalCalculated,
                 status: SubscriptionStatus.ACTIVE,
               },
             });
@@ -1790,7 +1803,7 @@ export async function handleStripeWebhook(
                   paidAt: new Date(),
                   billingPeriodStart: newPeriodStart,
                   billingPeriodEnd: newPeriodEnd,
-                  nextRenewalDate: newPeriodEnd,
+                  nextRenewalDate: nextRenewalCalculated,
                   invoiceNumber: invoiceRecord?.invoiceNumber,
                   receiptUrl: stripeInvoice.hosted_invoice_url,
                 });
@@ -2231,7 +2244,7 @@ export async function getAdminInvoices(query: AdminBillingFilterInput) {
         inv.billingMethod === "AUTOMATIC"
           ? "Credit Card (Auto)"
           : "Pay by Invoice",
-      status: inv.status.toLowerCase(),
+      status: inv.status === InvoiceStatus.DRAFT ? "open" : inv.status.toLowerCase(),
       dueDate: inv.dueDate.toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
@@ -2366,13 +2379,22 @@ export async function getAdminSubscriptions(query: AdminBillingFilterInput) {
       currentPeriod: sub.periods?.[0]
         ? `${sub.periods[0].startDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${sub.periods[0].endDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
         : "N/A",
-      nextRenewalDate: sub.nextRenewalDate
-        ? sub.nextRenewalDate.toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          })
-        : "N/A",
+      nextRenewalDate: (() => {
+        const renewalObj =
+          sub.nextRenewalDate &&
+          getEasternDateParts(new Date(sub.nextRenewalDate)).day === 1
+            ? sub.nextRenewalDate
+            : sub.currentPeriodStart
+              ? getFirstBillingDate(new Date(sub.currentPeriodStart))
+              : sub.nextRenewalDate;
+        return renewalObj
+          ? renewalObj.toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })
+          : "N/A";
+      })(),
     })),
     pagination: {
       total,

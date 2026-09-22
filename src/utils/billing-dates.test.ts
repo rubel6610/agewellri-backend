@@ -193,29 +193,68 @@ function runTests() {
     false,
   );
 
-  // TEST 15: Period end calculation for Monthly interval (Oct 1, 2026 -> Nov 1, 2026)
+  // TEST 15: Period end calculation for Monthly interval: Oct 1, 2026 -> Oct 31, 2026 (Last day of month)
   const periodEndM = calculatePeriodEndDate(firstBilling1, "MONTHLY");
   const periodPartsM = getEasternDateParts(periodEndM);
   assert(
     periodPartsM.year === 2026 &&
-      periodPartsM.month === 11 &&
-      periodPartsM.day === 1,
-    "TEST 15: Monthly period end for Oct 1, 2026 -> Nov 1, 2026",
+      periodPartsM.month === 10 &&
+      periodPartsM.day === 31,
+    "TEST 15: Monthly period end for Oct 1, 2026 -> Oct 31, 2026 (Last day of month)",
     formatBillingDate(periodEndM),
-    "November 1, 2026",
+    "October 31, 2026",
   );
 
-  // TEST 16: Period end calculation for year boundary (Dec 1, 2026 -> Jan 1, 2027)
+  // TEST 16: Period end calculation for December: Dec 1, 2026 -> Dec 31, 2026 (Last day of month)
   const decDate = new Date("2026-12-01T12:00:00.000Z");
   const periodEndDec = calculatePeriodEndDate(decDate, "MONTHLY");
   const periodPartsDec = getEasternDateParts(periodEndDec);
   assert(
-    periodPartsDec.year === 2027 &&
-      periodPartsDec.month === 1 &&
-      periodPartsDec.day === 1,
-    "TEST 16: Monthly period end for Dec 1, 2026 -> Jan 1, 2027",
+    periodPartsDec.year === 2026 &&
+      periodPartsDec.month === 12 &&
+      periodPartsDec.day === 31,
+    "TEST 16: Monthly period end for Dec 1, 2026 -> Dec 31, 2026 (Last day of month)",
     formatBillingDate(periodEndDec),
-    "January 1, 2027",
+    "December 31, 2026",
+  );
+
+  // TEST 17: Period end calculation for February: Feb 1, 2026 -> Feb 28, 2026 (Last day of month)
+  const febDate = new Date("2026-02-01T12:00:00.000Z");
+  const periodEndFeb = calculatePeriodEndDate(febDate, "MONTHLY");
+  const periodPartsFeb = getEasternDateParts(periodEndFeb);
+  assert(
+    periodPartsFeb.year === 2026 &&
+      periodPartsFeb.month === 2 &&
+      periodPartsFeb.day === 28,
+    "TEST 17: Monthly period end for Feb 1, 2026 -> Feb 28, 2026 (Last day of month)",
+    formatBillingDate(periodEndFeb),
+    "February 28, 2026",
+  );
+
+  // TEST 18: Period end calculation for Leap Year February: Feb 1, 2028 -> Feb 29, 2028 (Last day of month)
+  const febLeapDate = new Date("2028-02-01T12:00:00.000Z");
+  const periodEndFebLeap = calculatePeriodEndDate(febLeapDate, "MONTHLY");
+  const periodPartsFebLeap = getEasternDateParts(periodEndFebLeap);
+  assert(
+    periodPartsFebLeap.year === 2028 &&
+      periodPartsFebLeap.month === 2 &&
+      periodPartsFebLeap.day === 29,
+    "TEST 18: Monthly period end for Feb 1, 2028 (Leap Year) -> Feb 29, 2028 (Last day of month)",
+    formatBillingDate(periodEndFebLeap),
+    "February 29, 2028",
+  );
+
+  // TEST 19: Period end calculation for 30-day month (April): Apr 1, 2026 -> Apr 30, 2026 (Last day of month)
+  const aprDate = new Date("2026-04-01T12:00:00.000Z");
+  const periodEndApr = calculatePeriodEndDate(aprDate, "MONTHLY");
+  const periodPartsApr = getEasternDateParts(periodEndApr);
+  assert(
+    periodPartsApr.year === 2026 &&
+      periodPartsApr.month === 4 &&
+      periodPartsApr.day === 30,
+    "TEST 19: Monthly period end for Apr 1, 2026 -> Apr 30, 2026 (Last day of month)",
+    formatBillingDate(periodEndApr),
+    "April 30, 2026",
   );
 
   console.log("==================================================");

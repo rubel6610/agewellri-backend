@@ -1,6 +1,10 @@
 import prisma from "../../lib/prisma";
 import { stripe } from "../../config/stripe";
 import { formatPeriodEntitlements } from "../payment/visit-entitlement.service";
+import {
+  getFirstBillingDate,
+  getEasternDateParts,
+} from "../../utils/billing-dates.util";
 
 export interface AdminClientsQuery {
   search?: string;
@@ -167,7 +171,14 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
       completedVisitsCount,
       remainingVisitsCount,
       nextVisitDate: safeFormatDate(nextAppt?.startAt),
-      renewalDate: safeFormatDate(latestSub?.currentPeriodEnd),
+      renewalDate: safeFormatDate(
+        latestSub?.nextRenewalDate &&
+          getEasternDateParts(new Date(latestSub.nextRenewalDate)).day === 1
+          ? latestSub.nextRenewalDate
+          : latestSub?.currentPeriodStart
+            ? getFirstBillingDate(new Date(latestSub.currentPeriodStart))
+            : latestSub?.nextRenewalDate || latestSub?.currentPeriodEnd,
+      ),
       status: isEnrolledAndPaid
         ? "active"
         : isExecutedAgreement
@@ -452,7 +463,14 @@ export async function getAdminClientById(clientIdOrNumber: string) {
       return formatPeriodEntitlements(currentPeriod, client.appointments || []);
     })(),
     nextVisitDate: safeFormatDate(nextAppt?.startAt),
-    renewalDate: safeFormatDate(latestSub?.currentPeriodEnd),
+    renewalDate: safeFormatDate(
+      latestSub?.nextRenewalDate &&
+        getEasternDateParts(new Date(latestSub.nextRenewalDate)).day === 1
+        ? latestSub.nextRenewalDate
+        : latestSub?.currentPeriodStart
+          ? getFirstBillingDate(new Date(latestSub.currentPeriodStart))
+          : latestSub?.nextRenewalDate || latestSub?.currentPeriodEnd,
+    ),
     status:
       isExecutedAgreement && (isSubActive || paymentStatus === "PAID")
         ? "active"

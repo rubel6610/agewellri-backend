@@ -4,10 +4,11 @@
  * FINAL BUSINESS RULES:
  * 1. First Billing Date: ALWAYS the 1st day of the calendar month following signup.
  * 2. Service Commencement Date: ALWAYS the 1st day of the calendar month following signup (First Billing Date === Service Commencement Date).
- * 3. Stripe trial_end: Anchored to the 1st of the next month at 12:00:00 UTC (08:00 AM EDT / 07:00 AM EST), guaranteed to be the 1st of the month across all US timezones.
- * 4. Recurring Billing: 1st day of each subsequent month (strictly Monthly interval).
- * 5. Billing Reminder: Sent exactly 15 days before the upcoming billing date.
- * 6. Cancellation Cutoff: Client can cancel auto-renewal only if at least 10 days remain before upcoming renewal / month-end.
+ * 3. Period End Date: ALWAYS the LAST DAY of the calendar month (e.g. Oct 1 -> Oct 31, Feb 1 -> Feb 28/29, Dec 1 -> Dec 31).
+ * 4. Stripe trial_end: Anchored to the 1st of the next month at 12:00:00 UTC (08:00 AM EDT / 07:00 AM EST), guaranteed to be the 1st of the month across all US timezones.
+ * 5. Recurring Billing: 1st day of each subsequent month (strictly Monthly interval).
+ * 6. Billing Reminder: Sent exactly 15 days before the upcoming billing date.
+ * 7. Cancellation Cutoff: Client can cancel auto-renewal only if at least 10 days remain before upcoming renewal / month-end.
  *
  * Authoritative Business Timezone: America/New_York (US Eastern Time)
  */
@@ -128,8 +129,14 @@ export function isChargeAllowed(
 /**
  * Calculates the end date for a billing period starting on `startDate` with a given interval.
  *
- * - MONTHLY (Default): 1st of the next month (+1 month)
- * - ONE_TIME: Same month (0 extra months)
+ * FINAL BUSINESS RULE:
+ * - Every plan starts on the 1st of the month and ends on the LAST DAY of that month.
+ * Examples:
+ * - Start: October 1, 2026   -> End: October 31, 2026
+ * - Start: November 1, 2026  -> End: November 30, 2026
+ * - Start: February 1, 2026  -> End: February 28, 2026
+ * - Start: February 1, 2028  -> End: February 29, 2028 (Leap Year)
+ * - Start: December 1, 2026  -> End: December 31, 2026
  */
 export function calculatePeriodEndDate(
   startDate: Date,
@@ -137,20 +144,13 @@ export function calculatePeriodEndDate(
 ): Date {
   const { year, month } = getEasternDateParts(startDate);
 
-  let addMonths = 1; // Strictly 1 Month for Monthly billing
-  if (interval === "ONE_TIME") {
-    addMonths = 0;
-  }
+  // Month is 1-indexed (1 to 12)
+  // Day 0 of the following month (month in 1-based index) gives the last day of the current month
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
 
-  let endMonth = month + addMonths;
-  let endYear = year;
-  while (endMonth > 12) {
-    endMonth -= 12;
-    endYear += 1;
-  }
-
-  const monthStr = String(endMonth).padStart(2, "0");
-  return new Date(`${endYear}-${monthStr}-01T12:00:00.000Z`);
+  const monthStr = String(month).padStart(2, "0");
+  const dayStr = String(lastDay).padStart(2, "0");
+  return new Date(`${year}-${monthStr}-${dayStr}T12:00:00.000Z`);
 }
 
 /**

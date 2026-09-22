@@ -324,8 +324,8 @@ export async function handleCancelRenewal(
       parseResult.success ? parseResult.data : undefined,
     );
 
-    res.status(200).json({
-      success: true,
+    res.status(result.success ? 200 : 400).json({
+      success: result.success,
       message: result.message,
       data: result,
     });

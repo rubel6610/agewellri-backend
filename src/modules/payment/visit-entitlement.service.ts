@@ -37,6 +37,33 @@ export interface ClientVisitEntitlementsResponse {
   entitlements: VisitEntitlementItem[];
 }
 
+export function parsePlanDurationMinutes(times?: string | number | null): number {
+  if (times === undefined || times === null || times === "") return 120;
+  if (typeof times === "number") return isNaN(times) || times <= 0 ? 120 : times * 60;
+
+  const str = String(times).trim().toLowerCase();
+  if (
+    str.includes("an hour") ||
+    str.includes("one hour") ||
+    str === "1" ||
+    str === "1 hour" ||
+    str === "1 hr" ||
+    str === "up to an hour" ||
+    str === "up to 1 hour"
+  ) {
+    return 60;
+  }
+
+  const match = str.match(/(\d+(?:\.\d+)?)/);
+  if (match) {
+    const hours = parseFloat(match[1]);
+    if (!isNaN(hours) && hours > 0) {
+      return Math.round(hours * 60);
+    }
+  }
+  return 120;
+}
+
 /**
  * Provisions VisitAllocations for a given SubscriptionPeriod based on the client's ServicePlan.
  */
@@ -101,6 +128,7 @@ export async function ensureVisitAllocationsForPeriod(
 export function formatPeriodEntitlements(
   period: any,
   appointments: any[] = [],
+  targetPlan?: any,
 ): VisitEntitlementItem[] {
   if (!period || !period.allocations || period.allocations.length === 0) {
     return [];
@@ -119,6 +147,9 @@ export function formatPeriodEntitlements(
     }
     return false;
   });
+
+  const planTimes = targetPlan?.times || period?.subscription?.plan?.times;
+  const durationMinutes = parsePlanDurationMinutes(planTimes);
 
   return period.allocations.map((alloc: any) => {
     const scheduledCount = periodAppts.filter((a: any) =>
@@ -150,7 +181,7 @@ export function formatPeriodEntitlements(
       serviceName: alloc.serviceName || "",
       serviceCode: "PLAN_VISIT",
       category: "SAFETY_OVERSIGHT",
-      durationMinutes: 60,
+      durationMinutes,
       allocated,
       scheduled: scheduledCount,
       completed: completedCount,
@@ -263,11 +294,13 @@ export async function getClientVisitEntitlements(
   let entitlements = formatPeriodEntitlements(
     currentPeriod,
     client?.appointments || [],
+    activeSub?.plan,
   );
 
   // If entitlements array is empty, derive dynamically from active subscription plan
   if (entitlements.length === 0 && activeSub?.plan) {
     const defaultVisits = Number((activeSub.plan as any)?.totalVisits ?? 0);
+    const durationMinutes = parsePlanDurationMinutes(activeSub.plan.times);
     entitlements = [
       {
         id: "plan-quota",
@@ -275,7 +308,7 @@ export async function getClientVisitEntitlements(
         serviceName: activeSub.plan.name || "",
         serviceCode: activeSub.plan.code || "",
         category: "SAFETY_OVERSIGHT",
-        durationMinutes: 60,
+        durationMinutes,
         allocated: defaultVisits,
         scheduled: 0,
         completed: 0,
@@ -374,7 +407,42 @@ export async function getAdminClientVisitEntitlements(
   }
 
   const activeSub = client.subscriptions?.[0] || null;
-  const currentPeriod = activeSub?.periods?.[0] || null;
+  let currentPeriod: any = activeSub?.periods?.[0] || null;
+
+  if (activeSub && !currentPeriod) {
+    try {
+      const now = new Date();
+      const periodEnd =
+        activeSub.currentPeriodEnd ||
+        new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      const newPeriod = await prisma.subscriptionPeriod.create({
+        data: {
+          subscriptionId: activeSub.id,
+          periodNumber: 1,
+          startDate: activeSub.currentPeriodStart || now,
+          endDate: periodEnd,
+          isCurrent: true,
+          status: activeSub.status === "ACTIVE" ? "ACTIVE" : "PENDING",
+          amount: activeSub.contractedPrice,
+        },
+      });
+
+      await ensureVisitAllocationsForPeriod(
+        newPeriod.id,
+        activeSub?.planId,
+        Boolean(client?.hasCleaningAddon),
+      );
+
+      const refreshedPeriod = await prisma.subscriptionPeriod.findUnique({
+        where: { id: newPeriod.id },
+        include: { allocations: true },
+      });
+
+      currentPeriod = refreshedPeriod;
+    } catch (e: any) {
+      console.warn("⚠️ Admin subscription period auto-provision notice:", e.message);
+    }
+  }
 
   if (
     currentPeriod &&
@@ -401,6 +469,7 @@ export async function getAdminClientVisitEntitlements(
   const entitlements = formatPeriodEntitlements(
     currentPeriod,
     client.appointments || [],
+    activeSub?.plan,
   );
 
   const totalAllocated = entitlements.reduce(
