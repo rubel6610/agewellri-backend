@@ -117,16 +117,21 @@ export async function createNotification(
     // Duplicate protection check
     const dedupKey = idempotencyKey || metadata?.idempotencyKey;
     if (dedupKey) {
-      const existing = await (prisma.notification.findFirst as any)({
+      const recentNotifications = await (prisma.notification.findMany as any)({
         where: {
           userId,
           type: type as any,
-          metadata: {
-            path: ["idempotencyKey"],
-            equals: dedupKey,
-          },
         },
+        orderBy: { createdAt: "desc" },
+        take: 50,
       });
+
+      const existing = recentNotifications.find(
+        (n: any) =>
+          n.metadata &&
+          typeof n.metadata === "object" &&
+          (n.metadata as any).idempotencyKey === dedupKey,
+      );
 
       if (existing) {
         return { success: true, notificationId: existing.id };
