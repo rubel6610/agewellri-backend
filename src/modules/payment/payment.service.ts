@@ -678,7 +678,7 @@ export async function processAgreementPayment(
         billingMethod,
         currentPeriodStart: firstBillingDate,
         currentPeriodEnd: periodEndDate,
-        nextRenewalDate: firstBillingDate,
+        nextRenewalDate: getFirstBillingDate(firstBillingDate),
         autoRenew: !pricing.isOneTime,
         cancelAtPeriodEnd: false,
         stripeSubscriptionId: stripeSubscriptionId || null,
@@ -699,7 +699,7 @@ export async function processAgreementPayment(
         billingMethod,
         currentPeriodStart: firstBillingDate,
         currentPeriodEnd: periodEndDate,
-        nextRenewalDate: firstBillingDate,
+        nextRenewalDate: getFirstBillingDate(firstBillingDate),
         autoRenew: !pricing.isOneTime,
         cancelAtPeriodEnd: false,
         stripeSubscriptionId:
@@ -878,7 +878,7 @@ export async function processAgreementPayment(
         paidAt: null,
         coveragePeriodStart: firstBillingDate,
         coveragePeriodEnd: periodEndDate,
-        nextRenewalDate: firstBillingDate,
+        nextRenewalDate: getFirstBillingDate(firstBillingDate),
         cancellationDeadline: agreement?.cancellationDeadline,
         cancellationDeadlineRule: agreement?.cancellationDeadlineRule,
       });
@@ -1443,16 +1443,13 @@ export async function getBillingOverview(userId: string) {
     activeSub?.status === SubscriptionStatus.PENDING;
 
   // Authoritative Renewal Date:
-  // For PENDING subscriptions, next payment occurs on firstBillingDate (1st of commencement month).
-  // For ACTIVE subscriptions, next monthly renewal is strictly the 1st of the following month (e.g. Nov 1, 2026 for an Oct cycle).
-  const calculatedNextRenewal = isPendingFirstBilling
-    ? firstBillingDate
-    : getFirstBillingDate(activeSub?.currentPeriodStart ? new Date(activeSub.currentPeriodStart) : now);
+  // Next monthly renewal is strictly the 1st of the month AFTER service commencement / current period start (e.g. Nov 1, 2026 for an Oct commencement).
+  const calculatedNextRenewal = getFirstBillingDate(serviceCommencementDate);
 
   const targetRenewalDate =
     activeSub?.nextRenewalDate &&
     getEasternDateParts(new Date(activeSub.nextRenewalDate)).day === 1 &&
-    new Date(activeSub.nextRenewalDate) > (activeSub?.currentPeriodStart ? new Date(activeSub.currentPeriodStart) : now)
+    new Date(activeSub.nextRenewalDate) > serviceCommencementDate
       ? new Date(activeSub.nextRenewalDate)
       : calculatedNextRenewal;
 

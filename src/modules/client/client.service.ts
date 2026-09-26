@@ -134,8 +134,8 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
       internalId: c.id,
       userId: c.userId,
       clientNumber: c.clientNumber || `AW-${c.id.slice(-4).toUpperCase()}`,
-      firstName: c.user?.firstName || "Unknown",
-      lastName: c.user?.lastName || "Member",
+      firstName: c.user?.firstName,
+      lastName: c.user?.lastName,
       email: c.user?.email || c.primaryContactEmail || "",
       phone: c.user?.phone || c.primaryContactPhone || "",
       address: {
@@ -173,18 +173,19 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
       nextVisitDate: safeFormatDate(nextAppt?.startAt),
       renewalDate: safeFormatDate(
         latestSub?.nextRenewalDate &&
-          getEasternDateParts(new Date(latestSub.nextRenewalDate)).day === 1
+          getEasternDateParts(new Date(latestSub.nextRenewalDate)).day === 1 &&
+          new Date(latestSub.nextRenewalDate) > (latestSub?.currentPeriodStart ? new Date(latestSub.currentPeriodStart) : new Date())
           ? latestSub.nextRenewalDate
           : latestSub?.currentPeriodStart
             ? getFirstBillingDate(new Date(latestSub.currentPeriodStart))
-            : latestSub?.nextRenewalDate || latestSub?.currentPeriodEnd,
+            : getFirstBillingDate(new Date())
       ),
       status: isEnrolledAndPaid
         ? "active"
         : isExecutedAgreement
           ? "pending_payment"
           : "pending_onboarding",
-      createdAt: safeFormatDate(c.createdAt) || "Recently",
+      createdAt: safeFormatDate(c.createdAt),
       // Onboarding Timeline Flags
       timeline: {
         welcomeSent: Boolean(latestInvitation || c.createdAt),
@@ -465,11 +466,12 @@ export async function getAdminClientById(clientIdOrNumber: string) {
     nextVisitDate: safeFormatDate(nextAppt?.startAt),
     renewalDate: safeFormatDate(
       latestSub?.nextRenewalDate &&
-        getEasternDateParts(new Date(latestSub.nextRenewalDate)).day === 1
+        getEasternDateParts(new Date(latestSub.nextRenewalDate)).day === 1 &&
+        new Date(latestSub.nextRenewalDate) > (latestSub?.currentPeriodStart ? new Date(latestSub.currentPeriodStart) : new Date())
         ? latestSub.nextRenewalDate
         : latestSub?.currentPeriodStart
           ? getFirstBillingDate(new Date(latestSub.currentPeriodStart))
-          : latestSub?.nextRenewalDate || latestSub?.currentPeriodEnd,
+          : getFirstBillingDate(new Date())
     ),
     status:
       isExecutedAgreement && (isSubActive || paymentStatus === "PAID")
