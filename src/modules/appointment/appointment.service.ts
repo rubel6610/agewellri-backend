@@ -535,7 +535,32 @@ async function validateAndExecuteContractualScheduling(
   const startAt = requestedStart;
   const endAt = requestedEnd;
 
-  // 8. Check client overlapping active appointments
+  // 8. Check client active appointments on the exact same date (Disabled date check)
+  const requestedDayStart = new Date(requestedStart);
+  requestedDayStart.setHours(0, 0, 0, 0);
+  const requestedDayEnd = new Date(requestedStart);
+  requestedDayEnd.setHours(23, 59, 59, 999);
+
+  const sameDayAppt = await (prisma.appointment.findFirst as any)({
+    where: {
+      clientId: client.id,
+      status: {
+        in: [
+          AppointmentStatus.SCHEDULED,
+          AppointmentStatus.CONFIRMED,
+          AppointmentStatus.RESCHEDULED,
+        ],
+      },
+      startAt: { gte: requestedDayStart, lte: requestedDayEnd },
+    },
+  });
+
+  if (sameDayAppt) {
+    throw new Error(
+      "A visit is already scheduled on this date. Dates with scheduled visits are disabled.",
+    );
+  }
+
   const clientConflict = await (prisma.appointment.findFirst as any)({
     where: {
       clientId: client.id,
@@ -553,7 +578,7 @@ async function validateAndExecuteContractualScheduling(
 
   if (clientConflict) {
     throw new Error(
-      "The client already has an active appointment scheduled during this time window.",
+      "A visit is already scheduled during this requested date and time slot. Please select another time slot.",
     );
   }
 
