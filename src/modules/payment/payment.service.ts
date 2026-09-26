@@ -1004,6 +1004,22 @@ export async function cancelSubscriptionRenewal(
       };
     }
 
+    // 10-Day Cancellation Cutoff Rule:
+    // Cancellation requests for auto-renewal must be submitted at least 10 days before the 1st of the next month (by the 20th of the current month).
+    // If the request is made after the 20th (day >= 21), cutoff for next month's renewal has passed and renewal cancellation is rejected.
+    const easternNow = getEasternDateParts(now);
+    if (easternNow.day > 20) {
+      const cutoffDate = new Date(easternNow.year, easternNow.month - 1, 20);
+      const cutoffFormatted = formatBillingDate(cutoffDate);
+      return {
+        success: false,
+        message: `Auto-renewal cancellation must be submitted at least 10 days prior to the 1st of each month (by the 20th of the month). The cutoff date (${cutoffFormatted}) for next month's renewal has passed. Cancellation cannot be processed for the upcoming renewal.`,
+        cancellationEffectiveAt: null,
+        autoRenew: true,
+        cancelAtPeriodEnd: false,
+      };
+    }
+
     const effectiveDate =
       activeSub.currentPeriodEnd ||
       activeSub.nextRenewalDate ||
