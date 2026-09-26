@@ -11,6 +11,7 @@ import {
   handleUpdateAppointmentStatus,
   handleAcceptVisitRequest,
   handleDeclineVisitRequest,
+  handleDeleteAppointment,
 } from "./appointment.controller";
 
 const router = Router();
@@ -25,6 +26,7 @@ router.post("/admin/schedule", authenticate, handleScheduleAdminAppointment);
 router.put("/:id/status", authenticate, handleUpdateAppointmentStatus);
 router.put("/:id/accept-request", authenticate, handleAcceptVisitRequest);
 router.put("/:id/decline-request", authenticate, handleDeclineVisitRequest);
+router.delete("/:id", authenticate, handleDeleteAppointment);
 
 // Shared Protected Routes (Client/Admin with ownership check)
 router.get("/:id", authenticate, handleGetAppointmentById);

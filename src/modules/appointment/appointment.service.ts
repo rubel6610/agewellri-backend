@@ -1516,3 +1516,48 @@ export async function declineVisitRequest(
     reason || "Visit request declined by administrator",
   );
 }
+
+/**
+ * ADMIN: Permanently Delete Appointment (e.g. cancelled visits)
+ */
+export async function deleteAppointment(
+  appointmentId: string,
+  adminUserId: string,
+) {
+  if (!isValidObjectId(appointmentId)) {
+    throw new Error("Invalid appointment ID.");
+  }
+
+  const appt = await prisma.appointment.findUnique({
+    where: { id: appointmentId },
+  });
+
+  if (!appt) {
+    throw new Error("Appointment record not found.");
+  }
+
+  // Find linked visits
+  const visits = await prisma.visit.findMany({
+    where: { appointmentId },
+  });
+
+  for (const v of visits) {
+    await prisma.report.deleteMany({ where: { visitId: v.id } });
+  }
+  await prisma.visit.deleteMany({ where: { appointmentId } });
+
+  // Delete the appointment
+  await prisma.appointment.delete({
+    where: { id: appointmentId },
+  });
+
+  await createAppointmentAuditLog({
+    actorUserId: adminUserId,
+    action: "ADMIN_DELETED_APPOINTMENT",
+    entityType: "Appointment",
+    entityId: appointmentId,
+    previousValues: { status: appt.status, startAt: appt.startAt },
+  });
+
+  return { id: appointmentId, deleted: true };
+}
