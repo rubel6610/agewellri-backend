@@ -1021,12 +1021,23 @@ export async function getAdminDashboardStats() {
     });
   }
 
+  const pendingPaymentsCount = Math.max(
+    openInvoices.length,
+    allClients.filter(
+      (c: any) =>
+        c.onboardingStatus === "PAYMENT_PENDING" ||
+        c.paymentStatus === "UNPAID" ||
+        c.paymentStatus === "PAYMENT_PENDING",
+    ).length,
+  );
+
   return {
     kpis: {
       activeClientsCount: activeClients.length,
       totalClientsCount: totalClients,
       newClientsThisMonth,
       pendingOnboardingCount: pendingOnboarding.length,
+      pendingPaymentsCount,
       upcomingVisitsCount,
       completedVisitsCount: completedVisits.length,
       reportsPendingCount,
