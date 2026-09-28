@@ -64,6 +64,7 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
         take: 1,
       },
       subscriptions: {
+        include: { plan: true },
         orderBy: { createdAt: "desc" },
         take: 1,
       },
@@ -157,6 +158,7 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
       homeAccessInstructions: c.homeAccessInstructions,
       planName: latestSub?.plan?.name || c.selectedPlan || "Unassigned",
       planCode: latestSub?.plan?.code || c.selectedPlan || "",
+      planTimes: latestSub?.plan?.times || null,
       hasCleaningAddon: Boolean(c.hasCleaningAddon),
       onboardingStatus: c.onboardingStatus || "INVITED",
       onboardingStep: c.onboardingStep || 1,

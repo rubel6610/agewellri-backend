@@ -1269,12 +1269,28 @@ export async function updateAppointmentStatus(
   const appt = await (prisma.appointment.findUnique as any)({
     where: { id: appointmentId },
     include: {
-      client: true,
+      client: {
+        include: {
+          subscriptions: {
+            where: { isArchived: false },
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      },
     },
   });
 
   if (!appt) {
     throw new Error(`Appointment with ID ${appointmentId} not found.`);
+  }
+
+  if (input.status === "COMPLETED") {
+    const activeSub = appt.client?.subscriptions?.[0];
+    if (!activeSub || activeSub.status !== SubscriptionStatus.ACTIVE) {
+      throw new Error(
+        "Cannot mark visit as completed: Client subscription is not active yet. An active subscription with confirmed payment is required to complete visits.",
+      );
+    }
   }
 
   const updated = await (prisma.appointment.update as any)({
@@ -1374,7 +1390,15 @@ export async function acceptVisitRequest(
   const appt = await (prisma.appointment.findUnique as any)({
     where: { id: appointmentId },
     include: {
-      client: { include: { user: true } },
+      client: {
+        include: {
+          user: true,
+          subscriptions: {
+            where: { isArchived: false },
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      },
     },
   });
 
@@ -1384,6 +1408,22 @@ export async function acceptVisitRequest(
 
   if (appt.status === AppointmentStatus.CANCELLED) {
     throw new Error("Cannot accept a cancelled appointment request.");
+  }
+
+  const activeSub = appt.client?.subscriptions?.[0];
+  if (!activeSub || activeSub.status !== SubscriptionStatus.ACTIVE) {
+    const isInitialPayment = activeSub?.status === SubscriptionStatus.PENDING;
+    const paymentLabel = isInitialPayment ? "initial payment" : "monthly payment";
+    const commencementStr = activeSub?.currentPeriodStart
+      ? new Date(activeSub.currentPeriodStart).toLocaleDateString("en-US", {
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        })
+      : "the 1st of the month";
+    throw new Error(
+      `Cannot assign specialist: Client subscription is not active yet. Specialist assignment and visit fulfillment will open on ${commencementStr} once ${paymentLabel} is confirmed.`,
+    );
   }
 
   // Resolve technician

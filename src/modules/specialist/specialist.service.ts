@@ -287,12 +287,38 @@ export async function assignSpecialistToAppointment(
   input: AssignSpecialistInput,
   actorUserId?: string
 ) {
-  const appointment = await prisma.appointment.findUnique({
+  const appointment = await (prisma.appointment.findUnique as any)({
     where: { id: input.appointmentId },
+    include: {
+      client: {
+        include: {
+          subscriptions: {
+            where: { isArchived: false },
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      },
+    },
   });
 
   if (!appointment) {
     throw new Error("Appointment not found.");
+  }
+
+  const activeSub = appointment.client?.subscriptions?.[0];
+  if (!activeSub || activeSub.status !== "ACTIVE") {
+    const isInitialPayment = activeSub?.status === "PENDING";
+    const paymentLabel = isInitialPayment ? "initial payment" : "monthly payment";
+    const commencementStr = activeSub?.currentPeriodStart
+      ? new Date(activeSub.currentPeriodStart).toLocaleDateString("en-US", {
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        })
+      : "the 1st of the month";
+    throw new Error(
+      `Cannot assign specialist: Client subscription is not active yet. Specialist assignment and visit fulfillment will open on ${commencementStr} once ${paymentLabel} is confirmed.`
+    );
   }
 
   const updatedAppointment = await prisma.appointment.update({
