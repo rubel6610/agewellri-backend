@@ -39,6 +39,99 @@ export function invalidateSpecialistsCache() {
 }
 
 /**
+ * Repair any corrupted string dates in Technician collection by converting them to BSON Date objects.
+ */
+export async function repairTechnicianDates() {
+  try {
+    await (prisma as any).$runCommandRaw({
+      update: "Technician",
+      updates: [
+        {
+          q: {
+            $or: [
+              { updatedAt: { $type: "string" } },
+              { createdAt: { $type: "string" } },
+            ],
+          },
+          u: [
+            {
+              $set: {
+                updatedAt: {
+                  $cond: {
+                    if: { $eq: [{ $type: "$updatedAt" }, "string"] },
+                    then: {
+                      $dateFromString: {
+                        dateString: "$updatedAt",
+                        onError: new Date(),
+                        onNull: new Date(),
+                      },
+                    },
+                    else: "$updatedAt",
+                  },
+                },
+                createdAt: {
+                  $cond: {
+                    if: { $eq: [{ $type: "$createdAt" }, "string"] },
+                    then: {
+                      $dateFromString: {
+                        dateString: "$createdAt",
+                        onError: new Date(),
+                        onNull: new Date(),
+                      },
+                    },
+                    else: "$createdAt",
+                  },
+                },
+              },
+            },
+          ],
+          multi: true,
+        },
+      ],
+    });
+  } catch (err) {
+    try {
+      const result: any = await (prisma as any).$runCommandRaw({
+        find: "Technician",
+        filter: {
+          $or: [
+            { updatedAt: { $type: "string" } },
+            { createdAt: { $type: "string" } },
+          ],
+        },
+      });
+      const docs = result?.cursor?.firstBatch || [];
+      for (const doc of docs) {
+        const docId = doc._id?.$oid || doc._id;
+        const setFields: any = {};
+        if (typeof doc.updatedAt === "string") {
+          const parsed = new Date(doc.updatedAt);
+          setFields.updatedAt = { $date: isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString() };
+        }
+        if (typeof doc.createdAt === "string") {
+          const parsed = new Date(doc.createdAt);
+          setFields.createdAt = { $date: isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString() };
+        }
+        if (Object.keys(setFields).length > 0) {
+          await (prisma as any).$runCommandRaw({
+            update: "Technician",
+            updates: [
+              {
+                q: { $or: [{ _id: { $oid: docId } }, { _id: docId }] },
+                u: { $set: setFields },
+              },
+            ],
+          });
+        }
+      }
+    } catch {}
+  }
+}
+
+// Trigger initial repair in background
+repairTechnicianDates().catch(() => {});
+
+/**
  * List all specialists directly from database (100% real-time).
  */
 export async function getAllSpecialists(_forceRefresh = true) {
@@ -70,8 +163,39 @@ export async function getAllSpecialists(_forceRefresh = true) {
         updatedAt: doc.updatedAt || new Date(),
       }));
     }
-  } catch (err) {
-    console.warn("Falling back to raw query for technicians:", err);
+  } catch (err: any) {
+    if (err?.code === "P2023" || String(err?.message || err).includes("Failed to convert")) {
+      await repairTechnicianDates();
+      try {
+        const retryDocs = await (prisma as any).technician.findMany({
+          where: { isArchived: false },
+          orderBy: { displayOrder: "asc" },
+        });
+        return retryDocs.map((doc: any) => ({
+          id: String(doc.id),
+          name: doc.name || "Specialist",
+          email: doc.email || null,
+          phone: doc.phone || null,
+          title: doc.title || "Home Safety Specialist",
+          specialties: doc.specialties || [],
+          shssCertified: Boolean(doc.shssCertified),
+          shssRenewalDate: doc.shssRenewalDate || null,
+          cprCertified: Boolean(doc.cprCertified),
+          aedCertified: Boolean(doc.aedCertified),
+          backgroundChecked: Boolean(doc.backgroundChecked),
+          bilingualSpanish: Boolean(doc.bilingualSpanish),
+          color: doc.color || "#294B68",
+          status: doc.status || "ACTIVE",
+          notes: doc.notes || null,
+          displayOrder: doc.displayOrder ?? 0,
+          activeAssignmentsCount: 0,
+          createdAt: doc.createdAt || new Date(),
+          updatedAt: doc.updatedAt || new Date(),
+        }));
+      } catch (retryErr) {
+        // quiet fallback
+      }
+    }
   }
 
   try {
@@ -108,7 +232,6 @@ export async function getAllSpecialists(_forceRefresh = true) {
 
     return mapped;
   } catch (rawErr) {
-    console.warn("Could not fetch specialists:", rawErr);
     return [];
   }
 }
@@ -129,7 +252,7 @@ export async function getSpecialistById(specialistId: string) {
  * Create a new Specialist directly from Admin Dashboard (No user account required).
  */
 export async function createSpecialist(input: CreateSpecialistInput, actorUserId?: string) {
-  const doc = {
+  const data = {
     name: input.name,
     email: input.email || null,
     phone: input.phone || null,
@@ -146,25 +269,39 @@ export async function createSpecialist(input: CreateSpecialistInput, actorUserId
     notes: input.notes || null,
     displayOrder: input.displayOrder ?? 0,
     isArchived: false,
-    createdAt: new Date(),
-    updatedAt: new Date(),
   };
 
-  const insertResult: any = await (prisma as any).$runCommandRaw({
-    insert: "Technician",
-    documents: [doc],
-  });
+  let created: any;
+  try {
+    if ((prisma as any).technician?.create) {
+      created = await (prisma as any).technician.create({ data });
+    }
+  } catch {}
+
+  if (!created) {
+    const nowIso = new Date().toISOString();
+    const rawDoc = {
+      ...data,
+      createdAt: { $date: nowIso },
+      updatedAt: { $date: nowIso },
+    };
+    await (prisma as any).$runCommandRaw({
+      insert: "Technician",
+      documents: [rawDoc],
+    });
+    created = rawDoc;
+  }
 
   await createSpecialistAuditLog({
     actorUserId,
     action: "SPECIALIST_CREATED",
     entityType: "Specialist",
     entityId: input.name,
-    newValues: doc,
+    newValues: data,
   });
 
   invalidateSpecialistsCache();
-  return doc;
+  return created;
 }
 
 /**
@@ -175,7 +312,7 @@ export async function updateSpecialist(
   input: UpdateSpecialistInput,
   actorUserId?: string
 ) {
-  const updateFields: any = { updatedAt: new Date() };
+  const updateFields: any = {};
   if (input.name !== undefined) updateFields.name = input.name;
   if (input.email !== undefined) updateFields.email = input.email;
   if (input.phone !== undefined) updateFields.phone = input.phone;
@@ -193,20 +330,35 @@ export async function updateSpecialist(
   if (input.displayOrder !== undefined) updateFields.displayOrder = input.displayOrder;
   if (input.isArchived !== undefined) updateFields.isArchived = input.isArchived;
 
-  await (prisma as any).$runCommandRaw({
-    update: "Technician",
-    updates: [
-      {
-        q: {
-          $or: [
-            { _id: { $oid: specialistId } },
-            { _id: specialistId },
-          ],
+  try {
+    if ((prisma as any).technician?.update) {
+      await (prisma as any).technician.update({
+        where: { id: specialistId },
+        data: updateFields,
+      });
+    } else {
+      throw new Error("fallback to raw");
+    }
+  } catch {
+    const rawSet = {
+      ...updateFields,
+      updatedAt: { $date: new Date().toISOString() },
+    };
+    await (prisma as any).$runCommandRaw({
+      update: "Technician",
+      updates: [
+        {
+          q: {
+            $or: [
+              { _id: { $oid: specialistId } },
+              { _id: specialistId },
+            ],
+          },
+          u: { $set: rawSet },
         },
-        u: { $set: updateFields },
-      },
-    ],
-  });
+      ],
+    });
+  }
 
   await createSpecialistAuditLog({
     actorUserId,
