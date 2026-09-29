@@ -215,6 +215,17 @@ export async function submitAssessment(
 
   const clientId = appointment.clientId;
 
+  // 1b. Verify client subscription is active before completing visit / publishing report
+  const activeSub = await (prisma.subscription.findFirst as any)({
+    where: { clientId, isArchived: false },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!activeSub || activeSub.status !== "ACTIVE") {
+    throw new Error(
+      "Cannot complete visit or publish report: Client subscription payment is not active yet. Active subscription payment is required before completing visits.",
+    );
+  }
+
   // 2. Ensure appointment is marked COMPLETED
   if (appointment.status !== AppointmentStatus.COMPLETED) {
     await (prisma.appointment.update as any)({

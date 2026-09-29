@@ -457,21 +457,8 @@ export async function assignSpecialistToAppointment(
     throw new Error("Appointment not found.");
   }
 
-  const activeSub = appointment.client?.subscriptions?.[0];
-  if (!activeSub || activeSub.status !== "ACTIVE") {
-    const isInitialPayment = activeSub?.status === "PENDING";
-    const paymentLabel = isInitialPayment ? "initial payment" : "monthly payment";
-    const commencementStr = activeSub?.currentPeriodStart
-      ? new Date(activeSub.currentPeriodStart).toLocaleDateString("en-US", {
-          month: "long",
-          day: "numeric",
-          year: "numeric",
-        })
-      : "the 1st of the month";
-    throw new Error(
-      `Cannot assign specialist: Client subscription is not active yet. Specialist assignment and visit fulfillment will open on ${commencementStr} once ${paymentLabel} is confirmed.`
-    );
-  }
+  // Note: Admin can assign specialists in advance even if subscription payment activation is pending.
+  // Subscription payment activation is only required when completing visits.
 
   const updatedAppointment = await prisma.appointment.update({
     where: { id: input.appointmentId },
@@ -515,43 +502,3 @@ export async function assignSpecialistToAppointment(
 /**
  * Seed initial Rhode Island specialists if catalog is empty.
  */
-export async function seedDefaultSpecialists() {
-  const existing = await getAllSpecialists();
-  if (existing.length === 0) {
-    await createSpecialist({
-      name: "Mark Johnson",
-      title: "Senior Home Safety Specialist",
-      phone: "(401) 555-0144",
-      email: "mark.johnson@agewellri.com",
-      specialties: ["Home Safety Audits", "Fall Hazard Checks", "Grab Bar Positioning"],
-      color: "#294B68",
-      status: "ACTIVE",
-      displayOrder: 1,
-      notes: "Primary specialist for Washington County & Westerly area.",
-    });
-
-    await createSpecialist({
-      name: "Sarah Miller",
-      title: "Senior Environmental & Safety Specialist",
-      phone: "(401) 555-0168",
-      email: "sarah.miller@agewellri.com",
-      specialties: ["Environmental Safety", "Pathway Clearance", "Hazard Mitigation"],
-      color: "#3F8F6B",
-      status: "ACTIVE",
-      displayOrder: 2,
-      notes: "Senior environmental safety specialist for South County residences.",
-    });
-
-    await createSpecialist({
-      name: "David Chen",
-      title: "Safety Specialist",
-      phone: "(401) 555-0192",
-      email: "david.chen@agewellri.com",
-      specialties: ["Wellness Check-ins", "Lighting & Rug Safety", "Home Hazard Mitigation"],
-      color: "#5E8FB2",
-      status: "ACTIVE",
-      displayOrder: 3,
-      notes: "Certified environmental safety inspector.",
-    });
-  }
-}

@@ -535,15 +535,13 @@ async function validateAndExecuteContractualScheduling(
   const startAt = requestedStart;
   const endAt = requestedEnd;
 
-  // 8. Check client active appointments on the exact same date (Disabled date check)
-  const requestedDayStart = new Date(requestedStart);
-  requestedDayStart.setHours(0, 0, 0, 0);
-  const requestedDayEnd = new Date(requestedStart);
-  requestedDayEnd.setHours(23, 59, 59, 999);
-
-  const sameDayAppt = await (prisma.appointment.findFirst as any)({
+  // 8. Check client and technician active appointments for same date and cross-date time slot conflicts
+  const activeAppts = await (prisma.appointment.findMany as any)({
     where: {
-      clientId: client.id,
+      OR: [
+        { clientId: client.id },
+        ...(params.technicianId ? [{ technicianId: params.technicianId }] : []),
+      ],
       status: {
         in: [
           AppointmentStatus.SCHEDULED,
@@ -551,35 +549,43 @@ async function validateAndExecuteContractualScheduling(
           AppointmentStatus.RESCHEDULED,
         ],
       },
-      startAt: { gte: requestedDayStart, lte: requestedDayEnd },
+      isArchived: false,
     },
   });
 
-  if (sameDayAppt) {
-    throw new Error(
-      "A visit is already scheduled on this date. Dates with scheduled visits are disabled.",
-    );
-  }
+  const reqStartMin = requestedStart.getHours() * 60 + requestedStart.getMinutes();
+  const reqEndMin = requestedEnd.getHours() * 60 + requestedEnd.getMinutes();
 
-  const clientConflict = await (prisma.appointment.findFirst as any)({
-    where: {
-      clientId: client.id,
-      status: {
-        in: [
-          AppointmentStatus.SCHEDULED,
-          AppointmentStatus.CONFIRMED,
-          AppointmentStatus.RESCHEDULED,
-        ],
-      },
-      startAt: { lt: endAt },
-      endAt: { gt: startAt },
-    },
-  });
+  for (const appt of activeAppts) {
+    const apptStart = new Date(appt.startAt);
+    const apptEnd = new Date(appt.endAt);
+    const apptStartMin = apptStart.getHours() * 60 + apptStart.getMinutes();
+    const apptEndMin = apptEnd.getHours() * 60 + apptEnd.getMinutes();
 
-  if (clientConflict) {
-    throw new Error(
-      "A visit is already scheduled during this requested date and time slot. Please select another time slot.",
-    );
+    const isTimeOfDayOverlap = Math.max(reqStartMin, apptStartMin) < Math.min(reqEndMin, apptEndMin);
+
+    if (isTimeOfDayOverlap) {
+      const isSameDate =
+        apptStart.getFullYear() === requestedStart.getFullYear() &&
+        apptStart.getMonth() === requestedStart.getMonth() &&
+        apptStart.getDate() === requestedStart.getDate();
+
+      const formattedDate = apptStart.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+
+      if (isSameDate) {
+        throw new Error(
+          `A visit is already scheduled on ${formattedDate} during this time window. Please select another time slot.`,
+        );
+      } else {
+        throw new Error(
+          `A visit is already scheduled during this time slot on ${formattedDate}. The same time slot cannot be scheduled on different dates. Please select another time slot.`,
+        );
+      }
+    }
   }
 
   // 9. Resolve Specialist / Technician
@@ -1088,6 +1094,60 @@ export async function rescheduleAppointment(
 
   const technicianId = input.technicianId || appt.technicianId;
 
+  // Validate time slot conflict for client and technician (excluding current appointment)
+  const activeAppts = await (prisma.appointment.findMany as any)({
+    where: {
+      id: { not: appointmentId },
+      OR: [
+        { clientId: appt.clientId },
+        ...(technicianId ? [{ technicianId }] : []),
+      ],
+      status: {
+        in: [
+          AppointmentStatus.SCHEDULED,
+          AppointmentStatus.CONFIRMED,
+          AppointmentStatus.RESCHEDULED,
+        ],
+      },
+      isArchived: false,
+    },
+  });
+
+  const reqStartMin = startAt.getHours() * 60 + startAt.getMinutes();
+  const reqEndMin = endAt.getHours() * 60 + endAt.getMinutes();
+
+  for (const otherAppt of activeAppts) {
+    const otherStart = new Date(otherAppt.startAt);
+    const otherEnd = new Date(otherAppt.endAt);
+    const otherStartMin = otherStart.getHours() * 60 + otherStart.getMinutes();
+    const otherEndMin = otherEnd.getHours() * 60 + otherEnd.getMinutes();
+
+    const isTimeOfDayOverlap = Math.max(reqStartMin, otherStartMin) < Math.min(reqEndMin, otherEndMin);
+
+    if (isTimeOfDayOverlap) {
+      const isSameDate =
+        otherStart.getFullYear() === startAt.getFullYear() &&
+        otherStart.getMonth() === startAt.getMonth() &&
+        otherStart.getDate() === startAt.getDate();
+
+      const formattedDate = otherStart.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+
+      if (isSameDate) {
+        throw new Error(
+          `A visit is already scheduled on ${formattedDate} during this time window. Please select another time slot.`,
+        );
+      } else {
+        throw new Error(
+          `A visit is already scheduled during this time slot on ${formattedDate}. The same time slot cannot be scheduled on different dates. Please select another time slot.`,
+        );
+      }
+    }
+  }
+
   const updated = await (prisma.appointment.update as any)({
     where: { id: appointmentId },
     data: {
@@ -1410,21 +1470,8 @@ export async function acceptVisitRequest(
     throw new Error("Cannot accept a cancelled appointment request.");
   }
 
-  const activeSub = appt.client?.subscriptions?.[0];
-  if (!activeSub || activeSub.status !== SubscriptionStatus.ACTIVE) {
-    const isInitialPayment = activeSub?.status === SubscriptionStatus.PENDING;
-    const paymentLabel = isInitialPayment ? "initial payment" : "monthly payment";
-    const commencementStr = activeSub?.currentPeriodStart
-      ? new Date(activeSub.currentPeriodStart).toLocaleDateString("en-US", {
-          month: "long",
-          day: "numeric",
-          year: "numeric",
-        })
-      : "the 1st of the month";
-    throw new Error(
-      `Cannot assign specialist: Client subscription is not active yet. Specialist assignment and visit fulfillment will open on ${commencementStr} once ${paymentLabel} is confirmed.`,
-    );
-  }
+  // Note: Admin can accept visit requests and assign specialists in advance even if subscription payment is pending.
+  // Subscription payment activation is only required when completing visits.
 
   // Resolve technician
   const technician = await resolveTechnician(
