@@ -558,33 +558,21 @@ async function validateAndExecuteContractualScheduling(
 
   for (const appt of activeAppts) {
     const apptStart = new Date(appt.startAt);
-    const apptEnd = new Date(appt.endAt);
-    const apptStartMin = apptStart.getHours() * 60 + apptStart.getMinutes();
-    const apptEndMin = apptEnd.getHours() * 60 + apptEnd.getMinutes();
 
-    const isTimeOfDayOverlap = Math.max(reqStartMin, apptStartMin) < Math.min(reqEndMin, apptEndMin);
+    const isSameDate =
+      apptStart.getFullYear() === requestedStart.getFullYear() &&
+      apptStart.getMonth() === requestedStart.getMonth() &&
+      apptStart.getDate() === requestedStart.getDate();
 
-    if (isTimeOfDayOverlap) {
-      const isSameDate =
-        apptStart.getFullYear() === requestedStart.getFullYear() &&
-        apptStart.getMonth() === requestedStart.getMonth() &&
-        apptStart.getDate() === requestedStart.getDate();
-
+    if (isSameDate) {
       const formattedDate = apptStart.toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
         year: "numeric",
       });
-
-      if (isSameDate) {
-        throw new Error(
-          `A visit is already scheduled on ${formattedDate} during this time window. Please select another time slot.`,
-        );
-      } else {
-        throw new Error(
-          `A visit is already scheduled during this time slot on ${formattedDate}. The same time slot cannot be scheduled on different dates. Please select another time slot.`,
-        );
-      }
+      throw new Error(
+        `A visit is already scheduled for this client on ${formattedDate} (${appt.timeSlot || "Scheduled"}). The same client cannot have multiple visits scheduled on the same date. Please select another date.`,
+      );
     }
   }
 
@@ -1118,33 +1106,21 @@ export async function rescheduleAppointment(
 
   for (const otherAppt of activeAppts) {
     const otherStart = new Date(otherAppt.startAt);
-    const otherEnd = new Date(otherAppt.endAt);
-    const otherStartMin = otherStart.getHours() * 60 + otherStart.getMinutes();
-    const otherEndMin = otherEnd.getHours() * 60 + otherEnd.getMinutes();
 
-    const isTimeOfDayOverlap = Math.max(reqStartMin, otherStartMin) < Math.min(reqEndMin, otherEndMin);
+    const isSameDate =
+      otherStart.getFullYear() === startAt.getFullYear() &&
+      otherStart.getMonth() === startAt.getMonth() &&
+      otherStart.getDate() === startAt.getDate();
 
-    if (isTimeOfDayOverlap) {
-      const isSameDate =
-        otherStart.getFullYear() === startAt.getFullYear() &&
-        otherStart.getMonth() === startAt.getMonth() &&
-        otherStart.getDate() === startAt.getDate();
-
+    if (isSameDate) {
       const formattedDate = otherStart.toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
         year: "numeric",
       });
-
-      if (isSameDate) {
-        throw new Error(
-          `A visit is already scheduled on ${formattedDate} during this time window. Please select another time slot.`,
-        );
-      } else {
-        throw new Error(
-          `A visit is already scheduled during this time slot on ${formattedDate}. The same time slot cannot be scheduled on different dates. Please select another time slot.`,
-        );
-      }
+      throw new Error(
+        `A visit is already scheduled on ${formattedDate} (${otherAppt.timeSlot || "Scheduled"}). The same client cannot have multiple visits scheduled on the same date. Please select another date.`,
+      );
     }
   }
 
