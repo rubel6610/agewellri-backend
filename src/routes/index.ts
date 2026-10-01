@@ -10,6 +10,7 @@ import appointmentRoutes from "../modules/appointment/appointment.routes";
 import reportRoutes from "../modules/report/report.routes";
 import familyRoutes from "../modules/family/family.routes";
 import notificationRoutes from "../modules/notification/notification.routes";
+import contactRoutes from "../modules/contact/contact.routes";
 
 const router = Router();
 
@@ -62,6 +63,10 @@ const moduleRoutes: ModuleRoute[] = [
   {
     path: "/notifications",
     route: notificationRoutes,
+  },
+  {
+    path: "/contact",
+    route: contactRoutes,
   },
 ];
 
