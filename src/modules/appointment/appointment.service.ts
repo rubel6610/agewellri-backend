@@ -923,7 +923,7 @@ export async function getClientAppointments(userId: string) {
         clientId: client.id,
         isArchived: false,
       },
-      orderBy: { startAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { startAt: "desc" }],
       include: {
         client: { include: { user: true } },
         createdByUser: true,
@@ -999,8 +999,8 @@ export async function getAdminAppointments(query: AdminAppointmentsQuery = {}) {
     getAllSpecialists(),
     (prisma.appointment.findMany as any)({
       where,
-      orderBy: { startAt: "desc" },
-      take: query.limit || 50,
+      orderBy: [{ createdAt: "desc" }, { startAt: "desc" }],
+      take: query.limit || 500,
       skip: query.page && query.limit ? (query.page - 1) * query.limit : 0,
       include: {
         client: { include: { user: true } },
