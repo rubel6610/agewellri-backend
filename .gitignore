@@ -7,3 +7,5 @@ temp_interactive_push.bat
 nul
 .env*
 .env
+*/public/fonts
+.vscode

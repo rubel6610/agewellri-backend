@@ -1951,7 +1951,7 @@ export async function sendReportToFamilyRecipientEmail(
     reportTitle = "Completed Safety Visit Report",
     customNote,
     reportId,
-    portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
+    portalUrl = process.env.FRONTEND_URL,
     supportPhone = "(401) 712-3012",
     supportEmail = "agewellri@gmail.com",
   } = options;
@@ -1967,7 +1967,7 @@ export async function sendReportToFamilyRecipientEmail(
 
   const customNoteHtml = customNote
     ? `
-      <div style="background: #FEF3C7; border-left: 4px solid #D97706; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; color: #92400E;">
+      <div>
         <strong>Personal Note from ${clientName}:</strong><br>
         "${customNote}"
       </div>
@@ -2006,11 +2006,7 @@ export async function sendReportToFamilyRecipientEmail(
       </table>
     </div>
 
-    <div style="text-align: center; margin: 28px 0;">
-      <a href="${portalUrl}/dashboard/reports/${reportId}" class="btn-primary" style="display: inline-block; padding: 14px 28px; background: #294B68; color: #ffffff; text-decoration: none; font-weight: 800; font-size: 14px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-        View Full Report &amp; Photos →
-      </a>
-    </div>
+  
 
     <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 12px; color: #475569; line-height: 1.6;">
       <strong>Authorized Recipient Communication:</strong><br>
@@ -2402,7 +2398,9 @@ export async function sendClientDirectMessageToAdminEmail(
 
   console.log(`\n======================================================`);
   console.log(`📨 [CONTACT EMAIL] Direct Client Message dispatched to Admin`);
-  console.log(`From: ${clientName} (${clientEmail}) -> Admin: ${adminDestinationEmail}`);
+  console.log(
+    `From: ${clientName} (${clientEmail}) -> Admin: ${adminDestinationEmail}`,
+  );
   console.log(`Subject: ${emailSubject}`);
   console.log(`======================================================\n`);
 
@@ -2486,28 +2484,26 @@ export async function sendSpecialistAssignedEmail(
     }
   })();
 
-  const specialistInitial = specialistName ? specialistName.trim().charAt(0).toUpperCase() : "S";
+  // const specialistInitial = specialistName
+  //   ? specialistName.trim().charAt(0).toUpperCase()
+  //   : "S";
   const displayService = serviceName || planName || "Safety Oversight Visit";
   const emailSubject = `Specialist Assigned: ${specialistName} for Your AgeWellRI Visit on ${formattedDate}`;
 
   const content = `
     <div class="greeting">Hello ${clientName},</div>
     <div class="message">
-      Great news! A certified AgeWellRI Safety Specialist has been assigned to your upcoming <strong>${displayService}</strong> oversight visit.
+   A certified AgeWellRI Safety Specialist has been assigned to your upcoming <strong>${displayService}</strong> oversight visit.
     </div>
 
     <!-- Assigned Specialist Card -->
     <div style="background: #EAF3F8; border: 1.5px solid #5E8FB2; border-radius: 16px; padding: 22px; margin: 20px 0;">
       <div style="font-size: 11px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">
-        🛡️ Assigned Safety Specialist
+         Assigned Safety Specialist
       </div>
       <table style="width: 100%; border-collapse: collapse;">
         <tr>
-          <td style="width: 54px; vertical-align: top;">
-            <div style="width: 48px; height: 48px; border-radius: 50%; background-color: #D97706; color: #ffffff; font-size: 20px; font-weight: 900; line-height: 48px; text-align: center; box-shadow: 0 2px 8px rgba(217,119,6,0.3);">
-              ${specialistInitial}
-            </div>
-          </td>
+          
           <td style="vertical-align: top; padding-left: 14px;">
             <div style="font-size: 17px; font-weight: 800; color: #243746; line-height: 1.3;">
               ${specialistName}
@@ -2587,24 +2583,20 @@ export async function sendSpecialistAssignedEmail(
         : ""
     }
 
-    <!-- Call to action button -->
-    <div style="text-align: center; margin: 26px 0 16px 0;">
-      <a href="${portalUrl}/dashboard/appointments" class="btn-primary">
-        View Visit Details in Portal &rarr;
-      </a>
-    </div>
+ 
 
-    <div style="font-size: 12px; color: #64748B; line-height: 1.5; border-top: 1px solid #D9E4EC; padding-top: 14px; margin-top: 20px;">
-      ℹ️ <strong>Rescheduling Notice:</strong> If you need to change your appointment date or time window, please reschedule via your member portal or contact us at least <strong>48 hours</strong> prior to your visit.
-    </div>
   `;
 
   const htmlContent = wrapHtmlEmail(emailSubject, content);
   const recipientList = Array.isArray(to) ? to.join(", ") : to;
 
   console.log(`\n======================================================`);
-  console.log(`👨‍🔧 [EMAIL SERVICE] Specialist Assigned Notification sent to: ${recipientList}`);
-  console.log(`Specialist: ${specialistName} | Visit: ${displayService} | Date: ${formattedDate} (${timeSlot})`);
+  console.log(
+    `👨‍🔧 [EMAIL SERVICE] Specialist Assigned Notification sent to: ${recipientList}`,
+  );
+  console.log(
+    `Specialist: ${specialistName} | Visit: ${displayService} | Date: ${formattedDate} (${timeSlot})`,
+  );
   console.log(`======================================================\n`);
 
   const transporter = createTransporter();
@@ -2618,12 +2610,12 @@ export async function sendSpecialistAssignedEmail(
       });
       return { success: true, messageId: info.messageId, mode: "smtp" };
     } catch (err: any) {
-      console.warn(`[EMAIL SERVICE] Specialist assigned SMTP error: ${err.message}`);
+      console.warn(
+        `[EMAIL SERVICE] Specialist assigned SMTP error: ${err.message}`,
+      );
       return { success: true, mode: "console" };
     }
   }
 
   return { success: true, mode: "console" };
 }
-
-

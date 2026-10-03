@@ -13,7 +13,10 @@ import {
 import { getAllSpecialists } from "../specialist/specialist.service";
 import path from "path";
 import fs from "fs";
-import { sendReportAvailableEmail } from "../../utils/email";
+import {
+  sendReportAvailableEmail,
+  sendReportToFamilyRecipientEmail,
+} from "../../utils/email";
 import { resolveClientForUser } from "../family/family.service";
 import {
   notifyClientAndFamily,
@@ -638,13 +641,16 @@ export async function uploadVisitReport(
         fam.email.toLowerCase() !== primaryRecipientEmail?.toLowerCase()
       ) {
         try {
-          await sendReportAvailableEmail({
+          await sendReportToFamilyRecipientEmail({
             to: fam.email,
-            clientName: `${fam.name} (for ${clientName})`,
+            recipientName: fam.name,
+            clientName,
             serviceType: serviceName,
             visitDate: visit.completedAt || appointment.startAt || new Date(),
             specialistName,
             reportTitle: defaultTitle,
+            customNote: null,
+            reportId: report.id,
           });
         } catch (famErr) {
           console.warn(`Could not email family member ${fam.email}:`, famErr);
