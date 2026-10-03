@@ -2426,3 +2426,204 @@ export async function sendClientDirectMessageToAdminEmail(
   return { success: true, mode: "console" };
 }
 
+export interface SendSpecialistAssignedEmailOptions {
+  to: string | string[];
+  clientName: string;
+  specialistName: string;
+  specialistTitle?: string;
+  specialistPhone?: string;
+  specialistBio?: string;
+  specialistPhotoUrl?: string;
+  serviceName: string;
+  planName?: string;
+  scheduledDate: string | Date;
+  timeSlot: string;
+  location?: string;
+  notes?: string;
+  accessMethodTitle?: string;
+  accessMethodInstructions?: string;
+  portalUrl?: string;
+}
+
+/**
+ * Send Specialist Assigned Email Notification to Client & Family
+ */
+export async function sendSpecialistAssignedEmail(
+  options: SendSpecialistAssignedEmailOptions,
+): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
+  const {
+    to,
+    clientName,
+    specialistName,
+    specialistTitle = "Senior Home Safety Specialist® certified by Age Safe® America",
+    specialistPhone,
+    specialistBio,
+    serviceName,
+    planName,
+    scheduledDate,
+    timeSlot,
+    location,
+    notes,
+    accessMethodTitle,
+    accessMethodInstructions,
+    portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
+  } = options;
+
+  const formattedDate = (() => {
+    try {
+      const d = new Date(scheduledDate);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleDateString("en-US", {
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        });
+      }
+      return String(scheduledDate);
+    } catch {
+      return String(scheduledDate);
+    }
+  })();
+
+  const specialistInitial = specialistName ? specialistName.trim().charAt(0).toUpperCase() : "S";
+  const displayService = serviceName || planName || "Safety Oversight Visit";
+  const emailSubject = `Specialist Assigned: ${specialistName} for Your AgeWellRI Visit on ${formattedDate}`;
+
+  const content = `
+    <div class="greeting">Hello ${clientName},</div>
+    <div class="message">
+      Great news! A certified AgeWellRI Safety Specialist has been assigned to your upcoming <strong>${displayService}</strong> oversight visit.
+    </div>
+
+    <!-- Assigned Specialist Card -->
+    <div style="background: #EAF3F8; border: 1.5px solid #5E8FB2; border-radius: 16px; padding: 22px; margin: 20px 0;">
+      <div style="font-size: 11px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">
+        🛡️ Assigned Safety Specialist
+      </div>
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td style="width: 54px; vertical-align: top;">
+            <div style="width: 48px; height: 48px; border-radius: 50%; background-color: #D97706; color: #ffffff; font-size: 20px; font-weight: 900; line-height: 48px; text-align: center; box-shadow: 0 2px 8px rgba(217,119,6,0.3);">
+              ${specialistInitial}
+            </div>
+          </td>
+          <td style="vertical-align: top; padding-left: 14px;">
+            <div style="font-size: 17px; font-weight: 800; color: #243746; line-height: 1.3;">
+              ${specialistName}
+            </div>
+            <div style="font-size: 13px; font-weight: 600; color: #5E8FB2; margin-top: 3px; line-height: 1.4;">
+              ${specialistTitle}
+            </div>
+            ${
+              specialistPhone
+                ? `<div style="font-size: 12px; color: #64748B; margin-top: 4px;">
+                    Direct Phone: <strong style="color: #243746;">${specialistPhone}</strong>
+                  </div>`
+                : ""
+            }
+          </td>
+        </tr>
+      </table>
+      ${
+        specialistBio
+          ? `<div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed #BFDBFE; font-size: 12px; color: #475569; line-height: 1.5;">
+              ${specialistBio}
+            </div>`
+          : ""
+      }
+    </div>
+
+    <!-- Scheduled Visit Summary Card -->
+    <div class="highlight-card">
+      <div style="font-size: 11px; font-weight: 800; color: #64748B; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 12px;">
+        📅 Confirmed Visit Details
+      </div>
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td style="padding: 7px 0; color: #64748B; font-weight: 600; font-size: 13px; width: 140px;">Service Plan:</td>
+          <td style="padding: 7px 0; color: #243746; font-weight: 800; font-size: 13px; text-align: right;">${displayService}</td>
+        </tr>
+        <tr>
+          <td style="padding: 7px 0; color: #64748B; font-weight: 600; font-size: 13px;">Scheduled Date:</td>
+          <td style="padding: 7px 0; color: #243746; font-weight: 800; font-size: 13px; text-align: right;">${formattedDate}</td>
+        </tr>
+        <tr>
+          <td style="padding: 7px 0; color: #64748B; font-weight: 600; font-size: 13px;">Time Window:</td>
+          <td style="padding: 7px 0; color: #294B68; font-weight: 900; font-size: 14px; text-align: right;">${timeSlot}</td>
+        </tr>
+        ${
+          location
+            ? `<tr>
+                <td style="padding: 7px 0; color: #64748B; font-weight: 600; font-size: 13px;">Service Address:</td>
+                <td style="padding: 7px 0; color: #243746; font-weight: 700; font-size: 13px; text-align: right;">${location}</td>
+              </tr>`
+            : ""
+        }
+        ${
+          accessMethodTitle
+            ? `<tr>
+                <td style="padding: 7px 0; color: #64748B; font-weight: 600; font-size: 13px;">Home Access:</td>
+                <td style="padding: 7px 0; color: #243746; font-weight: 700; font-size: 13px; text-align: right;">${accessMethodTitle}</td>
+              </tr>`
+            : ""
+        }
+      </table>
+    </div>
+
+    ${
+      accessMethodInstructions
+        ? `<div style="background: #F8FAFC; border: 1px solid #D9E4EC; border-radius: 12px; padding: 14px; margin: 16px 0; font-size: 12px; color: #475569;">
+            <strong style="color: #243746;">Entry Instructions:</strong> ${accessMethodInstructions}
+          </div>`
+        : ""
+    }
+
+    ${
+      notes
+        ? `<div style="background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 12px; padding: 14px; margin: 16px 0; font-size: 12px; color: #92400E;">
+            <strong>Special Visit Notes:</strong> ${notes}
+          </div>`
+        : ""
+    }
+
+    <!-- Call to action button -->
+    <div style="text-align: center; margin: 26px 0 16px 0;">
+      <a href="${portalUrl}/dashboard/appointments" class="btn-primary">
+        View Visit Details in Portal &rarr;
+      </a>
+    </div>
+
+    <div style="font-size: 12px; color: #64748B; line-height: 1.5; border-top: 1px solid #D9E4EC; padding-top: 14px; margin-top: 20px;">
+      ℹ️ <strong>Rescheduling Notice:</strong> If you need to change your appointment date or time window, please reschedule via your member portal or contact us at least <strong>48 hours</strong> prior to your visit.
+    </div>
+  `;
+
+  const htmlContent = wrapHtmlEmail(emailSubject, content);
+  const recipientList = Array.isArray(to) ? to.join(", ") : to;
+
+  console.log(`\n======================================================`);
+  console.log(`👨‍🔧 [EMAIL SERVICE] Specialist Assigned Notification sent to: ${recipientList}`);
+  console.log(`Specialist: ${specialistName} | Visit: ${displayService} | Date: ${formattedDate} (${timeSlot})`);
+  console.log(`======================================================\n`);
+
+  const transporter = createTransporter();
+  if (transporter) {
+    try {
+      const info = await transporter.sendMail({
+        from: getDefaultFromAddress("AgeWellRI Visit Coordination"),
+        to,
+        subject: emailSubject,
+        html: htmlContent,
+      });
+      return { success: true, messageId: info.messageId, mode: "smtp" };
+    } catch (err: any) {
+      console.warn(`[EMAIL SERVICE] Specialist assigned SMTP error: ${err.message}`);
+      return { success: true, mode: "console" };
+    }
+  }
+
+  return { success: true, mode: "console" };
+}
+
+

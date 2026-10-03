@@ -4,6 +4,8 @@ import {
   UpdateSpecialistInput,
   AssignSpecialistInput,
 } from "./specialist.validation";
+import { notifyClientAndFamily } from "../notification/notification.service";
+import { sendSpecialistAssignedEmail } from "../../utils/email";
 
 /**
  * Record an audit log for specialist management operations.
@@ -444,6 +446,7 @@ export async function assignSpecialistToAppointment(
     include: {
       client: {
         include: {
+          user: true,
           subscriptions: {
             where: { isArchived: false },
             orderBy: { createdAt: "desc" },
@@ -457,6 +460,14 @@ export async function assignSpecialistToAppointment(
     throw new Error("Appointment not found.");
   }
 
+  // Fetch specialist details
+  const specialist = await (prisma.technician.findUnique as any)({
+    where: { id: input.specialistId },
+  });
+
+  const specialistName = specialist?.name || "Assigned Specialist";
+  const specialistTitle = specialist?.title || "Senior Home Safety Specialist® certified by Age Safe® America";
+
   // Note: Admin can assign specialists in advance even if subscription payment activation is pending.
   // Subscription payment activation is only required when completing visits.
 
@@ -465,6 +476,9 @@ export async function assignSpecialistToAppointment(
     data: {
       technicianId: input.specialistId,
       status: "CONFIRMED",
+    },
+    include: {
+      client: { include: { user: true } },
     },
   });
 
@@ -493,8 +507,71 @@ export async function assignSpecialistToAppointment(
     action: "SPECIALIST_ASSIGNED_TO_APPOINTMENT",
     entityType: "Appointment",
     entityId: input.appointmentId,
-    metadata: { specialistId: input.specialistId },
+    metadata: { specialistId: input.specialistId, specialistName },
   });
+
+  // Dispatch In-App Notification and Email Notification for Client/Family
+  if (appointment.client?.id) {
+    try {
+      await notifyClientAndFamily(
+        appointment.client.id,
+        {
+          type: "SPECIALIST_ASSIGNED",
+          title: "Specialist Assigned",
+          message: `Specialist ${specialistName} has been assigned to your AgeWellRI visit (${appointment.serviceName || "Safety Visit"}).`,
+          metadata: {
+            appointmentId: input.appointmentId,
+            technicianId: input.specialistId,
+            technicianName: specialistName,
+          },
+        },
+        "portalAccess",
+      );
+
+      const clientEmail = appointment.client.user?.email || appointment.client.primaryContactEmail;
+      if (clientEmail) {
+        const clientDisplayName = `${appointment.client.user?.firstName || appointment.client.primaryContactName || "Valued"} ${appointment.client.user?.lastName || "Member"}`.trim();
+
+        const familyMembers = await (prisma.familyMember.findMany as any)({
+          where: { clientId: appointment.client.id },
+          include: { user: true },
+        });
+        const recipientEmails = Array.from(
+          new Set(
+            [
+              clientEmail,
+              ...familyMembers
+                .map((f: any) => f.email || f.user?.email)
+                .filter(Boolean),
+            ]
+          )
+        );
+
+        const start = new Date(appointment.startAt);
+        const end = new Date(appointment.endAt);
+        const timeSlotStr = `${start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} – ${end.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+
+        await sendSpecialistAssignedEmail({
+          to: recipientEmails.length === 1 ? recipientEmails[0] : recipientEmails,
+          clientName: clientDisplayName || "Valued Member",
+          specialistName,
+          specialistTitle,
+          specialistPhone: specialist?.phone || undefined,
+          specialistBio: specialist?.bio || undefined,
+          serviceName: appointment.serviceName || "Safety Oversight Visit",
+          scheduledDate: appointment.startAt,
+          timeSlot: timeSlotStr,
+          location: appointment.location || undefined,
+          notes: appointment.notes || undefined,
+          accessMethodTitle: appointment.accessMethodTitle || undefined,
+          accessMethodInstructions: appointment.accessMethodInstructions || undefined,
+          portalUrl: process.env.FRONTEND_URL || "http://localhost:3000",
+        });
+      }
+    } catch (notifErr: any) {
+      console.warn("⚠️ Failed to dispatch specialist assigned notifications:", notifErr.message);
+    }
+  }
 
   return updatedAppointment;
 }

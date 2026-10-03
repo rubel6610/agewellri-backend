@@ -23,6 +23,7 @@ import {
   notifyAdmins,
 } from "../notification/notification.service";
 import { calculatePeriodEndDate } from "../../utils/billing-dates.util";
+import { sendSpecialistAssignedEmail } from "../../utils/email";
 
 export function isValidObjectId(id?: string | null): boolean {
   if (!id || typeof id !== "string") return false;
@@ -747,8 +748,47 @@ async function validateAndExecuteContractualScheduling(
         serviceName,
       },
     });
+
+    // If specialist was assigned (e.g. admin dispatch), send confirmation email to client & family
+    if (appointment.technicianId && technician) {
+      const clientEmail = client.user?.email || client.primaryContactEmail;
+      if (clientEmail) {
+        const familyMembers = await (prisma.familyMember.findMany as any)({
+          where: { clientId: client.id },
+          include: { user: true },
+        });
+        const recipientEmails = Array.from(
+          new Set(
+            [
+              clientEmail,
+              ...familyMembers
+                .map((f: any) => f.email || f.user?.email)
+                .filter(Boolean),
+            ]
+          )
+        );
+
+        await sendSpecialistAssignedEmail({
+          to: recipientEmails.length === 1 ? recipientEmails[0] : recipientEmails,
+          clientName: clientDisplayName || "Valued Member",
+          specialistName: technician.name,
+          specialistTitle: technician.title || "Senior Home Safety Specialist® certified by Age Safe® America",
+          specialistPhone: technician.phone || undefined,
+          specialistBio: technician.bio || undefined,
+          serviceName: serviceName,
+          planName: targetPlan?.name || undefined,
+          scheduledDate: startAt,
+          timeSlot: params.timeSlot,
+          location: params.location || clientAddress,
+          notes: params.notes || undefined,
+          accessMethodTitle: appointment.accessMethodTitle || undefined,
+          accessMethodInstructions: appointment.accessMethodInstructions || undefined,
+          portalUrl: process.env.FRONTEND_URL || "http://localhost:3000",
+        });
+      }
+    }
   } catch (notifErr: any) {
-    console.warn("⚠️ Failed to dispatch appointment creation in-app notification:", notifErr.message);
+    console.warn("⚠️ Failed to dispatch appointment creation notifications:", notifErr.message);
   }
 
   return formatAppointmentRecord(appointment, technician ? [technician] : []);
@@ -1538,7 +1578,7 @@ export async function acceptVisitRequest(
     metadata: { technicianName: technician.name, notes: input.notes },
   });
 
-  // Dispatch In-App Notification for Client/Family
+  // Dispatch In-App Notification and Email Notification for Client/Family
   if (updated.client?.id) {
     try {
       await notifyClientAndFamily(
@@ -1555,8 +1595,53 @@ export async function acceptVisitRequest(
         },
         "portalAccess",
       );
+
+      // Send Dedicated Email to Client & Authorized Family
+      const clientEmail = updated.client.user?.email || updated.client.primaryContactEmail;
+      if (clientEmail) {
+        const clientDisplayName = `${updated.client.user?.firstName || updated.client.primaryContactName || "Valued"} ${updated.client.user?.lastName || "Member"}`.trim();
+
+        const familyMembers = await (prisma.familyMember.findMany as any)({
+          where: { clientId: updated.client.id },
+          include: { user: true },
+        });
+        const recipientEmails = Array.from(
+          new Set(
+            [
+              clientEmail,
+              ...familyMembers
+                .map((f: any) => f.email || f.user?.email)
+                .filter(Boolean),
+            ]
+          )
+        );
+
+        const start = new Date(startAt);
+        const end = new Date(endAt);
+        const timeSlotStr =
+          input.timeSlot ||
+          `${start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} – ${end.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+
+        await sendSpecialistAssignedEmail({
+          to: recipientEmails.length === 1 ? recipientEmails[0] : recipientEmails,
+          clientName: clientDisplayName || "Valued Member",
+          specialistName: technician.name,
+          specialistTitle: technician.title || "Senior Home Safety Specialist® certified by Age Safe® America",
+          specialistPhone: technician.phone || undefined,
+          specialistBio: technician.bio || undefined,
+          serviceName: updated.serviceName || updated.plan?.name || "Safety Oversight Visit",
+          planName: updated.plan?.name || undefined,
+          scheduledDate: startAt,
+          timeSlot: timeSlotStr,
+          location: updated.location || undefined,
+          notes: input.notes || updated.notes || undefined,
+          accessMethodTitle: updated.accessMethodTitle || undefined,
+          accessMethodInstructions: updated.accessMethodInstructions || undefined,
+          portalUrl: process.env.FRONTEND_URL || "http://localhost:3000",
+        });
+      }
     } catch (notifErr: any) {
-      console.warn("⚠️ Failed to dispatch specialist assigned notification:", notifErr.message);
+      console.warn("⚠️ Failed to dispatch specialist assigned notifications:", notifErr.message);
     }
   }
 
