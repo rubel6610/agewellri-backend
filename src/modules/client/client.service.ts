@@ -5,6 +5,7 @@ import {
   getFirstBillingDate,
   getEasternDateParts,
 } from "../../utils/billing-dates.util";
+import { deleteUploadedFiles } from "../../utils/fileStorage";
 
 export interface AdminClientsQuery {
   search?: string;
@@ -1468,7 +1469,47 @@ export async function deleteAdminClient(
     visitIds = visits.map((v: any) => v.id);
   }
 
-  // C. Get assessment IDs for visits
+  // C. Find all client report attachments (including visit reports)
+  let allClientReports: any[] = [];
+  try {
+    allClientReports = await (prisma.report.findMany as any)({
+      where: {
+        OR: [
+          { clientId: realClientId },
+          ...(visitIds.length > 0 ? [{ visitId: { in: visitIds } }] : []),
+        ],
+      },
+      select: { id: true, fileUrl: true },
+    });
+  } catch (repErr: any) {
+    console.warn("[deleteAdminClient] Report fetch warning:", repErr.message);
+  }
+
+  // D. Delete all physical attachment files from uploads folder
+  try {
+    const filesToDelete: (string | null | undefined)[] = [
+      // Client onboarding authority documents
+      (client.onboardingData as any)?.authorityDocumentUrl,
+      (client.onboardingData as any)?.signingData?.authorityDocumentUrl,
+      (client.onboardingData as any)?.authorityDocument,
+      // Service Agreement executed PDFs / authority documents
+      ...((client.agreements || []).map((a: any) => a.documentUrl)),
+      ...((client.agreements || []).map((a: any) => a.authorityDocumentUrl)),
+      // Family member / Representative authority documents
+      ...((client.familyMembers || []).map((fm: any) => fm.authorityDocumentUrl)),
+      // Client safety reports & Visit reports
+      ...((client.reports || []).map((r: any) => r.fileUrl)),
+      ...allClientReports.map((r: any) => r.fileUrl),
+      // Invoices PDF files if any
+      ...((client.invoices || []).map((inv: any) => inv.pdfUrl)),
+    ];
+
+    await deleteUploadedFiles(filesToDelete);
+  } catch (fileErr: any) {
+    console.warn("[deleteAdminClient] File deletion warning:", fileErr.message);
+  }
+
+  // E. Get assessment IDs for visits
   let assessmentIds: string[] = [];
   if (visitIds.length > 0) {
     const assessments = await (prisma.assessment.findMany as any)({

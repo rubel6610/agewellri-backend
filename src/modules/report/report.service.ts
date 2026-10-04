@@ -22,6 +22,7 @@ import {
   notifyClientAndFamily,
   notifyAdmins,
 } from "../notification/notification.service";
+import { deleteUploadedFile } from "../../utils/fileStorage";
 
 function isValidObjectId(id?: string | null): boolean {
   if (!id || typeof id !== "string") return false;
@@ -1219,6 +1220,9 @@ export async function deleteReport(actorUserId: string, reportId: string) {
   });
 
   if (report) {
+    if (report.fileUrl) {
+      await deleteUploadedFile(report.fileUrl);
+    }
     await (prisma.report.delete as any)({
       where: { id: reportId },
     });

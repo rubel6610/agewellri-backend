@@ -11,6 +11,7 @@ import {
   sendFamilyMemberCredentialsEmail,
   sendReportToFamilyRecipientEmail,
 } from "../../utils/email";
+import { deleteUploadedFile } from "../../utils/fileStorage";
 import {
   CreateFamilyMemberInput,
   UpdateFamilyMemberInput,
@@ -580,6 +581,10 @@ export async function deleteFamilyMember(userId: string, memberId: string) {
 
   if (!member) {
     throw new Error("Family member not found.");
+  }
+
+  if (member.authorityDocumentUrl) {
+    await deleteUploadedFile(member.authorityDocumentUrl);
   }
 
   await db.familyMember.delete({

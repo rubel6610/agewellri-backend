@@ -7,6 +7,7 @@ import {
   sendAgreementExecutedEmail,
   sendWelcomeInvitationEmail,
 } from "../../utils/email";
+import { deleteUploadedFiles } from "../../utils/fileStorage";
 import { generateNextClientNumber } from "../../utils/client-number.util";
 import { processAgreementPayment } from "../payment/payment.service";
 import {
@@ -1200,6 +1201,12 @@ export async function deleteAgreement(
   await ((prisma as any).serviceAgreement.delete as any)({
     where: { id: agreementId },
   });
+
+  // Safely delete physical files (executed agreement PDF and authority document)
+  await deleteUploadedFiles([
+    agreement.documentUrl,
+    agreement.authorityDocumentUrl,
+  ]);
 
   // Check if client has any other active/signed agreements remaining
   if (clientId) {
