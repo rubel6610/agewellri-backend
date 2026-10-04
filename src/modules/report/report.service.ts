@@ -13,7 +13,10 @@ import {
 import { getAllSpecialists } from "../specialist/specialist.service";
 import path from "path";
 import fs from "fs";
-import { sendReportAvailableEmail } from "../../utils/email";
+import {
+  sendReportAvailableEmail,
+  sendReportToFamilyRecipientEmail,
+} from "../../utils/email";
 import { resolveClientForUser } from "../family/family.service";
 import {
   notifyClientAndFamily,
@@ -214,6 +217,17 @@ export async function submitAssessment(
   }
 
   const clientId = appointment.clientId;
+
+  // 1b. Verify client subscription is active before completing visit / publishing report
+  const activeSub = await (prisma.subscription.findFirst as any)({
+    where: { clientId, isArchived: false },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!activeSub || activeSub.status !== "ACTIVE") {
+    throw new Error(
+      "Cannot complete visit or publish report: Client subscription payment is not active yet. Active subscription payment is required before completing visits.",
+    );
+  }
 
   // 2. Ensure appointment is marked COMPLETED
   if (appointment.status !== AppointmentStatus.COMPLETED) {
@@ -627,13 +641,16 @@ export async function uploadVisitReport(
         fam.email.toLowerCase() !== primaryRecipientEmail?.toLowerCase()
       ) {
         try {
-          await sendReportAvailableEmail({
+          await sendReportToFamilyRecipientEmail({
             to: fam.email,
-            clientName: `${fam.name} (for ${clientName})`,
+            recipientName: fam.name,
+            clientName,
             serviceType: serviceName,
             visitDate: visit.completedAt || appointment.startAt || new Date(),
             specialistName,
             reportTitle: defaultTitle,
+            customNote: null,
+            reportId: report.id,
           });
         } catch (famErr) {
           console.warn(`Could not email family member ${fam.email}:`, famErr);

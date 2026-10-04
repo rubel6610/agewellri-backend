@@ -436,3 +436,35 @@ export async function handleDeclineVisitRequest(
   }
 }
 
+/**
+ * DELETE /api/v1/appointments/:id
+ * Admin permanently deletes an appointment (e.g. cancelled visits)
+ */
+export async function handleDeleteAppointment(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      res.status(403).json({ success: false, message: "Admin authorization required." });
+      return;
+    }
+
+    const appointmentId = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id as string);
+    await appointmentService.deleteAppointment(appointmentId, req.user.id);
+
+    res.status(200).json({
+      success: true,
+      message: "Appointment deleted successfully.",
+      data: { id: appointmentId },
+    });
+  } catch (error: any) {
+    if (error instanceof Error) {
+      res.status(400).json({ success: false, message: formatClientErrorMessage(error) });
+      return;
+    }
+    next(error);
+  }
+}
+

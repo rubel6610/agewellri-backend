@@ -4,6 +4,8 @@ import {
   UpdateSpecialistInput,
   AssignSpecialistInput,
 } from "./specialist.validation";
+import { notifyClientAndFamily } from "../notification/notification.service";
+import { sendSpecialistAssignedEmail } from "../../utils/email";
 
 /**
  * Record an audit log for specialist management operations.
@@ -39,6 +41,99 @@ export function invalidateSpecialistsCache() {
 }
 
 /**
+ * Repair any corrupted string dates in Technician collection by converting them to BSON Date objects.
+ */
+export async function repairTechnicianDates() {
+  try {
+    await (prisma as any).$runCommandRaw({
+      update: "Technician",
+      updates: [
+        {
+          q: {
+            $or: [
+              { updatedAt: { $type: "string" } },
+              { createdAt: { $type: "string" } },
+            ],
+          },
+          u: [
+            {
+              $set: {
+                updatedAt: {
+                  $cond: {
+                    if: { $eq: [{ $type: "$updatedAt" }, "string"] },
+                    then: {
+                      $dateFromString: {
+                        dateString: "$updatedAt",
+                        onError: new Date(),
+                        onNull: new Date(),
+                      },
+                    },
+                    else: "$updatedAt",
+                  },
+                },
+                createdAt: {
+                  $cond: {
+                    if: { $eq: [{ $type: "$createdAt" }, "string"] },
+                    then: {
+                      $dateFromString: {
+                        dateString: "$createdAt",
+                        onError: new Date(),
+                        onNull: new Date(),
+                      },
+                    },
+                    else: "$createdAt",
+                  },
+                },
+              },
+            },
+          ],
+          multi: true,
+        },
+      ],
+    });
+  } catch (err) {
+    try {
+      const result: any = await (prisma as any).$runCommandRaw({
+        find: "Technician",
+        filter: {
+          $or: [
+            { updatedAt: { $type: "string" } },
+            { createdAt: { $type: "string" } },
+          ],
+        },
+      });
+      const docs = result?.cursor?.firstBatch || [];
+      for (const doc of docs) {
+        const docId = doc._id?.$oid || doc._id;
+        const setFields: any = {};
+        if (typeof doc.updatedAt === "string") {
+          const parsed = new Date(doc.updatedAt);
+          setFields.updatedAt = { $date: isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString() };
+        }
+        if (typeof doc.createdAt === "string") {
+          const parsed = new Date(doc.createdAt);
+          setFields.createdAt = { $date: isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString() };
+        }
+        if (Object.keys(setFields).length > 0) {
+          await (prisma as any).$runCommandRaw({
+            update: "Technician",
+            updates: [
+              {
+                q: { $or: [{ _id: { $oid: docId } }, { _id: docId }] },
+                u: { $set: setFields },
+              },
+            ],
+          });
+        }
+      }
+    } catch {}
+  }
+}
+
+// Trigger initial repair in background
+repairTechnicianDates().catch(() => {});
+
+/**
  * List all specialists directly from database (100% real-time).
  */
 export async function getAllSpecialists(_forceRefresh = true) {
@@ -70,8 +165,39 @@ export async function getAllSpecialists(_forceRefresh = true) {
         updatedAt: doc.updatedAt || new Date(),
       }));
     }
-  } catch (err) {
-    console.warn("Falling back to raw query for technicians:", err);
+  } catch (err: any) {
+    if (err?.code === "P2023" || String(err?.message || err).includes("Failed to convert")) {
+      await repairTechnicianDates();
+      try {
+        const retryDocs = await (prisma as any).technician.findMany({
+          where: { isArchived: false },
+          orderBy: { displayOrder: "asc" },
+        });
+        return retryDocs.map((doc: any) => ({
+          id: String(doc.id),
+          name: doc.name || "Specialist",
+          email: doc.email || null,
+          phone: doc.phone || null,
+          title: doc.title || "Home Safety Specialist",
+          specialties: doc.specialties || [],
+          shssCertified: Boolean(doc.shssCertified),
+          shssRenewalDate: doc.shssRenewalDate || null,
+          cprCertified: Boolean(doc.cprCertified),
+          aedCertified: Boolean(doc.aedCertified),
+          backgroundChecked: Boolean(doc.backgroundChecked),
+          bilingualSpanish: Boolean(doc.bilingualSpanish),
+          color: doc.color || "#294B68",
+          status: doc.status || "ACTIVE",
+          notes: doc.notes || null,
+          displayOrder: doc.displayOrder ?? 0,
+          activeAssignmentsCount: 0,
+          createdAt: doc.createdAt || new Date(),
+          updatedAt: doc.updatedAt || new Date(),
+        }));
+      } catch (retryErr) {
+        // quiet fallback
+      }
+    }
   }
 
   try {
@@ -108,7 +234,6 @@ export async function getAllSpecialists(_forceRefresh = true) {
 
     return mapped;
   } catch (rawErr) {
-    console.warn("Could not fetch specialists:", rawErr);
     return [];
   }
 }
@@ -129,7 +254,7 @@ export async function getSpecialistById(specialistId: string) {
  * Create a new Specialist directly from Admin Dashboard (No user account required).
  */
 export async function createSpecialist(input: CreateSpecialistInput, actorUserId?: string) {
-  const doc = {
+  const data = {
     name: input.name,
     email: input.email || null,
     phone: input.phone || null,
@@ -146,25 +271,39 @@ export async function createSpecialist(input: CreateSpecialistInput, actorUserId
     notes: input.notes || null,
     displayOrder: input.displayOrder ?? 0,
     isArchived: false,
-    createdAt: new Date(),
-    updatedAt: new Date(),
   };
 
-  const insertResult: any = await (prisma as any).$runCommandRaw({
-    insert: "Technician",
-    documents: [doc],
-  });
+  let created: any;
+  try {
+    if ((prisma as any).technician?.create) {
+      created = await (prisma as any).technician.create({ data });
+    }
+  } catch {}
+
+  if (!created) {
+    const nowIso = new Date().toISOString();
+    const rawDoc = {
+      ...data,
+      createdAt: { $date: nowIso },
+      updatedAt: { $date: nowIso },
+    };
+    await (prisma as any).$runCommandRaw({
+      insert: "Technician",
+      documents: [rawDoc],
+    });
+    created = rawDoc;
+  }
 
   await createSpecialistAuditLog({
     actorUserId,
     action: "SPECIALIST_CREATED",
     entityType: "Specialist",
     entityId: input.name,
-    newValues: doc,
+    newValues: data,
   });
 
   invalidateSpecialistsCache();
-  return doc;
+  return created;
 }
 
 /**
@@ -175,7 +314,7 @@ export async function updateSpecialist(
   input: UpdateSpecialistInput,
   actorUserId?: string
 ) {
-  const updateFields: any = { updatedAt: new Date() };
+  const updateFields: any = {};
   if (input.name !== undefined) updateFields.name = input.name;
   if (input.email !== undefined) updateFields.email = input.email;
   if (input.phone !== undefined) updateFields.phone = input.phone;
@@ -193,20 +332,35 @@ export async function updateSpecialist(
   if (input.displayOrder !== undefined) updateFields.displayOrder = input.displayOrder;
   if (input.isArchived !== undefined) updateFields.isArchived = input.isArchived;
 
-  await (prisma as any).$runCommandRaw({
-    update: "Technician",
-    updates: [
-      {
-        q: {
-          $or: [
-            { _id: { $oid: specialistId } },
-            { _id: specialistId },
-          ],
+  try {
+    if ((prisma as any).technician?.update) {
+      await (prisma as any).technician.update({
+        where: { id: specialistId },
+        data: updateFields,
+      });
+    } else {
+      throw new Error("fallback to raw");
+    }
+  } catch {
+    const rawSet = {
+      ...updateFields,
+      updatedAt: { $date: new Date().toISOString() },
+    };
+    await (prisma as any).$runCommandRaw({
+      update: "Technician",
+      updates: [
+        {
+          q: {
+            $or: [
+              { _id: { $oid: specialistId } },
+              { _id: specialistId },
+            ],
+          },
+          u: { $set: rawSet },
         },
-        u: { $set: updateFields },
-      },
-    ],
-  });
+      ],
+    });
+  }
 
   await createSpecialistAuditLog({
     actorUserId,
@@ -287,19 +441,44 @@ export async function assignSpecialistToAppointment(
   input: AssignSpecialistInput,
   actorUserId?: string
 ) {
-  const appointment = await prisma.appointment.findUnique({
+  const appointment = await (prisma.appointment.findUnique as any)({
     where: { id: input.appointmentId },
+    include: {
+      client: {
+        include: {
+          user: true,
+          subscriptions: {
+            where: { isArchived: false },
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      },
+    },
   });
 
   if (!appointment) {
     throw new Error("Appointment not found.");
   }
 
+  // Fetch specialist details
+  const specialist = await (prisma.technician.findUnique as any)({
+    where: { id: input.specialistId },
+  });
+
+  const specialistName = specialist?.name || "Assigned Specialist";
+  const specialistTitle = specialist?.title || "Senior Home Safety Specialist® certified by Age Safe® America";
+
+  // Note: Admin can assign specialists in advance even if subscription payment activation is pending.
+  // Subscription payment activation is only required when completing visits.
+
   const updatedAppointment = await prisma.appointment.update({
     where: { id: input.appointmentId },
     data: {
       technicianId: input.specialistId,
       status: "CONFIRMED",
+    },
+    include: {
+      client: { include: { user: true } },
     },
   });
 
@@ -328,8 +507,71 @@ export async function assignSpecialistToAppointment(
     action: "SPECIALIST_ASSIGNED_TO_APPOINTMENT",
     entityType: "Appointment",
     entityId: input.appointmentId,
-    metadata: { specialistId: input.specialistId },
+    metadata: { specialistId: input.specialistId, specialistName },
   });
+
+  // Dispatch In-App Notification and Email Notification for Client/Family
+  if (appointment.client?.id) {
+    try {
+      await notifyClientAndFamily(
+        appointment.client.id,
+        {
+          type: "SPECIALIST_ASSIGNED",
+          title: "Specialist Assigned",
+          message: `Specialist ${specialistName} has been assigned to your AgeWellRI visit (${appointment.serviceName || "Safety Visit"}).`,
+          metadata: {
+            appointmentId: input.appointmentId,
+            technicianId: input.specialistId,
+            technicianName: specialistName,
+          },
+        },
+        "portalAccess",
+      );
+
+      const clientEmail = appointment.client.user?.email || appointment.client.primaryContactEmail;
+      if (clientEmail) {
+        const clientDisplayName = `${appointment.client.user?.firstName || appointment.client.primaryContactName || "Valued"} ${appointment.client.user?.lastName || "Member"}`.trim();
+
+        const familyMembers = await (prisma.familyMember.findMany as any)({
+          where: { clientId: appointment.client.id },
+          include: { user: true },
+        });
+        const recipientEmails = Array.from(
+          new Set(
+            [
+              clientEmail,
+              ...familyMembers
+                .map((f: any) => f.email || f.user?.email)
+                .filter(Boolean),
+            ]
+          )
+        );
+
+        const start = new Date(appointment.startAt);
+        const end = new Date(appointment.endAt);
+        const timeSlotStr = `${start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} – ${end.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+
+        await sendSpecialistAssignedEmail({
+          to: recipientEmails.length === 1 ? recipientEmails[0] : recipientEmails,
+          clientName: clientDisplayName || "Valued Member",
+          specialistName,
+          specialistTitle,
+          specialistPhone: specialist?.phone || undefined,
+          specialistBio: specialist?.bio || undefined,
+          serviceName: appointment.serviceName || "Safety Oversight Visit",
+          scheduledDate: appointment.startAt,
+          timeSlot: timeSlotStr,
+          location: appointment.location || undefined,
+          notes: appointment.notes || undefined,
+          accessMethodTitle: appointment.accessMethodTitle || undefined,
+          accessMethodInstructions: appointment.accessMethodInstructions || undefined,
+          portalUrl: process.env.FRONTEND_URL || "http://localhost:3000",
+        });
+      }
+    } catch (notifErr: any) {
+      console.warn("⚠️ Failed to dispatch specialist assigned notifications:", notifErr.message);
+    }
+  }
 
   return updatedAppointment;
 }
@@ -337,43 +579,3 @@ export async function assignSpecialistToAppointment(
 /**
  * Seed initial Rhode Island specialists if catalog is empty.
  */
-export async function seedDefaultSpecialists() {
-  const existing = await getAllSpecialists();
-  if (existing.length === 0) {
-    await createSpecialist({
-      name: "Mark Johnson",
-      title: "Senior Home Safety Specialist",
-      phone: "(401) 555-0144",
-      email: "mark.johnson@agewellri.com",
-      specialties: ["Home Safety Audits", "Fall Hazard Checks", "Grab Bar Positioning"],
-      color: "#294B68",
-      status: "ACTIVE",
-      displayOrder: 1,
-      notes: "Primary specialist for Washington County & Westerly area.",
-    });
-
-    await createSpecialist({
-      name: "Sarah Miller",
-      title: "Senior Environmental & Safety Specialist",
-      phone: "(401) 555-0168",
-      email: "sarah.miller@agewellri.com",
-      specialties: ["Environmental Safety", "Pathway Clearance", "Hazard Mitigation"],
-      color: "#3F8F6B",
-      status: "ACTIVE",
-      displayOrder: 2,
-      notes: "Senior environmental safety specialist for South County residences.",
-    });
-
-    await createSpecialist({
-      name: "David Chen",
-      title: "Safety Specialist",
-      phone: "(401) 555-0192",
-      email: "david.chen@agewellri.com",
-      specialties: ["Wellness Check-ins", "Lighting & Rug Safety", "Home Hazard Mitigation"],
-      color: "#5E8FB2",
-      status: "ACTIVE",
-      displayOrder: 3,
-      notes: "Certified environmental safety inspector.",
-    });
-  }
-}

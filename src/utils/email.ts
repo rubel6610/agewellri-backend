@@ -172,14 +172,13 @@ function wrapHtmlEmail(title: string, contentHtml: string): string {
       <body>
         <div class="container">
           <div class="header">
-            <h1>AgeWellRI</h1>
-            <p>Home Safety Coordination</p>
+            <h1>AgeWellRI LLC</h1>
           </div>
           <div class="content">
             ${contentHtml}
           </div>
           <div class="footer">
-            &copy; ${new Date().getFullYear()} AgeWellRI LLC. Westerly, Rhode Island.<br>
+            &copy; ${new Date().getFullYear()} AgeWellRI LLC. Westerly, Rhode Island - 02891 <br>
             Questions? Contact Support: <a href="mailto:agewellri@gmail.com">agewellri@gmail.com</a> | (401) 212-3002
           </div>
         </div>
@@ -1952,7 +1951,7 @@ export async function sendReportToFamilyRecipientEmail(
     reportTitle = "Completed Safety Visit Report",
     customNote,
     reportId,
-    portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
+    portalUrl = process.env.FRONTEND_URL,
     supportPhone = "(401) 712-3012",
     supportEmail = "agewellri@gmail.com",
   } = options;
@@ -1968,7 +1967,7 @@ export async function sendReportToFamilyRecipientEmail(
 
   const customNoteHtml = customNote
     ? `
-      <div style="background: #FEF3C7; border-left: 4px solid #D97706; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; color: #92400E;">
+      <div>
         <strong>Personal Note from ${clientName}:</strong><br>
         "${customNote}"
       </div>
@@ -2007,11 +2006,7 @@ export async function sendReportToFamilyRecipientEmail(
       </table>
     </div>
 
-    <div style="text-align: center; margin: 28px 0;">
-      <a href="${portalUrl}/dashboard/reports/${reportId}" class="btn-primary" style="display: inline-block; padding: 14px 28px; background: #294B68; color: #ffffff; text-decoration: none; font-weight: 800; font-size: 14px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-        View Full Report &amp; Photos →
-      </a>
-    </div>
+  
 
     <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 12px; color: #475569; line-height: 1.6;">
       <strong>Authorized Recipient Communication:</strong><br>
@@ -2300,6 +2295,323 @@ export async function sendSubscriptionReactivatedEmail(
     } catch (err: any) {
       console.warn(
         `[EMAIL SERVICE] Subscription reactivated SMTP error: ${err.message}`,
+      );
+      return { success: true, mode: "console" };
+    }
+  }
+
+  return { success: true, mode: "console" };
+}
+
+export interface SendClientDirectMessageOptions {
+  clientName: string;
+  clientEmail: string;
+  clientPhone?: string;
+  clientNumber?: string;
+  subject: string;
+  message: string;
+  senderRole?: string;
+}
+
+/**
+ * Sends a direct inquiry message from a client portal user to the admin Gmail inbox.
+ * Sets replyTo directly to the client's email so that admin replies land in client's inbox.
+ */
+export async function sendClientDirectMessageToAdminEmail(
+  options: SendClientDirectMessageOptions,
+): Promise<{ success: boolean; messageId?: string; mode: string }> {
+  const {
+    clientName,
+    clientEmail,
+    clientPhone,
+    clientNumber,
+    subject: userSubject,
+    message: userMessage,
+    senderRole,
+  } = options;
+
+  const adminDestinationEmail =
+    process.env.ADMIN_NOTIFICATION_EMAIL ||
+    process.env.ADMIN_EMAIL ||
+    process.env.SMTP_USER ||
+    process.env.EMAIL_USER ||
+    "agewellri@gmail.com";
+
+  const emailSubject = `[AgeWellRI Message] ${userSubject || "New Client Inquiry"}`;
+
+  const content = `
+    <div class="greeting">New Message from ${clientName}</div>
+    <div class="message">
+      A message was sent directly from the AgeWellRI Portal. You can reply directly to this email to respond to the client.
+    </div>
+
+    <div class="highlight-card">
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600; width: 140px;">Client Name:</td>
+          <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${clientName}</td>
+        </tr>
+        ${
+          clientNumber
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Client ID:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${clientNumber}</td>
+              </tr>`
+            : ""
+        }
+        <tr>
+          <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Client Email:</td>
+          <td style="padding: 6px 0; color: #294B68; font-weight: 800; text-align: right;">
+            <a href="mailto:${clientEmail}" style="color: #294B68; text-decoration: underline;">${clientEmail}</a>
+          </td>
+        </tr>
+        ${
+          clientPhone
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Phone Number:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${clientPhone}</td>
+              </tr>`
+            : ""
+        }
+        ${
+          senderRole
+            ? `<tr>
+                <td style="padding: 6px 0; color: #64748B; font-weight: 600;">Sender Role:</td>
+                <td style="padding: 6px 0; color: #243746; font-weight: 800; text-align: right;">${senderRole}</td>
+              </tr>`
+            : ""
+        }
+      </table>
+    </div>
+
+    <div style="background: #ffffff; border: 1px solid #D9E4EC; border-radius: 12px; padding: 18px; margin: 16px 0;">
+      <div style="font-size: 12px; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Message:</div>
+      <div style="font-size: 14px; color: #1E293B; line-height: 1.6; white-space: pre-wrap;">${userMessage.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
+    </div>
+
+    <div style="font-size: 12px; color: #64748B; line-height: 1.5; border-top: 1px solid #D9E4EC; padding-top: 14px; margin-top: 20px;">
+      💡 <strong>Direct Reply:</strong> Click <strong>Reply</strong> in your email client to send your response directly to <strong>${clientEmail}</strong>.
+    </div>
+  `;
+
+  const htmlContent = wrapHtmlEmail(emailSubject, content);
+
+  console.log(`\n======================================================`);
+  console.log(`📨 [CONTACT EMAIL] Direct Client Message dispatched to Admin`);
+  console.log(
+    `From: ${clientName} (${clientEmail}) -> Admin: ${adminDestinationEmail}`,
+  );
+  console.log(`Subject: ${emailSubject}`);
+  console.log(`======================================================\n`);
+
+  const transporter = createTransporter();
+  if (transporter) {
+    try {
+      const info = await transporter.sendMail({
+        from: getDefaultFromAddress(`AgeWellRI Portal - ${clientName}`),
+        to: adminDestinationEmail,
+        replyTo: clientEmail,
+        subject: emailSubject,
+        html: htmlContent,
+      });
+      return { success: true, messageId: info.messageId, mode: "smtp" };
+    } catch (err: any) {
+      console.warn(`[CONTACT EMAIL] SMTP delivery warning: ${err.message}`);
+      return { success: true, mode: "console" };
+    }
+  }
+
+  return { success: true, mode: "console" };
+}
+
+export interface SendSpecialistAssignedEmailOptions {
+  to: string | string[];
+  clientName: string;
+  specialistName: string;
+  specialistTitle?: string;
+  specialistPhone?: string;
+  specialistBio?: string;
+  specialistPhotoUrl?: string;
+  serviceName: string;
+  planName?: string;
+  scheduledDate: string | Date;
+  timeSlot: string;
+  location?: string;
+  notes?: string;
+  accessMethodTitle?: string;
+  accessMethodInstructions?: string;
+  portalUrl?: string;
+}
+
+/**
+ * Send Specialist Assigned Email Notification to Client & Family
+ */
+export async function sendSpecialistAssignedEmail(
+  options: SendSpecialistAssignedEmailOptions,
+): Promise<{ success: boolean; messageId?: string; mode: "smtp" | "console" }> {
+  const {
+    to,
+    clientName,
+    specialistName,
+    specialistTitle = "Senior Home Safety Specialist® certified by Age Safe® America",
+    specialistPhone,
+    specialistBio,
+    serviceName,
+    planName,
+    scheduledDate,
+    timeSlot,
+    location,
+    notes,
+    accessMethodTitle,
+    accessMethodInstructions,
+    portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
+  } = options;
+
+  const formattedDate = (() => {
+    try {
+      const d = new Date(scheduledDate);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleDateString("en-US", {
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        });
+      }
+      return String(scheduledDate);
+    } catch {
+      return String(scheduledDate);
+    }
+  })();
+
+  // const specialistInitial = specialistName
+  //   ? specialistName.trim().charAt(0).toUpperCase()
+  //   : "S";
+  const displayService = serviceName || planName || "Safety Oversight Visit";
+  const emailSubject = `Specialist Assigned: ${specialistName} for Your AgeWellRI Visit on ${formattedDate}`;
+
+  const content = `
+    <div class="greeting">Hello ${clientName},</div>
+    <div class="message">
+   A certified AgeWellRI Safety Specialist has been assigned to your upcoming <strong>${displayService}</strong> oversight visit.
+    </div>
+
+    <!-- Assigned Specialist Card -->
+    <div style="background: #EAF3F8; border: 1.5px solid #5E8FB2; border-radius: 16px; padding: 22px; margin: 20px 0;">
+      <div style="font-size: 11px; font-weight: 800; color: #294B68; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">
+         Assigned Safety Specialist
+      </div>
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          
+          <td style="vertical-align: top; padding-left: 14px;">
+            <div style="font-size: 17px; font-weight: 800; color: #243746; line-height: 1.3;">
+              ${specialistName}
+            </div>
+            <div style="font-size: 13px; font-weight: 600; color: #5E8FB2; margin-top: 3px; line-height: 1.4;">
+              ${specialistTitle}
+            </div>
+            ${
+              specialistPhone
+                ? `<div style="font-size: 12px; color: #64748B; margin-top: 4px;">
+                    Direct Phone: <strong style="color: #243746;">${specialistPhone}</strong>
+                  </div>`
+                : ""
+            }
+          </td>
+        </tr>
+      </table>
+      ${
+        specialistBio
+          ? `<div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed #BFDBFE; font-size: 12px; color: #475569; line-height: 1.5;">
+              ${specialistBio}
+            </div>`
+          : ""
+      }
+    </div>
+
+    <!-- Scheduled Visit Summary Card -->
+    <div class="highlight-card">
+      <div style="font-size: 11px; font-weight: 800; color: #64748B; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 12px;">
+        📅 Confirmed Visit Details
+      </div>
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td style="padding: 7px 0; color: #64748B; font-weight: 600; font-size: 13px; width: 140px;">Service Plan:</td>
+          <td style="padding: 7px 0; color: #243746; font-weight: 800; font-size: 13px; text-align: right;">${displayService}</td>
+        </tr>
+        <tr>
+          <td style="padding: 7px 0; color: #64748B; font-weight: 600; font-size: 13px;">Scheduled Date:</td>
+          <td style="padding: 7px 0; color: #243746; font-weight: 800; font-size: 13px; text-align: right;">${formattedDate}</td>
+        </tr>
+        <tr>
+          <td style="padding: 7px 0; color: #64748B; font-weight: 600; font-size: 13px;">Time Window:</td>
+          <td style="padding: 7px 0; color: #294B68; font-weight: 900; font-size: 14px; text-align: right;">${timeSlot}</td>
+        </tr>
+        ${
+          location
+            ? `<tr>
+                <td style="padding: 7px 0; color: #64748B; font-weight: 600; font-size: 13px;">Service Address:</td>
+                <td style="padding: 7px 0; color: #243746; font-weight: 700; font-size: 13px; text-align: right;">${location}</td>
+              </tr>`
+            : ""
+        }
+        ${
+          accessMethodTitle
+            ? `<tr>
+                <td style="padding: 7px 0; color: #64748B; font-weight: 600; font-size: 13px;">Home Access:</td>
+                <td style="padding: 7px 0; color: #243746; font-weight: 700; font-size: 13px; text-align: right;">${accessMethodTitle}</td>
+              </tr>`
+            : ""
+        }
+      </table>
+    </div>
+
+    ${
+      accessMethodInstructions
+        ? `<div style="background: #F8FAFC; border: 1px solid #D9E4EC; border-radius: 12px; padding: 14px; margin: 16px 0; font-size: 12px; color: #475569;">
+            <strong style="color: #243746;">Entry Instructions:</strong> ${accessMethodInstructions}
+          </div>`
+        : ""
+    }
+
+    ${
+      notes
+        ? `<div style="background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 12px; padding: 14px; margin: 16px 0; font-size: 12px; color: #92400E;">
+            <strong>Special Visit Notes:</strong> ${notes}
+          </div>`
+        : ""
+    }
+
+ 
+
+  `;
+
+  const htmlContent = wrapHtmlEmail(emailSubject, content);
+  const recipientList = Array.isArray(to) ? to.join(", ") : to;
+
+  console.log(`\n======================================================`);
+  console.log(
+    `👨‍🔧 [EMAIL SERVICE] Specialist Assigned Notification sent to: ${recipientList}`,
+  );
+  console.log(
+    `Specialist: ${specialistName} | Visit: ${displayService} | Date: ${formattedDate} (${timeSlot})`,
+  );
+  console.log(`======================================================\n`);
+
+  const transporter = createTransporter();
+  if (transporter) {
+    try {
+      const info = await transporter.sendMail({
+        from: getDefaultFromAddress("AgeWellRI Visit Coordination"),
+        to,
+        subject: emailSubject,
+        html: htmlContent,
+      });
+      return { success: true, messageId: info.messageId, mode: "smtp" };
+    } catch (err: any) {
+      console.warn(
+        `[EMAIL SERVICE] Specialist assigned SMTP error: ${err.message}`,
       );
       return { success: true, mode: "console" };
     }

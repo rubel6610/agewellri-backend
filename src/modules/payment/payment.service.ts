@@ -678,7 +678,7 @@ export async function processAgreementPayment(
         billingMethod,
         currentPeriodStart: firstBillingDate,
         currentPeriodEnd: periodEndDate,
-        nextRenewalDate: firstBillingDate,
+        nextRenewalDate: getFirstBillingDate(firstBillingDate),
         autoRenew: !pricing.isOneTime,
         cancelAtPeriodEnd: false,
         stripeSubscriptionId: stripeSubscriptionId || null,
@@ -699,7 +699,7 @@ export async function processAgreementPayment(
         billingMethod,
         currentPeriodStart: firstBillingDate,
         currentPeriodEnd: periodEndDate,
-        nextRenewalDate: firstBillingDate,
+        nextRenewalDate: getFirstBillingDate(firstBillingDate),
         autoRenew: !pricing.isOneTime,
         cancelAtPeriodEnd: false,
         stripeSubscriptionId:
@@ -878,7 +878,7 @@ export async function processAgreementPayment(
         paidAt: null,
         coveragePeriodStart: firstBillingDate,
         coveragePeriodEnd: periodEndDate,
-        nextRenewalDate: firstBillingDate,
+        nextRenewalDate: getFirstBillingDate(firstBillingDate),
         cancellationDeadline: agreement?.cancellationDeadline,
         cancellationDeadlineRule: agreement?.cancellationDeadlineRule,
       });
@@ -1001,6 +1001,22 @@ export async function cancelSubscriptionRenewal(
         cancellationEffectiveAt: effectiveDate,
         autoRenew: false,
         cancelAtPeriodEnd: true,
+      };
+    }
+
+    // 10-Day Cancellation Cutoff Rule:
+    // Cancellation requests for auto-renewal must be submitted at least 10 days before the 1st of the next month (by the 20th of the current month).
+    // If the request is made after the 20th (day >= 21), cutoff for next month's renewal has passed and renewal cancellation is rejected.
+    const easternNow = getEasternDateParts(now);
+    if (easternNow.day > 20) {
+      const cutoffDate = new Date(easternNow.year, easternNow.month - 1, 20);
+      const cutoffFormatted = formatBillingDate(cutoffDate);
+      return {
+        success: false,
+        message: `Auto-renewal cancellation must be submitted at least 10 days prior to the 1st of each month (by the 20th of the month). The cutoff date (${cutoffFormatted}) for next month's renewal has passed. Cancellation cannot be processed for the upcoming renewal.`,
+        cancellationEffectiveAt: null,
+        autoRenew: true,
+        cancelAtPeriodEnd: false,
       };
     }
 
@@ -1427,16 +1443,13 @@ export async function getBillingOverview(userId: string) {
     activeSub?.status === SubscriptionStatus.PENDING;
 
   // Authoritative Renewal Date:
-  // For PENDING subscriptions, next payment occurs on firstBillingDate (1st of commencement month).
-  // For ACTIVE subscriptions, next monthly renewal is strictly the 1st of the following month (e.g. Nov 1, 2026 for an Oct cycle).
-  const calculatedNextRenewal = isPendingFirstBilling
-    ? firstBillingDate
-    : getFirstBillingDate(activeSub?.currentPeriodStart ? new Date(activeSub.currentPeriodStart) : now);
+  // Next monthly renewal is strictly the 1st of the month AFTER service commencement / current period start (e.g. Nov 1, 2026 for an Oct commencement).
+  const calculatedNextRenewal = getFirstBillingDate(serviceCommencementDate);
 
   const targetRenewalDate =
     activeSub?.nextRenewalDate &&
     getEasternDateParts(new Date(activeSub.nextRenewalDate)).day === 1 &&
-    new Date(activeSub.nextRenewalDate) > (activeSub?.currentPeriodStart ? new Date(activeSub.currentPeriodStart) : now)
+    new Date(activeSub.nextRenewalDate) > serviceCommencementDate
       ? new Date(activeSub.nextRenewalDate)
       : calculatedNextRenewal;
 
@@ -1476,28 +1489,55 @@ export async function getBillingOverview(userId: string) {
 
   const nextRenewal = formatBillingDate(targetRenewalDate);
 
-  const formattedInvoices = (client.invoices || []).map((inv: any) => ({
-    id: inv.id,
-    invoiceNumber: inv.invoiceNumber,
-    clientName: clientFullName,
-    clientNumber,
-    clientEmail,
-    planName: contractedPlanName,
-    billingFrequency: "Monthly",
-    paymentMethod:
-      activeSub?.billingMethod === "INVOICE"
-        ? "Pay by Invoice"
-        : "Credit Card (Auto-Pay)",
-    date: inv.createdAt.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
+  const formattedInvoices = (client.invoices || []).map((inv: any) => {
+    const targetServiceDate = inv.dueDate || (inv.createdAt && inv.createdAt.getDate() > 1
+      ? getFirstBillingDate(inv.createdAt)
+      : inv.createdAt || new Date());
+    const startOfMonth = new Date(targetServiceDate.getFullYear(), targetServiceDate.getMonth(), 1);
+    const endOfMonth = new Date(targetServiceDate.getFullYear(), targetServiceDate.getMonth() + 1, 0);
+
+    const billingMonth = targetServiceDate.toLocaleDateString("en-US", {
+      month: "long",
       year: "numeric",
-    }),
-    description: contractedPlanName,
-    amount: `$${inv.amount.toFixed(2)}`,
-    status: inv.status === InvoiceStatus.DRAFT ? "open" : inv.status.toLowerCase(),
-    pdfUrl: inv.invoiceUrl || inv.stripeHostedInvoiceUrl || "#",
-  }));
+    });
+    const billingPeriod = `${startOfMonth.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${endOfMonth.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+
+    return {
+      id: inv.id,
+      invoiceNumber: inv.invoiceNumber,
+      clientName: clientFullName,
+      clientNumber,
+      clientEmail,
+      planName: contractedPlanName,
+      billingFrequency: "Monthly",
+      paymentMethod:
+        activeSub?.billingMethod === "INVOICE"
+          ? "Pay by Invoice"
+          : "Credit Card (Auto-Pay)",
+      date: inv.createdAt.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }),
+      dueDate: inv.dueDate
+        ? inv.dueDate.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          })
+        : targetServiceDate.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          }),
+      billingMonth,
+      billingPeriod,
+      description: contractedPlanName,
+      amount: `$${inv.amount.toFixed(2)}`,
+      status: inv.status === InvoiceStatus.DRAFT ? "open" : inv.status.toLowerCase(),
+      pdfUrl: inv.invoiceUrl || inv.stripeHostedInvoiceUrl || "#",
+    };
+  });
 
   const formattedPayments = (client.payments || []).map((pm: any) => ({
     id: pm.id,
@@ -2273,39 +2313,69 @@ export async function getAdminInvoices(query: AdminBillingFilterInput) {
   ]);
 
   return {
-    invoices: invoices.map((inv: any) => ({
-      id: inv.id,
-      invoiceNumber: inv.invoiceNumber,
-      clientId: inv.clientId,
-      clientName: inv.client?.user
-        ? `${inv.client.user.firstName} ${inv.client.user.lastName}`.trim()
-        : "Client",
-      clientNumber: inv.client?.clientNumber || "AW-0000",
-      planName:
-        inv.subscription?.plan?.name ||
-        (inv.client as any)?.selectedPlan ||
-        "Service Plan",
-      billingFrequency: "Monthly",
-      amount: `$${inv.amount.toFixed(2)}`,
-      paymentMethod:
-        inv.billingMethod === "AUTOMATIC"
-          ? "Credit Card (Auto)"
-          : "Pay by Invoice",
-      status: inv.status === InvoiceStatus.DRAFT ? "open" : inv.status.toLowerCase(),
-      dueDate: inv.dueDate.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
+    invoices: invoices.map((inv: any) => {
+      const targetServiceDate = inv.dueDate || (inv.createdAt && inv.createdAt.getDate() > 1
+        ? getFirstBillingDate(inv.createdAt)
+        : inv.createdAt || new Date());
+      const startOfMonth = new Date(targetServiceDate.getFullYear(), targetServiceDate.getMonth(), 1);
+      const endOfMonth = new Date(targetServiceDate.getFullYear(), targetServiceDate.getMonth() + 1, 0);
+
+      const billingMonth = targetServiceDate.toLocaleDateString("en-US", {
+        month: "long",
         year: "numeric",
-      }),
-      paidAt: inv.paidAt
-        ? inv.paidAt.toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          })
-        : null,
-      pdfUrl: inv.invoiceUrl || inv.stripeHostedInvoiceUrl || "#",
-    })),
+      });
+      const billingPeriod = `${startOfMonth.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${endOfMonth.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+
+      return {
+        id: inv.id,
+        invoiceNumber: inv.invoiceNumber,
+        clientId: inv.clientId,
+        clientName: inv.client?.user
+          ? `${inv.client.user.firstName} ${inv.client.user.lastName}`.trim()
+          : "Client",
+        clientNumber: inv.client?.clientNumber || "AW-0000",
+        clientEmail: inv.client?.user?.email,
+        planName:
+          inv.subscription?.plan?.name ||
+          (inv.client as any)?.selectedPlan ||
+          "Service Plan",
+        billingFrequency: "Monthly",
+        amount: `$${inv.amount.toFixed(2)}`,
+        paymentMethod:
+          inv.billingMethod === "AUTOMATIC"
+            ? "Credit Card (Auto)"
+            : "Pay by Invoice",
+        status: inv.status === InvoiceStatus.DRAFT ? "open" : inv.status.toLowerCase(),
+        date: inv.createdAt
+          ? inv.createdAt.toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })
+          : "",
+        dueDate: inv.dueDate
+          ? inv.dueDate.toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })
+          : targetServiceDate.toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            }),
+        billingMonth,
+        billingPeriod,
+        paidAt: inv.paidAt
+          ? inv.paidAt.toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })
+          : null,
+        pdfUrl: inv.invoiceUrl || inv.stripeHostedInvoiceUrl || "#",
+      };
+    }),
     pagination: {
       total,
       page,

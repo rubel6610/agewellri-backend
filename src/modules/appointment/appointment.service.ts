@@ -23,6 +23,7 @@ import {
   notifyAdmins,
 } from "../notification/notification.service";
 import { calculatePeriodEndDate } from "../../utils/billing-dates.util";
+import { sendSpecialistAssignedEmail } from "../../utils/email";
 
 export function isValidObjectId(id?: string | null): boolean {
   if (!id || typeof id !== "string") return false;
@@ -535,10 +536,13 @@ async function validateAndExecuteContractualScheduling(
   const startAt = requestedStart;
   const endAt = requestedEnd;
 
-  // 8. Check client overlapping active appointments
-  const clientConflict = await (prisma.appointment.findFirst as any)({
+  // 8. Check client and technician active appointments for same date and cross-date time slot conflicts
+  const activeAppts = await (prisma.appointment.findMany as any)({
     where: {
-      clientId: client.id,
+      OR: [
+        { clientId: client.id },
+        ...(params.technicianId ? [{ technicianId: params.technicianId }] : []),
+      ],
       status: {
         in: [
           AppointmentStatus.SCHEDULED,
@@ -546,15 +550,31 @@ async function validateAndExecuteContractualScheduling(
           AppointmentStatus.RESCHEDULED,
         ],
       },
-      startAt: { lt: endAt },
-      endAt: { gt: startAt },
+      isArchived: false,
     },
   });
 
-  if (clientConflict) {
-    throw new Error(
-      "The client already has an active appointment scheduled during this time window.",
-    );
+  const reqStartMin = requestedStart.getHours() * 60 + requestedStart.getMinutes();
+  const reqEndMin = requestedEnd.getHours() * 60 + requestedEnd.getMinutes();
+
+  for (const appt of activeAppts) {
+    const apptStart = new Date(appt.startAt);
+
+    const isSameDate =
+      apptStart.getFullYear() === requestedStart.getFullYear() &&
+      apptStart.getMonth() === requestedStart.getMonth() &&
+      apptStart.getDate() === requestedStart.getDate();
+
+    if (isSameDate) {
+      const formattedDate = apptStart.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+      throw new Error(
+        `A visit is already scheduled for this client on ${formattedDate} (${appt.timeSlot || "Scheduled"}). The same client cannot have multiple visits scheduled on the same date. Please select another date.`,
+      );
+    }
   }
 
   // 9. Resolve Specialist / Technician
@@ -728,8 +748,47 @@ async function validateAndExecuteContractualScheduling(
         serviceName,
       },
     });
+
+    // If specialist was assigned (e.g. admin dispatch), send confirmation email to client & family
+    if (appointment.technicianId && technician) {
+      const clientEmail = client.user?.email || client.primaryContactEmail;
+      if (clientEmail) {
+        const familyMembers = await (prisma.familyMember.findMany as any)({
+          where: { clientId: client.id },
+          include: { user: true },
+        });
+        const recipientEmails = Array.from(
+          new Set(
+            [
+              clientEmail,
+              ...familyMembers
+                .map((f: any) => f.email || f.user?.email)
+                .filter(Boolean),
+            ]
+          )
+        );
+
+        await sendSpecialistAssignedEmail({
+          to: recipientEmails.length === 1 ? recipientEmails[0] : recipientEmails,
+          clientName: clientDisplayName || "Valued Member",
+          specialistName: technician.name,
+          specialistTitle: technician.title || "Senior Home Safety Specialist® certified by Age Safe® America",
+          specialistPhone: technician.phone || undefined,
+          specialistBio: technician.bio || undefined,
+          serviceName: serviceName,
+          planName: targetPlan?.name || undefined,
+          scheduledDate: startAt,
+          timeSlot: params.timeSlot,
+          location: params.location || clientAddress,
+          notes: params.notes || undefined,
+          accessMethodTitle: appointment.accessMethodTitle || undefined,
+          accessMethodInstructions: appointment.accessMethodInstructions || undefined,
+          portalUrl: process.env.FRONTEND_URL || "http://localhost:3000",
+        });
+      }
+    }
   } catch (notifErr: any) {
-    console.warn("⚠️ Failed to dispatch appointment creation in-app notification:", notifErr.message);
+    console.warn("⚠️ Failed to dispatch appointment creation notifications:", notifErr.message);
   }
 
   return formatAppointmentRecord(appointment, technician ? [technician] : []);
@@ -864,7 +923,7 @@ export async function getClientAppointments(userId: string) {
         clientId: client.id,
         isArchived: false,
       },
-      orderBy: { startAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { startAt: "desc" }],
       include: {
         client: { include: { user: true } },
         createdByUser: true,
@@ -940,8 +999,8 @@ export async function getAdminAppointments(query: AdminAppointmentsQuery = {}) {
     getAllSpecialists(),
     (prisma.appointment.findMany as any)({
       where,
-      orderBy: { startAt: "desc" },
-      take: query.limit || 50,
+      orderBy: [{ createdAt: "desc" }, { startAt: "desc" }],
+      take: query.limit || 500,
       skip: query.page && query.limit ? (query.page - 1) * query.limit : 0,
       include: {
         client: { include: { user: true } },
@@ -1062,6 +1121,48 @@ export async function rescheduleAppointment(
   }
 
   const technicianId = input.technicianId || appt.technicianId;
+
+  // Validate time slot conflict for client and technician (excluding current appointment)
+  const activeAppts = await (prisma.appointment.findMany as any)({
+    where: {
+      id: { not: appointmentId },
+      OR: [
+        { clientId: appt.clientId },
+        ...(technicianId ? [{ technicianId }] : []),
+      ],
+      status: {
+        in: [
+          AppointmentStatus.SCHEDULED,
+          AppointmentStatus.CONFIRMED,
+          AppointmentStatus.RESCHEDULED,
+        ],
+      },
+      isArchived: false,
+    },
+  });
+
+  const reqStartMin = startAt.getHours() * 60 + startAt.getMinutes();
+  const reqEndMin = endAt.getHours() * 60 + endAt.getMinutes();
+
+  for (const otherAppt of activeAppts) {
+    const otherStart = new Date(otherAppt.startAt);
+
+    const isSameDate =
+      otherStart.getFullYear() === startAt.getFullYear() &&
+      otherStart.getMonth() === startAt.getMonth() &&
+      otherStart.getDate() === startAt.getDate();
+
+    if (isSameDate) {
+      const formattedDate = otherStart.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+      throw new Error(
+        `A visit is already scheduled on ${formattedDate} (${otherAppt.timeSlot || "Scheduled"}). The same client cannot have multiple visits scheduled on the same date. Please select another date.`,
+      );
+    }
+  }
 
   const updated = await (prisma.appointment.update as any)({
     where: { id: appointmentId },
@@ -1244,12 +1345,28 @@ export async function updateAppointmentStatus(
   const appt = await (prisma.appointment.findUnique as any)({
     where: { id: appointmentId },
     include: {
-      client: true,
+      client: {
+        include: {
+          subscriptions: {
+            where: { isArchived: false },
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      },
     },
   });
 
   if (!appt) {
     throw new Error(`Appointment with ID ${appointmentId} not found.`);
+  }
+
+  if (input.status === "COMPLETED") {
+    const activeSub = appt.client?.subscriptions?.[0];
+    if (!activeSub || activeSub.status !== SubscriptionStatus.ACTIVE) {
+      throw new Error(
+        "Cannot mark visit as completed: Client subscription is not active yet. An active subscription with confirmed payment is required to complete visits.",
+      );
+    }
   }
 
   const updated = await (prisma.appointment.update as any)({
@@ -1349,7 +1466,15 @@ export async function acceptVisitRequest(
   const appt = await (prisma.appointment.findUnique as any)({
     where: { id: appointmentId },
     include: {
-      client: { include: { user: true } },
+      client: {
+        include: {
+          user: true,
+          subscriptions: {
+            where: { isArchived: false },
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      },
     },
   });
 
@@ -1360,6 +1485,9 @@ export async function acceptVisitRequest(
   if (appt.status === AppointmentStatus.CANCELLED) {
     throw new Error("Cannot accept a cancelled appointment request.");
   }
+
+  // Note: Admin can accept visit requests and assign specialists in advance even if subscription payment is pending.
+  // Subscription payment activation is only required when completing visits.
 
   // Resolve technician
   const technician = await resolveTechnician(
@@ -1450,7 +1578,7 @@ export async function acceptVisitRequest(
     metadata: { technicianName: technician.name, notes: input.notes },
   });
 
-  // Dispatch In-App Notification for Client/Family
+  // Dispatch In-App Notification and Email Notification for Client/Family
   if (updated.client?.id) {
     try {
       await notifyClientAndFamily(
@@ -1467,8 +1595,53 @@ export async function acceptVisitRequest(
         },
         "portalAccess",
       );
+
+      // Send Dedicated Email to Client & Authorized Family
+      const clientEmail = updated.client.user?.email || updated.client.primaryContactEmail;
+      if (clientEmail) {
+        const clientDisplayName = `${updated.client.user?.firstName || updated.client.primaryContactName || "Valued"} ${updated.client.user?.lastName || "Member"}`.trim();
+
+        const familyMembers = await (prisma.familyMember.findMany as any)({
+          where: { clientId: updated.client.id },
+          include: { user: true },
+        });
+        const recipientEmails = Array.from(
+          new Set(
+            [
+              clientEmail,
+              ...familyMembers
+                .map((f: any) => f.email || f.user?.email)
+                .filter(Boolean),
+            ]
+          )
+        );
+
+        const start = new Date(startAt);
+        const end = new Date(endAt);
+        const timeSlotStr =
+          input.timeSlot ||
+          `${start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} – ${end.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+
+        await sendSpecialistAssignedEmail({
+          to: recipientEmails.length === 1 ? recipientEmails[0] : recipientEmails,
+          clientName: clientDisplayName || "Valued Member",
+          specialistName: technician.name,
+          specialistTitle: technician.title || "Senior Home Safety Specialist® certified by Age Safe® America",
+          specialistPhone: technician.phone || undefined,
+          specialistBio: technician.bio || undefined,
+          serviceName: updated.serviceName || updated.plan?.name || "Safety Oversight Visit",
+          planName: updated.plan?.name || undefined,
+          scheduledDate: startAt,
+          timeSlot: timeSlotStr,
+          location: updated.location || undefined,
+          notes: input.notes || updated.notes || undefined,
+          accessMethodTitle: updated.accessMethodTitle || undefined,
+          accessMethodInstructions: updated.accessMethodInstructions || undefined,
+          portalUrl: process.env.FRONTEND_URL || "http://localhost:3000",
+        });
+      }
     } catch (notifErr: any) {
-      console.warn("⚠️ Failed to dispatch specialist assigned notification:", notifErr.message);
+      console.warn("⚠️ Failed to dispatch specialist assigned notifications:", notifErr.message);
     }
   }
 
@@ -1490,4 +1663,49 @@ export async function declineVisitRequest(
     false,
     reason || "Visit request declined by administrator",
   );
+}
+
+/**
+ * ADMIN: Permanently Delete Appointment (e.g. cancelled visits)
+ */
+export async function deleteAppointment(
+  appointmentId: string,
+  adminUserId: string,
+) {
+  if (!isValidObjectId(appointmentId)) {
+    throw new Error("Invalid appointment ID.");
+  }
+
+  const appt = await prisma.appointment.findUnique({
+    where: { id: appointmentId },
+  });
+
+  if (!appt) {
+    throw new Error("Appointment record not found.");
+  }
+
+  // Find linked visits
+  const visits = await prisma.visit.findMany({
+    where: { appointmentId },
+  });
+
+  for (const v of visits) {
+    await prisma.report.deleteMany({ where: { visitId: v.id } });
+  }
+  await prisma.visit.deleteMany({ where: { appointmentId } });
+
+  // Delete the appointment
+  await prisma.appointment.delete({
+    where: { id: appointmentId },
+  });
+
+  await createAppointmentAuditLog({
+    actorUserId: adminUserId,
+    action: "ADMIN_DELETED_APPOINTMENT",
+    entityType: "Appointment",
+    entityId: appointmentId,
+    previousValues: { status: appt.status, startAt: appt.startAt },
+  });
+
+  return { id: appointmentId, deleted: true };
 }

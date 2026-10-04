@@ -64,6 +64,14 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
         take: 1,
       },
       subscriptions: {
+        include: {
+          plan: true,
+          periods: {
+            orderBy: { startDate: "desc" },
+            take: 1,
+            include: { allocations: true },
+          },
+        },
         orderBy: { createdAt: "desc" },
         take: 1,
       },
@@ -72,9 +80,8 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
         take: 1,
       },
       appointments: {
-        where: { status: { in: ["SCHEDULED", "CONFIRMED"] } },
+        where: { status: { not: "CANCELLED" } },
         orderBy: { startAt: "asc" },
-        take: 1,
       },
       invitations: {
         orderBy: { createdAt: "desc" },
@@ -91,7 +98,9 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
     const latestAgreement = c.agreements?.[0] || null;
     const latestSub = c.subscriptions?.[0] || null;
     const latestInvoice = c.invoices?.[0] || null;
-    const nextAppt = c.appointments?.[0] || null;
+    const nextAppt = c.appointments?.find((a: any) =>
+      ["SCHEDULED", "CONFIRMED"].includes(a.status?.toUpperCase())
+    ) || null;
     const latestInvitation = c.invitations?.[0] || null;
 
     const isExecutedAgreement =
@@ -117,25 +126,46 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
 
     const isEnrolledAndPaid =
       isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
-    const totalVisitsAllowed = isEnrolledAndPaid
-      ? c.hasCleaningAddon
-        ? 18
-        : 12
-      : 0;
-    const completedVisitsCount = 0;
-    const remainingVisitsCount = isEnrolledAndPaid
-      ? c.hasCleaningAddon
-        ? 18
-        : 12
-      : 0;
+
+    const currentPeriod = latestSub?.periods?.[0] || null;
+    const entitlements = formatPeriodEntitlements(
+      currentPeriod,
+      c.appointments || [],
+      latestSub?.plan,
+    );
+
+    let totalVisitsAllowed = 0;
+    let completedVisitsCount = 0;
+    let remainingVisitsCount = 0;
+
+    if (entitlements.length > 0) {
+      totalVisitsAllowed = entitlements.reduce((sum: number, item: any) => sum + item.allocated, 0);
+      completedVisitsCount = entitlements.reduce((sum: number, item: any) => sum + item.completed, 0);
+      remainingVisitsCount = entitlements.reduce((sum: number, item: any) => sum + item.remaining, 0);
+    } else {
+      const planNameStr = (latestSub?.plan?.name || c.selectedPlan || "").toLowerCase();
+      if (planNameStr && planNameStr !== "unassigned") {
+        totalVisitsAllowed = Number(
+          (latestSub?.plan as any)?.totalVisits ??
+            (planNameStr.includes("plan 2") || planNameStr.includes("independence") ? 2 : 1)
+        );
+        completedVisitsCount = (c.appointments || []).filter(
+          (a: any) => a.status === "COMPLETED"
+        ).length;
+        const bookedOrUsed = (c.appointments || []).filter((a: any) =>
+          ["SCHEDULED", "CONFIRMED", "RESCHEDULED", "COMPLETED"].includes(a.status?.toUpperCase())
+        ).length;
+        remainingVisitsCount = Math.max(0, totalVisitsAllowed - bookedOrUsed);
+      }
+    }
 
     return {
       id: c.clientNumber || c.id,
       internalId: c.id,
       userId: c.userId,
       clientNumber: c.clientNumber || `AW-${c.id.slice(-4).toUpperCase()}`,
-      firstName: c.user?.firstName || "Unknown",
-      lastName: c.user?.lastName || "Member",
+      firstName: c.user?.firstName,
+      lastName: c.user?.lastName,
       email: c.user?.email || c.primaryContactEmail || "",
       phone: c.user?.phone || c.primaryContactPhone || "",
       address: {
@@ -157,6 +187,7 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
       homeAccessInstructions: c.homeAccessInstructions,
       planName: latestSub?.plan?.name || c.selectedPlan || "Unassigned",
       planCode: latestSub?.plan?.code || c.selectedPlan || "",
+      planTimes: latestSub?.plan?.times || null,
       hasCleaningAddon: Boolean(c.hasCleaningAddon),
       onboardingStatus: c.onboardingStatus || "INVITED",
       onboardingStep: c.onboardingStep || 1,
@@ -173,18 +204,19 @@ export async function getAllAdminClients(query?: AdminClientsQuery) {
       nextVisitDate: safeFormatDate(nextAppt?.startAt),
       renewalDate: safeFormatDate(
         latestSub?.nextRenewalDate &&
-          getEasternDateParts(new Date(latestSub.nextRenewalDate)).day === 1
+          getEasternDateParts(new Date(latestSub.nextRenewalDate)).day === 1 &&
+          new Date(latestSub.nextRenewalDate) > (latestSub?.currentPeriodStart ? new Date(latestSub.currentPeriodStart) : new Date())
           ? latestSub.nextRenewalDate
           : latestSub?.currentPeriodStart
             ? getFirstBillingDate(new Date(latestSub.currentPeriodStart))
-            : latestSub?.nextRenewalDate || latestSub?.currentPeriodEnd,
+            : getFirstBillingDate(new Date())
       ),
       status: isEnrolledAndPaid
         ? "active"
         : isExecutedAgreement
           ? "pending_payment"
           : "pending_onboarding",
-      createdAt: safeFormatDate(c.createdAt) || "Recently",
+      createdAt: safeFormatDate(c.createdAt),
       // Onboarding Timeline Flags
       timeline: {
         welcomeSent: Boolean(latestInvitation || c.createdAt),
@@ -407,9 +439,6 @@ export async function getAdminClientById(clientIdOrNumber: string) {
     cardBrand: client.cardBrand,
     cardLast4: client.cardLast4,
     totalVisitsAllowed: (() => {
-      const isEnrolledAndPaid =
-        isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
-      if (!isEnrolledAndPaid) return 0;
       const currentPeriod = latestSub?.periods?.[0];
       const entitlements = formatPeriodEntitlements(
         currentPeriod,
@@ -418,12 +447,13 @@ export async function getAdminClientById(clientIdOrNumber: string) {
       if (entitlements.length > 0) {
         return entitlements.reduce((sum, item) => sum + item.allocated, 0);
       }
-      return client.hasCleaningAddon ? 18 : 12;
+      const planNameStr = (latestSub?.plan?.name || client.selectedPlan || "").toLowerCase();
+      if (planNameStr.includes("plan 2") || planNameStr.includes("independence")) {
+        return 2;
+      }
+      return 1;
     })(),
     completedVisitsCount: (() => {
-      const isEnrolledAndPaid =
-        isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
-      if (!isEnrolledAndPaid) return 0;
       const currentPeriod = latestSub?.periods?.[0];
       const entitlements = formatPeriodEntitlements(
         currentPeriod,
@@ -438,9 +468,6 @@ export async function getAdminClientById(clientIdOrNumber: string) {
       );
     })(),
     remainingVisitsCount: (() => {
-      const isEnrolledAndPaid =
-        isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
-      if (!isEnrolledAndPaid) return 0;
       const currentPeriod = latestSub?.periods?.[0];
       const entitlements = formatPeriodEntitlements(
         currentPeriod,
@@ -449,27 +476,29 @@ export async function getAdminClientById(clientIdOrNumber: string) {
       if (entitlements.length > 0) {
         return entitlements.reduce((sum, item) => sum + item.remaining, 0);
       }
-      return (
-        (client.hasCleaningAddon ? 18 : 12) -
-        (client.appointments?.filter((a: any) => a.status === "COMPLETED")
-          .length || 0)
-      );
+      const planNameStr = (latestSub?.plan?.name || client.selectedPlan || "").toLowerCase();
+      const allocated = planNameStr.includes("plan 2") || planNameStr.includes("independence") ? 2 : 1;
+      const bookedOrUsed = (client.appointments || []).filter((a: any) =>
+        ["SCHEDULED", "CONFIRMED", "RESCHEDULED", "COMPLETED"].includes(a.status),
+      ).length;
+      return Math.max(0, allocated - bookedOrUsed);
     })(),
     visitEntitlements: (() => {
-      const isEnrolledAndPaid =
-        isExecutedAgreement && (isSubActive || paymentStatus === "PAID");
-      if (!isEnrolledAndPaid) return [];
       const currentPeriod = latestSub?.periods?.[0];
-      return formatPeriodEntitlements(currentPeriod, client.appointments || []);
+      return formatPeriodEntitlements(
+        currentPeriod,
+        client.appointments || [],
+      );
     })(),
     nextVisitDate: safeFormatDate(nextAppt?.startAt),
     renewalDate: safeFormatDate(
       latestSub?.nextRenewalDate &&
-        getEasternDateParts(new Date(latestSub.nextRenewalDate)).day === 1
+        getEasternDateParts(new Date(latestSub.nextRenewalDate)).day === 1 &&
+        new Date(latestSub.nextRenewalDate) > (latestSub?.currentPeriodStart ? new Date(latestSub.currentPeriodStart) : new Date())
         ? latestSub.nextRenewalDate
         : latestSub?.currentPeriodStart
           ? getFirstBillingDate(new Date(latestSub.currentPeriodStart))
-          : latestSub?.nextRenewalDate || latestSub?.currentPeriodEnd,
+          : getFirstBillingDate(new Date())
     ),
     status:
       isExecutedAgreement && (isSubActive || paymentStatus === "PAID")
@@ -1019,12 +1048,23 @@ export async function getAdminDashboardStats() {
     });
   }
 
+  const pendingPaymentsCount = Math.max(
+    openInvoices.length,
+    allClients.filter(
+      (c: any) =>
+        c.onboardingStatus === "PAYMENT_PENDING" ||
+        c.paymentStatus === "UNPAID" ||
+        c.paymentStatus === "PAYMENT_PENDING",
+    ).length,
+  );
+
   return {
     kpis: {
       activeClientsCount: activeClients.length,
       totalClientsCount: totalClients,
       newClientsThisMonth,
       pendingOnboardingCount: pendingOnboarding.length,
+      pendingPaymentsCount,
       upcomingVisitsCount,
       completedVisitsCount: completedVisits.length,
       reportsPendingCount,
