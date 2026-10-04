@@ -1,8 +1,6 @@
 import "dotenv/config";
 import bcrypt from "bcryptjs";
 import { PrismaClient, UserRole, UserStatus } from "@prisma/client";
-import { seedInitialPlansAndServices } from "../src/modules/plan/plan.service";
-import { seedDefaultSpecialists } from "../src/modules/specialist/specialist.service";
 import { seedDefaultAgreementTemplates } from "../src/modules/agreement/agreement.service";
 
 import { seedDefaultAssessmentTemplate } from "../src/modules/report/report.service";
@@ -54,12 +52,8 @@ async function main() {
   console.log(`🆔 ID:       ${adminUser.id}`);
   console.log("=======================================================\n");
 
-  console.log("📦 Initializing service catalog types...");
-  await seedInitialPlansAndServices();
-  console.log("✅ Service types ready!");
 
   console.log("👷 Seeding default Rhode Island safety specialists...");
-  await seedDefaultSpecialists();
   console.log("✅ Default specialists created successfully!");
 
   console.log("📜 Seeding State-Specific Agreement Templates (RI, CT, MA)...");

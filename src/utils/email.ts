@@ -1,4 +1,6 @@
 import nodemailer from "nodemailer";
+import fs from "fs";
+import path from "path";
 
 interface SendOtpEmailOptions {
   to: string;
@@ -1434,6 +1436,8 @@ export interface SendReportAvailableEmailOptions {
   specialistName?: string;
   reportTitle?: string;
   portalUrl?: string;
+  downloadUrl?: string;
+  pdfPath?: string;
   supportPhone?: string;
   supportEmail?: string;
 }
@@ -1452,6 +1456,8 @@ export async function sendReportAvailableEmail(
     specialistName = "AgeWellRI Specialist",
     reportTitle = "Completed Visit Report",
     portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
+    downloadUrl,
+    pdfPath,
     supportPhone = "(401) 212-3002",
     supportEmail = "agewellri@gmail.com",
   } = options;
@@ -1468,7 +1474,7 @@ export async function sendReportAvailableEmail(
   const content = `
     <div class="greeting">Hello ${clientName},</div>
     <div class="message">
-      Your official visit report for your completed <strong>${serviceType}</strong> on <strong>${formattedDate}</strong> is now available in your AgeWellRI member portal.
+      Your official visit report for your completed <strong>${serviceType}</strong> on <strong>${formattedDate}</strong> is now available. You can download the PDF directly below or access it in your AgeWellRI member portal.
     </div>
 
     <div class="highlight-card">
@@ -1500,8 +1506,8 @@ export async function sendReportAvailableEmail(
     </div>
 
     <div style="text-align: center; margin: 28px 0;">
-      <a href="${portalUrl}/dashboard/reports" class="btn-primary">
-        View &amp; Download Report PDF →
+      <a href="${downloadUrl || `${portalUrl}/dashboard/reports`}" class="btn-primary">
+        📥 Download Report (PDF) →
       </a>
     </div>
 
@@ -1524,6 +1530,15 @@ export async function sendReportAvailableEmail(
   );
   console.log(`======================================================\n`);
 
+  const attachments: any[] = [];
+  if (pdfPath && fs.existsSync(pdfPath)) {
+    attachments.push({
+      filename: `${(reportTitle || "AgeWellRI_Safety_Report").replace(/[^a-zA-Z0-9.-]/g, "_")}.pdf`,
+      path: pdfPath,
+      contentType: "application/pdf",
+    });
+  }
+
   const transporter = createTransporter();
   if (transporter) {
     try {
@@ -1532,6 +1547,7 @@ export async function sendReportAvailableEmail(
         to: recipientString,
         subject,
         html: htmlContent,
+        attachments: attachments.length > 0 ? attachments : undefined,
       });
       return { success: true, messageId: info.messageId, mode: "smtp" };
     } catch (err: any) {
@@ -1932,8 +1948,10 @@ export interface SendReportToFamilyRecipientEmailOptions {
   specialistName?: string;
   reportTitle?: string;
   customNote?: string | null;
-  reportId: string;
+  reportId?: string;
   portalUrl?: string;
+  downloadUrl?: string;
+  pdfPath?: string;
   supportPhone?: string;
   supportEmail?: string;
 }
@@ -1951,8 +1969,10 @@ export async function sendReportToFamilyRecipientEmail(
     reportTitle = "Completed Safety Visit Report",
     customNote,
     reportId,
-    portalUrl = process.env.FRONTEND_URL,
-    supportPhone = "(401) 712-3012",
+    portalUrl = process.env.FRONTEND_URL || "http://localhost:3000",
+    downloadUrl,
+    pdfPath,
+    supportPhone = "(401) 212-3002",
     supportEmail = "agewellri@gmail.com",
   } = options;
 
@@ -1967,7 +1987,7 @@ export async function sendReportToFamilyRecipientEmail(
 
   const customNoteHtml = customNote
     ? `
-      <div>
+      <div style="background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 12px; padding: 14px; margin: 16px 0; font-size: 13px; color: #92400E;">
         <strong>Personal Note from ${clientName}:</strong><br>
         "${customNote}"
       </div>
@@ -2006,11 +2026,15 @@ export async function sendReportToFamilyRecipientEmail(
       </table>
     </div>
 
-  
+    <div style="text-align: center; margin: 28px 0;">
+      <a href="${downloadUrl || `${portalUrl}/dashboard/reports`}" class="btn-primary">
+        📥 Download Safety Report (PDF) →
+      </a>
+    </div>
 
     <div style="background: #F0F5F9; border-radius: 12px; padding: 16px; font-size: 12px; color: #475569; line-height: 1.6;">
       <strong>Authorized Recipient Communication:</strong><br>
-      You are receiving this update because you are registered as an authorized family contact for ${clientName}.<br><br>
+      You are receiving this update because you are registered as an authorized family contact or report recipient for ${clientName}.<br><br>
       AgeWellRI Support: <strong>${supportPhone}</strong> | <a href="mailto:${supportEmail}" style="color: #294B68; font-weight: 700;">${supportEmail}</a>
     </div>
   `;
@@ -2027,6 +2051,15 @@ export async function sendReportToFamilyRecipientEmail(
   );
   console.log(`======================================================\n`);
 
+  const attachments: any[] = [];
+  if (pdfPath && fs.existsSync(pdfPath)) {
+    attachments.push({
+      filename: `${(reportTitle || "AgeWellRI_Safety_Report").replace(/[^a-zA-Z0-9.-]/g, "_")}.pdf`,
+      path: pdfPath,
+      contentType: "application/pdf",
+    });
+  }
+
   const transporter = createTransporter();
   if (transporter) {
     try {
@@ -2035,6 +2068,7 @@ export async function sendReportToFamilyRecipientEmail(
         to: recipientString,
         subject,
         html: htmlContent,
+        attachments: attachments.length > 0 ? attachments : undefined,
       });
       return { success: true, messageId: info.messageId, mode: "smtp" };
     } catch (err: any) {

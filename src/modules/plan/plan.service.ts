@@ -73,7 +73,7 @@ async function createPlanAuditLog(params: {
 export async function getActivePlans() {
   const plans = (await prisma.servicePlan.findMany({
     where: { isActive: true, isArchived: false },
-    orderBy: { createdAt: "desc" },
+    orderBy: { createdAt: "asc" },
   })) as unknown as ServicePlanData[];
 
   return plans.map((plan) => ({
@@ -111,7 +111,7 @@ export async function getAllAdminPlans() {
         select: { id: true },
       },
     },
-    orderBy: { createdAt: "desc" },
+    orderBy: { createdAt: "asc" },
   })) as unknown as (ServicePlanData & { subscriptions: { id: string }[] })[];
 
   return plans.map((plan) => ({
@@ -446,85 +446,3 @@ export async function deletePlan(planId: string, actorUserId?: string) {
   };
 }
 
-/**
- * Seed initial standard service plans if none exist in the database.
- */
-export async function seedInitialPlansAndServices() {
-  const existingCount = await prisma.servicePlan.count();
-
-  if (existingCount === 0) {
-    const defaultPlans = [
-      {
-        name: "Independence & Upkeep Plan",
-        code: "INDEPENDENCE_UPKEEP",
-        shortDescription:
-          "Essential safety oversight and regular home upkeep visits for independent seniors.",
-        fullDescription: "",
-        price: 995,
-        totalVisits: 2,
-        times: "Up to 2 hours",
-        billingInterval: BillingInterval.MONTHLY,
-        displayOrder: 1,
-        isActive: true,
-        features: [
-          "2 Dedicated In-Home Safety & Upkeep Visits per month",
-          "Comprehensive Fall Prevention & Grab-Bar Inspections",
-          "Pathway Clearing & Hazard Mitigation",
-          "Digital Safety & Health Scorecard Reports for Family",
-          "Dedicated Rhode Island Specialist safety Team",
-          "Priority Scheduling & Direct Concierge Support",
-        ],
-      },
-      {
-        name: "Peace of Mind Plan",
-        code: "PEACE_OF_MIND",
-        shortDescription:
-          "Enhanced safety oversight, hazard mitigation, and wellness check-ins for active households.",
-        fullDescription: "",
-        price: 1495,
-        totalVisits: 4,
-        times: "Up to 2 hours",
-        billingInterval: BillingInterval.MONTHLY,
-        displayOrder: 2,
-        isActive: true,
-        features: [
-          "4 Dedicated In-Home Safety & Upkeep Visits per month",
-          "Full Home Environmental & Hazard Assessment",
-          "Smoke / Carbon Monoxide Detector & Lighting Audits",
-          "Detailed Digital Safety Reports with Specialist Notes",
-          "Family Portal Real-Time Updates & SMS Alerts",
-          "Dedicated Specialist & Emergency safety Coordination",
-        ],
-      },
-      {
-        name: "Complete safety Plan",
-        code: "COMPLETE_SAFETY",
-        shortDescription:
-          "Maximum weekly protection, deep hazard mitigation, and white-glove home safety oversight.",
-        fullDescription: "",
-        price: 1995,
-        totalVisits: 6,
-        times: "Up to 2 hours",
-        billingInterval: BillingInterval.MONTHLY,
-        displayOrder: 3,
-        isActive: true,
-        features: [
-          "6 Dedicated In-Home Safety & Upkeep Visits per month",
-          "Weekly Specialized Hazard & Accessibility Inspections",
-          "Comprehensive Pathway Clearance & Hazard Mitigation Support",
-          "Complete Digital Safety Scorecards & Family Dashboard",
-          "Direct Dedicated Senior Safety Specialist Assigned",
-          "24/7 Priority Emergency Support & Coordination",
-        ],
-      },
-    ];
-
-    for (const planData of defaultPlans) {
-      await (prisma.servicePlan.create as any)({
-        data: planData,
-      });
-    }
-
-    console.log("✅ Seeded initial AgeWellRI Service Plans.");
-  }
-}

@@ -749,19 +749,22 @@ async function validateAndExecuteContractualScheduling(
       },
     });
 
-    // If specialist was assigned (e.g. admin dispatch), send confirmation email to client & family
+    // If specialist was assigned (e.g. admin dispatch), send confirmation email to client & representatives
     if (appointment.technicianId && technician) {
       const clientEmail = client.user?.email || client.primaryContactEmail;
       if (clientEmail) {
-        const familyMembers = await (prisma.familyMember.findMany as any)({
-          where: { clientId: client.id },
+        const representatives = await (prisma.familyMember.findMany as any)({
+          where: {
+            clientId: client.id,
+            OR: [{ isEmergencyContact: true }, { portalAccess: true }],
+          },
           include: { user: true },
         });
         const recipientEmails = Array.from(
           new Set(
             [
               clientEmail,
-              ...familyMembers
+              ...representatives
                 .map((f: any) => f.email || f.user?.email)
                 .filter(Boolean),
             ]
@@ -1596,20 +1599,23 @@ export async function acceptVisitRequest(
         "portalAccess",
       );
 
-      // Send Dedicated Email to Client & Authorized Family
+      // Send Dedicated Email to Client & Authorized Representatives
       const clientEmail = updated.client.user?.email || updated.client.primaryContactEmail;
       if (clientEmail) {
         const clientDisplayName = `${updated.client.user?.firstName || updated.client.primaryContactName || "Valued"} ${updated.client.user?.lastName || "Member"}`.trim();
 
-        const familyMembers = await (prisma.familyMember.findMany as any)({
-          where: { clientId: updated.client.id },
+        const representatives = await (prisma.familyMember.findMany as any)({
+          where: {
+            clientId: updated.client.id,
+            OR: [{ isEmergencyContact: true }, { portalAccess: true }],
+          },
           include: { user: true },
         });
         const recipientEmails = Array.from(
           new Set(
             [
               clientEmail,
-              ...familyMembers
+              ...representatives
                 .map((f: any) => f.email || f.user?.email)
                 .filter(Boolean),
             ]

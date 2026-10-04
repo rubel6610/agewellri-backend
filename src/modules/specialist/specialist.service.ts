@@ -532,15 +532,18 @@ export async function assignSpecialistToAppointment(
       if (clientEmail) {
         const clientDisplayName = `${appointment.client.user?.firstName || appointment.client.primaryContactName || "Valued"} ${appointment.client.user?.lastName || "Member"}`.trim();
 
-        const familyMembers = await (prisma.familyMember.findMany as any)({
-          where: { clientId: appointment.client.id },
+        const representatives = await (prisma.familyMember.findMany as any)({
+          where: {
+            clientId: appointment.client.id,
+            OR: [{ isEmergencyContact: true }, { portalAccess: true }],
+          },
           include: { user: true },
         });
         const recipientEmails = Array.from(
           new Set(
             [
               clientEmail,
-              ...familyMembers
+              ...representatives
                 .map((f: any) => f.email || f.user?.email)
                 .filter(Boolean),
             ]

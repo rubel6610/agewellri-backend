@@ -1323,8 +1323,17 @@ export async function getAuthorityDocumentForDownload(
         orderBy: { createdAt: "desc" },
       });
       const onboardingData = fullClient.onboardingData as any;
+      const familyMemberDoc = await ((prisma as any).familyMember.findFirst as any)({
+        where: {
+          clientId: fullClient.id,
+          authorityDocumentUrl: { contains: sanitizedFilename },
+        },
+      });
       const clientDoc =
-        agreement?.documentUrl || onboardingData?.authorityDocumentUrl || null;
+        agreement?.documentUrl ||
+        onboardingData?.authorityDocumentUrl ||
+        familyMemberDoc?.authorityDocumentUrl ||
+        null;
       if (!clientDoc || !clientDoc.includes(sanitizedFilename)) {
         throw new Error("You do not have permission to download this document.");
       }

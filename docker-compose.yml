@@ -1,0 +1,46 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: agewell-mongodb
+    restart: unless-stopped
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--port", "27017"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --port 27017 --eval 'db.runCommand({ ping: 1 })' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # Automated single-node replica set initializer (Required for Prisma transactions)
+  mongo-init:
+    image: mongo:7.0
+    container_name: agewell-mongo-init
+    restart: "no"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    entrypoint: >
+      bash -c "
+        echo 'Waiting for MongoDB to accept connections...';
+        mongosh --host mongodb:27017 --eval '
+          try {
+            rs.status();
+            console.log(\"Replica set already initialized\");
+          } catch (e) {
+            console.log(\"Initializing single-node replica set rs0...\");
+            rs.initiate({
+              _id: \"rs0\",
+              members: [{ _id: 0, host: \"localhost:27017\" }]
+            });
+          }
+        ';
+        echo 'Replica set initialization complete!';
+      "
+
+volumes:
+  mongodb_data:
+    name: agewell_mongodb_data

@@ -3,18 +3,10 @@
   "version": "1.0.0",
   "description": "",
   "keywords": [],
-  "homepage": "https://github.com/rubel6610/agewellri-backend#readme",
-  "bugs": {
-    "url": "https://github.com/rubel6610/agewellri-backend/issues"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/rubel6610/agewellri-backend.git"
-  },
   "license": "ISC",
   "author": "",
   "type": "module",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc",
@@ -22,7 +14,10 @@
     "dev": "tsx watch src/server.ts",
     "postinstall": "prisma generate",
     "seed:admin": "tsx prisma/seed.ts",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
