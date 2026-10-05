@@ -9,4 +9,4 @@ nul
 .env
 public/fonts/**
 .vscode
-uploads/authority-documents/
+uploads/authority-documents/*

@@ -24,6 +24,7 @@ import {
 } from "../notification/notification.service";
 import { calculatePeriodEndDate } from "../../utils/billing-dates.util";
 import { sendSpecialistAssignedEmail } from "../../utils/email";
+import { isDateAnOffDay } from "../off-day/off-day.service";
 
 export function isValidObjectId(id?: string | null): boolean {
   if (!id || typeof id !== "string") return false;
@@ -442,6 +443,20 @@ async function validateAndExecuteContractualScheduling(
     const dayName = dayOfWeek === 0 ? "Sunday" : "Wednesday";
     throw new Error(
       `Visits cannot be scheduled on ${dayName}s as they are non-service days. Working days are Monday, Tuesday, Thursday, Friday, and Saturday.`,
+    );
+  }
+
+  // Validate Off-Days / Office Closures / Holidays
+  const offDayConflict = await isDateAnOffDay(requestedStart);
+  if (offDayConflict) {
+    const formattedDate = requestedStart.toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+    throw new Error(
+      `Visits cannot be scheduled on ${formattedDate} (${offDayConflict.title}) as the office/service is closed.`,
     );
   }
 
@@ -1109,6 +1124,20 @@ export async function rescheduleAppointment(
     const dayName = dayOfWeek === 0 ? "Sunday" : "Wednesday";
     throw new Error(
       `Visits cannot be rescheduled to ${dayName}s as they are non-service days. Working days are Monday, Tuesday, Thursday, Friday, and Saturday.`,
+    );
+  }
+
+  // Validate Off-Days / Office Closures / Holidays
+  const offDayRescheduleConflict = await isDateAnOffDay(startAt);
+  if (offDayRescheduleConflict) {
+    const formattedDate = startAt.toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+    throw new Error(
+      `Visits cannot be rescheduled to ${formattedDate} (${offDayRescheduleConflict.title}) as the office/service is closed.`,
     );
   }
 
