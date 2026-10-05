@@ -1,13 +1,12 @@
 import crypto from "crypto";
 import path from "path";
 import fs from "fs";
-import { UserRole, UserStatus, InvitationStatus, NotificationType } from "@prisma/client";
+import { UserRole, UserStatus, InvitationStatus, } from "@prisma/client";
 import prisma from "../../lib/prisma";
 const db = prisma as any;
 import { hashPassword } from "../../utils/password";
 import { generateAuthTokens } from "../../utils/jwt";
 import {
-  sendFamilyMemberInvitationEmail,
   sendFamilyMemberCredentialsEmail,
   sendReportToFamilyRecipientEmail,
 } from "../../utils/email";
@@ -17,7 +16,6 @@ import {
   UpdateFamilyMemberInput,
   AcceptFamilyInviteInput,
   SendReportToFamilyInput,
-  SendCredentialsInput,
 } from "./family.validation";
 import { createNotification } from "../notification/notification.service";
 
