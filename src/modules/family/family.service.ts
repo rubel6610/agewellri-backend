@@ -112,15 +112,23 @@ export async function getFamilyMembers(userId: string) {
     orderBy: { createdAt: "asc" },
   });
 
+  const clientUserFullName = `${client.user?.firstName || ""} ${client.user?.lastName || ""}`.trim().toLowerCase();
+  const clientUserEmail = (client.user?.email || "").trim().toLowerCase();
+
   const existingEmails = new Set(familyMembers.map((m: any) => m.email.toLowerCase()));
   const existingNames = new Set(familyMembers.map((m: any) => m.name.toLowerCase()));
 
-  // 1. Auto-sync Emergency Contact / Family Coordinator from Client Profile if missing
+  // 1. Auto-sync Emergency Contact / Family Coordinator from Client Profile ONLY if different from the primary client
   if (client.emergencyContactName && client.emergencyContactName.trim()) {
     const emName = client.emergencyContactName.trim();
-    const emEmail = (client.emergencyContactEmail?.trim() || "").toLowerCase() || `${emName.toLowerCase().replace(/\s+/g, ".")}@family.contact`;
+    const emEmail = (client.emergencyContactEmail?.trim() || "").toLowerCase() || `${emName.toLowerCase().replace(/[^a-z0-9]/g, ".")}@family.contact`;
     
-    if (!existingNames.has(emName.toLowerCase()) && !existingEmails.has(emEmail)) {
+    // Do not sync if the emergency contact is the primary client himself
+    const isOwnerContact =
+      emName.toLowerCase() === clientUserFullName ||
+      emEmail === clientUserEmail;
+
+    if (!isOwnerContact && !existingNames.has(emName.toLowerCase()) && !existingEmails.has(emEmail)) {
       try {
         const createdEm = await db.familyMember.create({
           data: {
@@ -145,26 +153,45 @@ export async function getFamilyMembers(userId: string) {
     }
   }
 
-  // 2. Auto-sync Representative from Signing Data (Track B) if present
-  const signingData = (client.onboardingData as any)?.signingData;
-  if (signingData?.repFullName && signingData.repFullName.trim()) {
-    const repName = signingData.repFullName.trim();
-    const residentName = `${client.user?.firstName || ""} ${client.user?.lastName || ""}`.trim().toLowerCase();
-    
-    if (repName.toLowerCase() !== residentName && !existingNames.has(repName.toLowerCase())) {
-      const repEmail = `${repName.toLowerCase().replace(/\s+/g, ".")}@representative.contact`;
-      if (!existingEmails.has(repEmail)) {
+  // 2. Auto-sync Representative from Signing Data (Track B) if present and distinct from client
+  const onboarding = (client.onboardingData as any) || {};
+  const signingData = onboarding.signingData || {};
+  const repName = (signingData.repFullName || onboarding.repFullName || "").trim();
+
+  if (repName) {
+    if (repName.toLowerCase() !== clientUserFullName && !existingNames.has(repName.toLowerCase())) {
+      const repEmail = (
+        signingData.repEmail ||
+        onboarding.repEmail ||
+        (client.emergencyContactName?.toLowerCase() === repName.toLowerCase() ? client.emergencyContactEmail : null) ||
+        `${repName.toLowerCase().replace(/[^a-z0-9]/g, ".")}@representative.contact`
+      ).trim().toLowerCase();
+
+      const repPhone =
+        signingData.repPhone ||
+        onboarding.repPhone ||
+        (client.emergencyContactName?.toLowerCase() === repName.toLowerCase() ? client.emergencyContactPhone : null) ||
+        client.user?.phone ||
+        null;
+
+      if (repEmail !== clientUserEmail && !existingEmails.has(repEmail)) {
         try {
           const createdRep = await db.familyMember.create({
             data: {
               clientId,
               name: repName,
-              relationship: signingData.repRelationship?.trim() || signingData.repCapacity || "Legal Representative",
+              relationship:
+                signingData.repRelationship?.trim() ||
+                onboarding.repRelationship?.trim() ||
+                signingData.repCapacity ||
+                "Legal Representative",
               email: repEmail,
-              phone: client.user?.phone || null,
-              legalCapacity: signingData.repCapacity || null,
-              authorityDocumentUrl: signingData.authorityDocumentUrl || null,
-              authorityDocumentName: signingData.authorityDocumentName || null,
+              phone: repPhone,
+              legalCapacity: signingData.repCapacity || onboarding.representativeCapacity || null,
+              authorityDocumentUrl:
+                signingData.authorityDocumentUrl || onboarding.authorityDocumentUrl || null,
+              authorityDocumentName:
+                signingData.authorityDocumentName || onboarding.authorityDocumentName || null,
               reportAccess: true,
               portalAccess: false,
               billingAccess: true,
@@ -190,7 +217,12 @@ export async function getFamilyMembers(userId: string) {
         const cleanEmail = rec.email.trim().toLowerCase();
         const cleanName = rec.name.trim();
 
-        if (!existingEmails.has(cleanEmail) && !existingNames.has(cleanName.toLowerCase())) {
+        if (
+          cleanEmail !== clientUserEmail &&
+          cleanName.toLowerCase() !== clientUserFullName &&
+          !existingEmails.has(cleanEmail) &&
+          !existingNames.has(cleanName.toLowerCase())
+        ) {
           try {
             const createdRec = await db.familyMember.create({
               data: {
@@ -217,6 +249,21 @@ export async function getFamilyMembers(userId: string) {
     }
   }
 
+  // Filter out any primary client / owner record so they NEVER appear in their own representatives / family list
+  const sanitizedFamilyMembers = familyMembers.filter((m: any) => {
+    if (m.userId && client.userId && m.userId === client.userId) return false;
+    if (m.email && m.email.toLowerCase() === clientUserEmail) return false;
+    if (
+      m.name &&
+      m.name.trim().toLowerCase() === clientUserFullName &&
+      !m.authorityDocumentUrl &&
+      !m.legalCapacity
+    ) {
+      return false;
+    }
+    return true;
+  });
+
   return {
     client: {
       id: context.client.id,
@@ -229,7 +276,7 @@ export async function getFamilyMembers(userId: string) {
     },
     isPrimary: context.isPrimary,
     permissions: context.permissions,
-    familyMembers,
+    familyMembers: sanitizedFamilyMembers,
   };
 }
 

@@ -16,7 +16,10 @@ export const submitAgreementSchema = z.object({
   repCapacity: z.enum(["ATTORNEY_IN_FACT", "GUARDIAN", "CONSERVATOR"]).optional().nullable(),
   repFullName: z.string().optional().nullable(),
   repRelationship: z.string().optional().nullable(),
+  repEmail: z.string().email("Valid representative email required").optional().nullable(),
+  repPhone: z.string().optional().nullable(),
   authorityDocumentUrl: z.string().optional().nullable(),
+  authorityDocumentName: z.string().optional().nullable(),
   signerRole: z.enum([
     "RESIDENT",
     "FAMILY_MEMBER",
