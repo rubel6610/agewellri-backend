@@ -438,77 +438,75 @@ export async function submitServiceAgreement(
     }
   }
 
-  // 4c. Persist Representative (Track B Signer) as FamilyMember record ONLY if distinct from the primary resident
+  // 4c. Persist Representative (Track B Signer) as FamilyMember record
   const clientFullNameLower = (input.clientFullName || `${user.firstName || ""} ${user.lastName || ""}`).trim().toLowerCase();
   const clientEmailLower = (user.email || input.email || "").trim().toLowerCase();
 
-  if (isRepresentative && signerName && signerName.trim().toLowerCase() !== clientFullNameLower) {
+  if (isRepresentative && signerName && (signerName.trim().toLowerCase() !== clientFullNameLower || representativeCapacity)) {
     try {
       const repEmail = (
         input.repEmail ||
         input.signerEmail ||
+        clientEmailLower ||
         `${signerName.toLowerCase().replace(/[^a-z0-9]/g, ".")}@representative.contact`
       ).trim().toLowerCase();
 
-      if (repEmail !== clientEmailLower) {
-        const repPhone =
-          input.repPhone ||
-          input.signerPhone ||
-          (user.phone && user.phone !== input.phone ? user.phone : null);
+      const repPhone =
+        input.repPhone ||
+        input.signerPhone ||
+        (user.phone && user.phone !== input.phone ? user.phone : null);
 
-        const repRelationship =
-          relationshipToClient ||
-          representativeCapacity ||
-          "Legal Representative / Power of Attorney";
+      const repRelationship =
+        relationshipToClient ||
+        representativeCapacity ||
+        "Legal Representative / Power of Attorney";
 
-        const existingRep = await (prisma as any).familyMember.findFirst({
-          where: {
-            clientId,
-            OR: [
-              { email: repEmail },
-              { name: { equals: signerName, mode: "insensitive" } },
-              { isEmergencyContact: true },
-            ],
+      const existingRep = await (prisma as any).familyMember.findFirst({
+        where: {
+          clientId,
+          OR: [
+            { name: { equals: signerName, mode: "insensitive" } },
+            ...(repEmail ? [{ email: repEmail }] : []),
+          ],
+        },
+      });
+
+      if (existingRep) {
+        await (prisma as any).familyMember.update({
+          where: { id: existingRep.id },
+          data: {
+            name: signerName,
+            relationship: repRelationship,
+            email: repEmail,
+            phone: repPhone || existingRep.phone,
+            legalCapacity: representativeCapacity || existingRep.legalCapacity || "ATTORNEY_IN_FACT",
+            authorityDocumentUrl:
+              input.authorityDocumentUrl || existingRep.authorityDocumentUrl || null,
+            authorityDocumentName:
+              (input as any).authorityDocumentName || existingRep.authorityDocumentName || null,
+            reportAccess: true,
+            billingAccess: true,
+            isEmergencyContact: true,
           },
         });
-
-        if (existingRep) {
-          await (prisma as any).familyMember.update({
-            where: { id: existingRep.id },
-            data: {
-              name: signerName,
-              relationship: repRelationship,
-              email: repEmail,
-              phone: repPhone || existingRep.phone,
-              legalCapacity: representativeCapacity,
-              authorityDocumentUrl:
-                input.authorityDocumentUrl || existingRep.authorityDocumentUrl || null,
-              authorityDocumentName:
-                (input as any).authorityDocumentName || existingRep.authorityDocumentName || null,
-              reportAccess: true,
-              billingAccess: true,
-              isEmergencyContact: true,
-            },
-          });
-        } else {
-          await (prisma as any).familyMember.create({
-            data: {
-              clientId,
-              name: signerName,
-              relationship: repRelationship,
-              email: repEmail,
-              phone: repPhone,
-              legalCapacity: representativeCapacity,
-              authorityDocumentUrl: input.authorityDocumentUrl || null,
-              authorityDocumentName: (input as any).authorityDocumentName || null,
-              reportAccess: true,
-              portalAccess: false,
-              billingAccess: true,
-              isEmergencyContact: true,
-              invitationStatus: "PENDING",
-            },
-          });
-        }
+      } else {
+        await (prisma as any).familyMember.create({
+          data: {
+            clientId,
+            name: signerName,
+            relationship: repRelationship,
+            email: repEmail,
+            phone: repPhone,
+            legalCapacity: representativeCapacity || "ATTORNEY_IN_FACT",
+            authorityDocumentUrl: input.authorityDocumentUrl || null,
+            authorityDocumentName: (input as any).authorityDocumentName || null,
+            reportAccess: true,
+            portalAccess: false,
+            billingAccess: true,
+            isEmergencyContact: true,
+            invitationStatus: "PENDING",
+          },
+        });
       }
     } catch (repErr) {
       console.warn("⚠️ Error saving representative during agreement execution:", repErr);

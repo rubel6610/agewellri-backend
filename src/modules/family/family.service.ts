@@ -151,45 +151,132 @@ export async function getFamilyMembers(userId: string) {
     }
   }
 
-  // 2. Auto-sync Representative from Signing Data (Track B) if present and distinct from client
+  // 2. Auto-sync Representative from Signing Data (Track B), Service Agreements, or Client Profile
   const onboarding = (client.onboardingData as any) || {};
   const signingData = onboarding.signingData || {};
-  const repName = (signingData.repFullName || onboarding.repFullName || "").trim();
+
+  // Fetch executed service agreement if signed by an authorized representative
+  let executedAgreement: any = null;
+  try {
+    executedAgreement = await db.serviceAgreement.findFirst({
+      where: {
+        clientId,
+        signerRole: { not: "RESIDENT" },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  } catch (err) {
+    console.warn("⚠️ Error fetching service agreement for representative sync:", err);
+  }
+
+  const repName = (
+    signingData.repFullName ||
+    onboarding.repFullName ||
+    executedAgreement?.authorizedRepName ||
+    executedAgreement?.signerName ||
+    (client.signerRole !== "RESIDENT" && client.primaryContactName?.trim().toLowerCase() !== clientUserFullName ? client.primaryContactName : "") ||
+    ""
+  ).trim();
 
   if (repName) {
-    if (repName.toLowerCase() !== clientUserFullName && !existingNames.has(repName.toLowerCase())) {
+    const isDistinctName = repName.toLowerCase() !== clientUserFullName;
+    const hasLegalRepCredentials = Boolean(
+      signingData.repCapacity ||
+      onboarding.representativeCapacity ||
+      executedAgreement?.legalAuthority ||
+      signingData.authorityDocumentUrl ||
+      onboarding.authorityDocumentUrl ||
+      executedAgreement?.documentUrl ||
+      client.signerRole !== "RESIDENT"
+    );
+
+    if (isDistinctName || hasLegalRepCredentials) {
       const repEmail = (
         signingData.repEmail ||
         onboarding.repEmail ||
+        executedAgreement?.signerEmail ||
         (client.emergencyContactName?.toLowerCase() === repName.toLowerCase() ? client.emergencyContactEmail : null) ||
+        clientUserEmail ||
         `${repName.toLowerCase().replace(/[^a-z0-9]/g, ".")}@representative.contact`
       ).trim().toLowerCase();
 
       const repPhone =
         signingData.repPhone ||
         onboarding.repPhone ||
+        executedAgreement?.signerPhone ||
         (client.emergencyContactName?.toLowerCase() === repName.toLowerCase() ? client.emergencyContactPhone : null) ||
         client.user?.phone ||
         null;
 
-      if (repEmail !== clientUserEmail && !existingEmails.has(repEmail)) {
+      const repRelationship =
+        signingData.repRelationship?.trim() ||
+        onboarding.repRelationship?.trim() ||
+        executedAgreement?.relationshipToClient?.trim() ||
+        signingData.repCapacity ||
+        onboarding.representativeCapacity ||
+        executedAgreement?.legalAuthority ||
+        "Legal Representative / Power of Attorney";
+
+      const repCapacity =
+        signingData.repCapacity ||
+        onboarding.representativeCapacity ||
+        executedAgreement?.legalAuthority ||
+        client.legalAuthority ||
+        "ATTORNEY_IN_FACT";
+
+      const authorityDocUrl =
+        signingData.authorityDocumentUrl ||
+        onboarding.authorityDocumentUrl ||
+        executedAgreement?.documentUrl ||
+        null;
+
+      const authorityDocName =
+        signingData.authorityDocumentName ||
+        onboarding.authorityDocumentName ||
+        null;
+
+      const existingRepIdx = familyMembers.findIndex(
+        (m: any) =>
+          m.name?.trim().toLowerCase() === repName.toLowerCase() ||
+          (m.legalCapacity && m.authorityDocumentUrl && authorityDocUrl && m.authorityDocumentUrl === authorityDocUrl)
+      );
+
+      if (existingRepIdx !== -1) {
+        const existingRep = familyMembers[existingRepIdx];
+        const needsUpdate =
+          (!existingRep.legalCapacity && repCapacity) ||
+          (!existingRep.authorityDocumentUrl && authorityDocUrl);
+
+        if (needsUpdate) {
+          try {
+            const updated = await db.familyMember.update({
+              where: { id: existingRep.id },
+              data: {
+                legalCapacity: existingRep.legalCapacity || repCapacity,
+                authorityDocumentUrl: existingRep.authorityDocumentUrl || authorityDocUrl,
+                authorityDocumentName: existingRep.authorityDocumentName || authorityDocName,
+                billingAccess: true,
+                reportAccess: true,
+                isEmergencyContact: true,
+              },
+            });
+            familyMembers[existingRepIdx] = updated;
+          } catch (updateErr) {
+            console.warn("⚠️ Representative update sync notice:", updateErr);
+          }
+        }
+      } else {
         try {
           const createdRep = await db.familyMember.create({
             data: {
               clientId,
               name: repName,
-              relationship:
-                signingData.repRelationship?.trim() ||
-                onboarding.repRelationship?.trim() ||
-                signingData.repCapacity ||
-                "Legal Representative",
+              relationship: repRelationship,
               email: repEmail,
               phone: repPhone,
-              legalCapacity: signingData.repCapacity || onboarding.representativeCapacity || null,
-              authorityDocumentUrl:
-                signingData.authorityDocumentUrl || onboarding.authorityDocumentUrl || null,
-              authorityDocumentName:
-                signingData.authorityDocumentName || onboarding.authorityDocumentName || null,
+              legalCapacity: repCapacity,
+              authorityDocumentUrl: authorityDocUrl,
+              authorityDocumentName: authorityDocName,
               reportAccess: true,
               portalAccess: false,
               billingAccess: true,
@@ -249,8 +336,9 @@ export async function getFamilyMembers(userId: string) {
 
   // Filter out any primary client / owner record so they NEVER appear in their own representatives / family list
   const sanitizedFamilyMembers = familyMembers.filter((m: any) => {
-    if (m.userId && client.userId && m.userId === client.userId) return false;
-    if (m.email && m.email.toLowerCase() === clientUserEmail) return false;
+    if (m.userId && client.userId && m.userId === client.userId && !m.legalCapacity && !m.authorityDocumentUrl) {
+      return false;
+    }
     if (
       m.name &&
       m.name.trim().toLowerCase() === clientUserFullName &&
