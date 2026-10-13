@@ -24,6 +24,50 @@ model CalendarEvent {
   updatedAt       DateTime           @updatedAt
 }
 
+type TimeWindow {
+  start String
+  end   String
+}
+
+type DaySchedule {
+  dayOfWeek   Int
+  dayName     String
+  isOpen      Boolean      @default(true)
+  timeWindows TimeWindow[]
+}
+
+model WeeklySchedule {
+  id           String        @id @default(auto()) @map("_id") @db.ObjectId
+  name         String        @default("Default Weekly Schedule")
+  isDefault    Boolean       @default(true)
+  days         DaySchedule[]
+  slotDuration Int           @default(60)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model ScheduleOverride {
+  id              String         @id @default(auto()) @map("_id") @db.ObjectId
+  title           String
+  description     String?
+  overrideType    OverrideType   @default(DATE)
+  status          OverrideStatus @default(CLOSED)
+  startDate       DateTime
+  endDate         DateTime
+  isRecurring     Boolean        @default(false)
+  isActive        Boolean        @default(true)
+  timeWindows     TimeWindow[]
+  offDayId        String?        @db.ObjectId
+  createdByUserId String?        @db.ObjectId
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([startDate])
+  @@index([endDate])
+  @@index([isActive])
+  @@index([overrideType])
+}
+
 model OffDay {
   id              String    @id @default(auto()) @map("_id") @db.ObjectId
   title           String

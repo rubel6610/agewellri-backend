@@ -152,52 +152,71 @@ export async function isDateAnOffDay(
 
   const targetMidnight = Date.UTC(targetYear, targetMonth, targetDay, 12, 0, 0);
 
-  const activeOffDays = await db.offDay.findMany({
-    where: { isActive: true },
-  });
+  const [activeOffDays, allActiveOverrides] = await Promise.all([
+    db.offDay.findMany({
+      where: { isActive: true },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    }),
+    db.scheduleOverride.findMany({
+      where: { isActive: true },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    }),
+  ]);
 
-  for (const off of activeOffDays) {
+  const linkedOffDayIds = new Set(allActiveOverrides.map((o: any) => o.offDayId).filter(Boolean));
+  const unlinkedLegacy = activeOffDays.filter((o: any) => !linkedOffDayIds.has(String(o.id)));
+
+  const unified = [...allActiveOverrides, ...unlinkedLegacy];
+
+  for (const item of unified) {
     let sY: number, sM: number, sD: number;
     let eY: number, eM: number, eD: number;
 
-    if (off.startDate instanceof Date) {
-      sY = off.startDate.getUTCFullYear();
-      sM = off.startDate.getUTCMonth();
-      sD = off.startDate.getUTCDate();
+    if (item.startDate instanceof Date) {
+      sY = item.startDate.getUTCFullYear();
+      sM = item.startDate.getUTCMonth();
+      sD = item.startDate.getUTCDate();
     } else {
-      const parts = String(off.startDate).split("T")[0].split("-");
+      const parts = String(item.startDate).split("T")[0].split("-");
       sY = parseInt(parts[0], 10);
       sM = parseInt(parts[1], 10) - 1;
       sD = parseInt(parts[2], 10);
     }
 
-    if (off.endDate instanceof Date) {
-      eY = off.endDate.getUTCFullYear();
-      eM = off.endDate.getUTCMonth();
-      eD = off.endDate.getUTCDate();
+    if (item.endDate instanceof Date) {
+      eY = item.endDate.getUTCFullYear();
+      eM = item.endDate.getUTCMonth();
+      eD = item.endDate.getUTCDate();
     } else {
-      const parts = String(off.endDate || off.startDate).split("T")[0].split("-");
+      const parts = String(item.endDate || item.startDate).split("T")[0].split("-");
       eY = parseInt(parts[0], 10);
       eM = parseInt(parts[1], 10) - 1;
       eD = parseInt(parts[2], 10);
     }
 
-    if (off.isRecurring) {
+    let isMatch = false;
+    if (item.isRecurring) {
       const targetMMDD = (targetMonth + 1) * 100 + targetDay;
       const startMMDD = (sM + 1) * 100 + sD;
       const endMMDD = (eM + 1) * 100 + eD;
 
       if (startMMDD <= endMMDD) {
-        if (targetMMDD >= startMMDD && targetMMDD <= endMMDD) return off;
+        isMatch = targetMMDD >= startMMDD && targetMMDD <= endMMDD;
       } else {
-        if (targetMMDD >= startMMDD || targetMMDD <= endMMDD) return off;
+        isMatch = targetMMDD >= startMMDD || targetMMDD <= endMMDD;
       }
     } else {
       const sMidnight = Date.UTC(sY, sM, sD, 0, 0, 0, 0);
       const eMidnight = Date.UTC(eY, eM, eD, 23, 59, 59, 999);
-      if (targetMidnight >= sMidnight && targetMidnight <= eMidnight) {
-        return off;
+      isMatch = targetMidnight >= sMidnight && targetMidnight <= eMidnight;
+    }
+
+    if (isMatch) {
+      // The newest matching override for this date decides!
+      if (item.status === "OPEN" || item.status === "CUSTOM_HOURS") {
+        return null;
       }
+      return item;
     }
   }
 
@@ -365,14 +384,71 @@ export function formatOffDay(off: any) {
  * CLIENT & CALENDARS: Get active off-days for date picker and calendar display
  */
 export async function getActiveOffDays(filter: { year?: number; month?: number } = {}) {
-  const where: any = { isActive: true };
+  const [activeOverrides, activeLegacyOffDays] = await Promise.all([
+    db.scheduleOverride.findMany({
+      where: { isActive: true },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    }),
+    db.offDay.findMany({
+      where: { isActive: true },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    }),
+  ]);
 
-  const offDays = await db.offDay.findMany({
-    where,
-    orderBy: { startDate: "asc" },
+  const linkedOffDayIds = new Set(
+    activeOverrides.map((o: any) => o.offDayId).filter(Boolean)
+  );
+  const unlinkedLegacy = activeLegacyOffDays.filter(
+    (o: any) => !linkedOffDayIds.has(String(o.id))
+  );
+
+  // Combine unified overrides ordered newest-first
+  const unified = [...activeOverrides, ...unlinkedLegacy];
+
+  // Map to find the newest override status for each single date
+  const newestSingleDateMap = new Map<string, any>();
+  const multiDayOrRecurringItems: any[] = [];
+
+  for (const item of unified) {
+    let sStr = "";
+    let eStr = "";
+    if (item.startDate instanceof Date) {
+      sStr = `${item.startDate.getUTCFullYear()}-${String(item.startDate.getUTCMonth() + 1).padStart(2, "0")}-${String(item.startDate.getUTCDate()).padStart(2, "0")}`;
+    } else {
+      sStr = String(item.startDate).split("T")[0];
+    }
+    if (item.endDate instanceof Date) {
+      eStr = `${item.endDate.getUTCFullYear()}-${String(item.endDate.getUTCMonth() + 1).padStart(2, "0")}-${String(item.endDate.getUTCDate()).padStart(2, "0")}`;
+    } else {
+      eStr = String(item.endDate || item.startDate).split("T")[0];
+    }
+
+    if (sStr === eStr && !item.isRecurring) {
+      if (!newestSingleDateMap.has(sStr)) {
+        newestSingleDateMap.set(sStr, item);
+      }
+    } else {
+      multiDayOrRecurringItems.push(item);
+    }
+  }
+
+  const resultList: any[] = [];
+
+  // Add single-day overrides where newest status is CLOSED (or legacy off-day without status)
+  newestSingleDateMap.forEach((item) => {
+    if (item.status === "CLOSED" || (!item.status && item.title)) {
+      resultList.push(item);
+    }
   });
 
-  return offDays.map(formatOffDay);
+  // Add multi-day or recurring items where status is CLOSED (or legacy off-day without status)
+  for (const item of multiDayOrRecurringItems) {
+    if (item.status === "CLOSED" || (!item.status && item.title)) {
+      resultList.push(item);
+    }
+  }
+
+  return resultList.map(formatOffDay);
 }
 
 /**

@@ -25,6 +25,7 @@ import {
 import { calculatePeriodEndDate } from "../../utils/billing-dates.util";
 import { sendSpecialistAssignedEmail } from "../../utils/email";
 import { isDateAnOffDay } from "../off-day/off-day.service";
+import { validateAppointmentTimeWithinSchedule } from "../schedule/schedule.service";
 
 export function isValidObjectId(id?: string | null): boolean {
   if (!id || typeof id !== "string") return false;
@@ -437,39 +438,12 @@ async function validateAndExecuteContractualScheduling(
       ? { startAt: new Date(params.startAt), endAt: new Date(params.endAt) }
       : parseDateAndTimeSlot(params.date, params.timeSlot);
 
-  // Validate working days: Sunday (0) and Wednesday (3) are non-service days (weekends)
-  const dayOfWeek = requestedStart.getDay();
-  if (dayOfWeek === 0 || dayOfWeek === 3) {
-    const dayName = dayOfWeek === 0 ? "Sunday" : "Wednesday";
-    throw new Error(
-      `Visits cannot be scheduled on ${dayName}s as they are non-service days. Working days are Monday, Tuesday, Thursday, Friday, and Saturday.`,
-    );
-  }
+  // Validate strictly against the authoritative Command Schedule (Weekly Schedule, Date Overrides, Week Overrides, Closures)
+  const targetDateStr = params.date
+    ? (params.date.includes("T") ? params.date.split("T")[0] : params.date)
+    : `${requestedStart.getFullYear()}-${String(requestedStart.getMonth() + 1).padStart(2, "0")}-${String(requestedStart.getDate()).padStart(2, "0")}`;
 
-  // Validate Off-Days / Office Closures / Holidays
-  const offDayConflict = await isDateAnOffDay(requestedStart);
-  if (offDayConflict) {
-    const formattedDate = requestedStart.toLocaleDateString("en-US", {
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    });
-    throw new Error(
-      `Visits cannot be scheduled on ${formattedDate} (${offDayConflict.title}) as the office/service is closed.`,
-    );
-  }
-
-  // Validate working hours: 8:00 AM to 6:00 PM (08:00 - 18:00)
-  const startHour = requestedStart.getHours();
-  const endHour = requestedEnd.getHours();
-  const endMin = requestedEnd.getMinutes();
-
-  if (startHour < 8 || endHour > 18 || (endHour === 18 && endMin > 0)) {
-    throw new Error(
-      "Visits must be scheduled within working hours (8:00 AM – 6:00 PM). Please select a time between 8:00 AM and 6:00 PM.",
-    );
-  }
+  await validateAppointmentTimeWithinSchedule(targetDateStr, requestedStart, requestedEnd);
 
   if (activePeriod && activePeriod.startDate) {
     const periodStart = new Date(activePeriod.startDate);
@@ -1118,39 +1092,12 @@ export async function rescheduleAppointment(
       ? { startAt: new Date(input.startAt), endAt: new Date(input.endAt) }
       : parseDateAndTimeSlot(input.date, input.timeSlot);
 
-  // Validate working days: Sunday (0) and Wednesday (3) are non-service days (weekends)
-  const dayOfWeek = startAt.getDay();
-  if (dayOfWeek === 0 || dayOfWeek === 3) {
-    const dayName = dayOfWeek === 0 ? "Sunday" : "Wednesday";
-    throw new Error(
-      `Visits cannot be rescheduled to ${dayName}s as they are non-service days. Working days are Monday, Tuesday, Thursday, Friday, and Saturday.`,
-    );
-  }
+  // Validate strictly against the authoritative Command Schedule (Weekly Schedule, Date Overrides, Week Overrides, Closures)
+  const targetRescheduleDateStr = input.date
+    ? (input.date.includes("T") ? input.date.split("T")[0] : input.date)
+    : `${startAt.getFullYear()}-${String(startAt.getMonth() + 1).padStart(2, "0")}-${String(startAt.getDate()).padStart(2, "0")}`;
 
-  // Validate Off-Days / Office Closures / Holidays
-  const offDayRescheduleConflict = await isDateAnOffDay(startAt);
-  if (offDayRescheduleConflict) {
-    const formattedDate = startAt.toLocaleDateString("en-US", {
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    });
-    throw new Error(
-      `Visits cannot be rescheduled to ${formattedDate} (${offDayRescheduleConflict.title}) as the office/service is closed.`,
-    );
-  }
-
-  // Validate working hours: 8:00 AM to 6:00 PM (08:00 - 18:00)
-  const startHour = startAt.getHours();
-  const endHour = endAt.getHours();
-  const endMin = endAt.getMinutes();
-
-  if (startHour < 8 || endHour > 18 || (endHour === 18 && endMin > 0)) {
-    throw new Error(
-      "Visits must be scheduled within working hours (8:00 AM – 6:00 PM). Please select a time between 8:00 AM and 6:00 PM.",
-    );
-  }
+  await validateAppointmentTimeWithinSchedule(targetRescheduleDateStr, startAt, endAt);
 
   const technicianId = input.technicianId || appt.technicianId;
 

@@ -188,3 +188,14 @@ enum RenewalStatus {
   FAILED
   CANCELLED
 }
+
+enum OverrideType {
+  DATE
+  WEEK
+}
+
+enum OverrideStatus {
+  CLOSED
+  CUSTOM_HOURS
+  OPEN
+}
