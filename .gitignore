@@ -8,3 +8,4 @@ nul
 .env*
 .env
 public/fonts/**
+uploads/authority-documents/*

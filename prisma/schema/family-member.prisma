@@ -8,6 +8,9 @@ model FamilyMember {
   relationship        String
   email               String
   phone               String?
+  legalCapacity       String?
+  authorityDocumentUrl String?
+  authorityDocumentName String?
   reportAccess        Boolean          @default(true)
   portalAccess        Boolean          @default(false)
   billingAccess       Boolean          @default(false)

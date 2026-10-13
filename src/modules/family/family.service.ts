@@ -1,20 +1,21 @@
 import crypto from "crypto";
-import { UserRole, UserStatus, InvitationStatus, NotificationType } from "@prisma/client";
+import path from "path";
+import fs from "fs";
+import { UserRole, UserStatus, InvitationStatus, } from "@prisma/client";
 import prisma from "../../lib/prisma";
 const db = prisma as any;
 import { hashPassword } from "../../utils/password";
 import { generateAuthTokens } from "../../utils/jwt";
 import {
-  sendFamilyMemberInvitationEmail,
   sendFamilyMemberCredentialsEmail,
   sendReportToFamilyRecipientEmail,
 } from "../../utils/email";
+import { deleteUploadedFile } from "../../utils/fileStorage";
 import {
   CreateFamilyMemberInput,
   UpdateFamilyMemberInput,
   AcceptFamilyInviteInput,
   SendReportToFamilyInput,
-  SendCredentialsInput,
 } from "./family.validation";
 import { createNotification } from "../notification/notification.service";
 
@@ -93,7 +94,7 @@ export async function resolveClientForUser(userId: string): Promise<UserClientCo
 
 /**
  * Get all Family Members for the active client.
- * Auto-syncs from onboardingData.authorizedRecipients if DB records do not exist yet.
+ * Auto-syncs from onboardingData and client profile (emergency contacts, coordinators, and authorized recipients).
  */
 export async function getFamilyMembers(userId: string) {
   const context = await resolveClientForUser(userId);
@@ -102,59 +103,266 @@ export async function getFamilyMembers(userId: string) {
   }
 
   const clientId = context.client.id;
+  const client = context.client;
 
   let familyMembers = await db.familyMember.findMany({
     where: { clientId },
     orderBy: { createdAt: "asc" },
   });
 
-  // Auto-sync from signup Authorized Recipients if records are empty
-  if (familyMembers.length === 0) {
-    const onboardingRecipients = (context.client.onboardingData as any)?.authorizedRecipients;
-    if (Array.isArray(onboardingRecipients) && onboardingRecipients.length > 0) {
-      const recordsToCreate = onboardingRecipients
-        .filter((r: any) => r && r.name && r.email)
-        .map((r: any) => ({
-          clientId,
-          name: r.name.trim(),
-          relationship: r.relationship?.trim() || "Family Member",
-          email: r.email.trim().toLowerCase(),
-          phone: r.phone?.trim() || null,
-          reportAccess: true,
-          portalAccess: false,
-          billingAccess: false,
-          isEmergencyContact: false,
-          invitationStatus: InvitationStatus.PENDING,
-        }));
+  const clientUserFullName = `${client.user?.firstName || ""} ${client.user?.lastName || ""}`.trim().toLowerCase();
+  const clientUserEmail = (client.user?.email || "").trim().toLowerCase();
 
-      if (recordsToCreate.length > 0) {
-        for (const rec of recordsToCreate) {
-          try {
-            await db.familyMember.create({
-              data: rec,
-            });
-          } catch (createErr) {
-            console.warn("Auto-sync recipient warning:", createErr);
-          }
-        }
+  const existingEmails = new Set(familyMembers.map((m: any) => m.email.toLowerCase()));
+  const existingNames = new Set(familyMembers.map((m: any) => m.name.toLowerCase()));
 
-        familyMembers = await db.familyMember.findMany({
-          where: { clientId },
-          orderBy: { createdAt: "asc" },
+  // 1. Auto-sync Emergency Contact / Family Coordinator from Client Profile ONLY if different from the primary client
+  if (client.emergencyContactName && client.emergencyContactName.trim()) {
+    const emName = client.emergencyContactName.trim();
+    const emEmail = (client.emergencyContactEmail?.trim() || "").toLowerCase() || `${emName.toLowerCase().replace(/[^a-z0-9]/g, ".")}@family.contact`;
+    
+    // Do not sync if the emergency contact is the primary client himself
+    const isOwnerContact =
+      emName.toLowerCase() === clientUserFullName ||
+      emEmail === clientUserEmail;
+
+    if (!isOwnerContact && !existingNames.has(emName.toLowerCase()) && !existingEmails.has(emEmail)) {
+      try {
+        const createdEm = await db.familyMember.create({
+          data: {
+            clientId,
+            name: emName,
+            relationship: client.emergencyContactRelation?.trim() || "Emergency Contact & Coordinator",
+            email: emEmail,
+            phone: client.emergencyContactPhone?.trim() || null,
+            reportAccess: true,
+            portalAccess: false,
+            billingAccess: false,
+            isEmergencyContact: true,
+            invitationStatus: InvitationStatus.PENDING,
+          },
         });
+        familyMembers.push(createdEm);
+        existingEmails.add(emEmail);
+        existingNames.add(emName.toLowerCase());
+      } catch (err) {
+        console.warn("⚠️ Emergency contact auto-sync notice:", err);
       }
     }
   }
+
+  // 2. Auto-sync Representative from Signing Data (Track B), Service Agreements, or Client Profile
+  const onboarding = (client.onboardingData as any) || {};
+  const signingData = onboarding.signingData || {};
+
+  // Fetch executed service agreement if signed by an authorized representative
+  let executedAgreement: any = null;
+  try {
+    executedAgreement = await db.serviceAgreement.findFirst({
+      where: {
+        clientId,
+        signerRole: { not: "RESIDENT" },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  } catch (err) {
+    console.warn("⚠️ Error fetching service agreement for representative sync:", err);
+  }
+
+  const repName = (
+    signingData.repFullName ||
+    onboarding.repFullName ||
+    executedAgreement?.authorizedRepName ||
+    executedAgreement?.signerName ||
+    (client.signerRole !== "RESIDENT" && client.primaryContactName?.trim().toLowerCase() !== clientUserFullName ? client.primaryContactName : "") ||
+    ""
+  ).trim();
+
+  if (repName) {
+    const isDistinctName = repName.toLowerCase() !== clientUserFullName;
+    const hasLegalRepCredentials = Boolean(
+      signingData.repCapacity ||
+      onboarding.representativeCapacity ||
+      executedAgreement?.legalAuthority ||
+      signingData.authorityDocumentUrl ||
+      onboarding.authorityDocumentUrl ||
+      executedAgreement?.documentUrl ||
+      client.signerRole !== "RESIDENT"
+    );
+
+    if (isDistinctName || hasLegalRepCredentials) {
+      const repEmail = (
+        signingData.repEmail ||
+        onboarding.repEmail ||
+        executedAgreement?.signerEmail ||
+        (client.emergencyContactName?.toLowerCase() === repName.toLowerCase() ? client.emergencyContactEmail : null) ||
+        clientUserEmail ||
+        `${repName.toLowerCase().replace(/[^a-z0-9]/g, ".")}@representative.contact`
+      ).trim().toLowerCase();
+
+      const repPhone =
+        signingData.repPhone ||
+        onboarding.repPhone ||
+        executedAgreement?.signerPhone ||
+        (client.emergencyContactName?.toLowerCase() === repName.toLowerCase() ? client.emergencyContactPhone : null) ||
+        client.user?.phone ||
+        null;
+
+      const repRelationship =
+        signingData.repRelationship?.trim() ||
+        onboarding.repRelationship?.trim() ||
+        executedAgreement?.relationshipToClient?.trim() ||
+        signingData.repCapacity ||
+        onboarding.representativeCapacity ||
+        executedAgreement?.legalAuthority ||
+        "Legal Representative / Power of Attorney";
+
+      const repCapacity =
+        signingData.repCapacity ||
+        onboarding.representativeCapacity ||
+        executedAgreement?.legalAuthority ||
+        client.legalAuthority ||
+        "ATTORNEY_IN_FACT";
+
+      const authorityDocUrl =
+        signingData.authorityDocumentUrl ||
+        onboarding.authorityDocumentUrl ||
+        executedAgreement?.documentUrl ||
+        null;
+
+      const authorityDocName =
+        signingData.authorityDocumentName ||
+        onboarding.authorityDocumentName ||
+        null;
+
+      const existingRepIdx = familyMembers.findIndex(
+        (m: any) =>
+          m.name?.trim().toLowerCase() === repName.toLowerCase() ||
+          (m.legalCapacity && m.authorityDocumentUrl && authorityDocUrl && m.authorityDocumentUrl === authorityDocUrl)
+      );
+
+      if (existingRepIdx !== -1) {
+        const existingRep = familyMembers[existingRepIdx];
+        const needsUpdate =
+          (!existingRep.legalCapacity && repCapacity) ||
+          (!existingRep.authorityDocumentUrl && authorityDocUrl);
+
+        if (needsUpdate) {
+          try {
+            const updated = await db.familyMember.update({
+              where: { id: existingRep.id },
+              data: {
+                legalCapacity: existingRep.legalCapacity || repCapacity,
+                authorityDocumentUrl: existingRep.authorityDocumentUrl || authorityDocUrl,
+                authorityDocumentName: existingRep.authorityDocumentName || authorityDocName,
+                billingAccess: true,
+                reportAccess: true,
+                isEmergencyContact: true,
+              },
+            });
+            familyMembers[existingRepIdx] = updated;
+          } catch (updateErr) {
+            console.warn("⚠️ Representative update sync notice:", updateErr);
+          }
+        }
+      } else {
+        try {
+          const createdRep = await db.familyMember.create({
+            data: {
+              clientId,
+              name: repName,
+              relationship: repRelationship,
+              email: repEmail,
+              phone: repPhone,
+              legalCapacity: repCapacity,
+              authorityDocumentUrl: authorityDocUrl,
+              authorityDocumentName: authorityDocName,
+              reportAccess: true,
+              portalAccess: false,
+              billingAccess: true,
+              isEmergencyContact: true,
+              invitationStatus: InvitationStatus.PENDING,
+            },
+          });
+          familyMembers.push(createdRep);
+          existingEmails.add(repEmail);
+          existingNames.add(repName.toLowerCase());
+        } catch (err) {
+          console.warn("⚠️ Representative auto-sync notice:", err);
+        }
+      }
+    }
+  }
+
+  // 3. Auto-sync Authorized Report Recipients from Onboarding Data
+  const onboardingRecipients = (client.onboardingData as any)?.authorizedRecipients;
+  if (Array.isArray(onboardingRecipients) && onboardingRecipients.length > 0) {
+    for (const rec of onboardingRecipients) {
+      if (rec && rec.name && rec.email) {
+        const cleanEmail = rec.email.trim().toLowerCase();
+        const cleanName = rec.name.trim();
+
+        if (
+          cleanEmail !== clientUserEmail &&
+          cleanName.toLowerCase() !== clientUserFullName &&
+          !existingEmails.has(cleanEmail) &&
+          !existingNames.has(cleanName.toLowerCase())
+        ) {
+          try {
+            const createdRec = await db.familyMember.create({
+              data: {
+                clientId,
+                name: cleanName,
+                relationship: rec.relationship?.trim() || "Family Member",
+                email: cleanEmail,
+                phone: rec.phone?.trim() || null,
+                reportAccess: true,
+                portalAccess: false,
+                billingAccess: false,
+                isEmergencyContact: false,
+                invitationStatus: InvitationStatus.PENDING,
+              },
+            });
+            familyMembers.push(createdRec);
+            existingEmails.add(cleanEmail);
+            existingNames.add(cleanName.toLowerCase());
+          } catch (createErr) {
+            console.warn("⚠️ Authorized recipient auto-sync notice:", createErr);
+          }
+        }
+      }
+    }
+  }
+
+  // Filter out any primary client / owner record so they NEVER appear in their own representatives / family list
+  const sanitizedFamilyMembers = familyMembers.filter((m: any) => {
+    if (m.userId && client.userId && m.userId === client.userId && !m.legalCapacity && !m.authorityDocumentUrl) {
+      return false;
+    }
+    if (
+      m.name &&
+      m.name.trim().toLowerCase() === clientUserFullName &&
+      !m.authorityDocumentUrl &&
+      !m.legalCapacity
+    ) {
+      return false;
+    }
+    return true;
+  });
 
   return {
     client: {
       id: context.client.id,
       clientNumber: context.client.clientNumber,
       clientName: `${context.client.user?.firstName || ""} ${context.client.user?.lastName || ""}`.trim(),
+      emergencyContactName: context.client.emergencyContactName || null,
+      emergencyContactPhone: context.client.emergencyContactPhone || null,
+      emergencyContactEmail: context.client.emergencyContactEmail || null,
+      emergencyContactRelation: context.client.emergencyContactRelation || null,
     },
     isPrimary: context.isPrimary,
     permissions: context.permissions,
-    familyMembers,
+    familyMembers: sanitizedFamilyMembers,
   };
 }
 
@@ -260,6 +468,9 @@ export async function createFamilyMember(userId: string, input: CreateFamilyMemb
       relationship: input.relationship.trim(),
       email,
       phone: input.phone?.trim() || null,
+      legalCapacity: input.legalCapacity?.trim() || null,
+      authorityDocumentUrl: input.authorityDocumentUrl?.trim() || null,
+      authorityDocumentName: input.authorityDocumentName?.trim() || null,
       reportAccess: input.reportAccess ?? true,
       portalAccess: isPortalActive,
       billingAccess: isPortalActive ? (input.billingAccess ?? false) : false,
@@ -268,6 +479,23 @@ export async function createFamilyMember(userId: string, input: CreateFamilyMemb
       acceptedAt: isPortalActive ? new Date() : null,
     },
   });
+
+  // Sync Client emergency contact fields if representative/emergency contact created
+  if (member.isEmergencyContact) {
+    try {
+      await db.client.update({
+        where: { id: clientId },
+        data: {
+          emergencyContactName: member.name,
+          emergencyContactPhone: member.phone || null,
+          emergencyContactEmail: member.email,
+          emergencyContactRelation: member.relationship,
+        },
+      });
+    } catch (clientSyncErr) {
+      console.warn("⚠️ Client emergency contact sync error on create:", clientSyncErr);
+    }
+  }
 
   // If portal credentials should be emailed
   if (isPortalActive && input.sendCredentialsNow !== false) {
@@ -362,6 +590,9 @@ export async function updateFamilyMember(
   if (input.relationship !== undefined) updateData.relationship = input.relationship.trim();
   if (input.email !== undefined) updateData.email = input.email.trim().toLowerCase();
   if (input.phone !== undefined) updateData.phone = input.phone ? input.phone.trim() : null;
+  if (input.legalCapacity !== undefined) updateData.legalCapacity = input.legalCapacity ? input.legalCapacity.trim() : null;
+  if (input.authorityDocumentUrl !== undefined) updateData.authorityDocumentUrl = input.authorityDocumentUrl ? input.authorityDocumentUrl.trim() : null;
+  if (input.authorityDocumentName !== undefined) updateData.authorityDocumentName = input.authorityDocumentName ? input.authorityDocumentName.trim() : null;
   if (input.reportAccess !== undefined) updateData.reportAccess = input.reportAccess;
   if (input.isEmergencyContact !== undefined) updateData.isEmergencyContact = input.isEmergencyContact;
 
@@ -441,6 +672,23 @@ export async function updateFamilyMember(
     data: updateData,
   });
 
+  // Sync Client emergency contact fields if representative details changed
+  if (updated.isEmergencyContact) {
+    try {
+      await db.client.update({
+        where: { id: context.client.id },
+        data: {
+          emergencyContactName: updated.name,
+          emergencyContactPhone: updated.phone || null,
+          emergencyContactEmail: updated.email,
+          emergencyContactRelation: updated.relationship,
+        },
+      });
+    } catch (clientSyncErr) {
+      console.warn("⚠️ Client emergency contact sync error:", clientSyncErr);
+    }
+  }
+
   return updated;
 }
 
@@ -468,9 +716,98 @@ export async function deleteFamilyMember(userId: string, memberId: string) {
     throw new Error("Family member not found.");
   }
 
+  if (member.authorityDocumentUrl) {
+    await deleteUploadedFile(member.authorityDocumentUrl);
+  }
+
   await db.familyMember.delete({
     where: { id: memberId },
   });
+
+  // Deactivate linked User account so they cannot log in to the portal
+  if (member.userId) {
+    try {
+      const isLinkedToOtherFamily = await db.familyMember.findFirst({
+        where: { userId: member.userId },
+      });
+      const isPrimaryClientUser = await db.client.findFirst({
+        where: { userId: member.userId },
+      });
+
+      if (!isLinkedToOtherFamily && !isPrimaryClientUser) {
+        await db.user.update({
+          where: { id: member.userId },
+          data: { status: UserStatus.INACTIVE },
+        });
+      }
+    } catch (userErr) {
+      console.warn("⚠️ User account deactivation notice:", userErr);
+    }
+  }
+
+  // Remove from onboardingData if present (prevents auto-resyncing)
+  try {
+    const rawClient = await db.client.findUnique({
+      where: { id: context.client.id },
+      select: { onboardingData: true },
+    });
+
+    if (rawClient?.onboardingData && typeof rawClient.onboardingData === "object") {
+      let changed = false;
+      const updatedOnboarding = { ...(rawClient.onboardingData as any) };
+
+      if (Array.isArray(updatedOnboarding.authorizedRecipients)) {
+        const initialLen = updatedOnboarding.authorizedRecipients.length;
+        updatedOnboarding.authorizedRecipients = updatedOnboarding.authorizedRecipients.filter(
+          (rec: any) =>
+            rec?.email?.trim().toLowerCase() !== member.email?.trim().toLowerCase() &&
+            rec?.name?.trim().toLowerCase() !== member.name?.trim().toLowerCase()
+        );
+        if (updatedOnboarding.authorizedRecipients.length !== initialLen) {
+          changed = true;
+        }
+      }
+
+      if (
+        updatedOnboarding.signingData?.repEmail?.trim().toLowerCase() ===
+        member.email?.trim().toLowerCase()
+      ) {
+        updatedOnboarding.signingData.repEmail = null;
+        updatedOnboarding.signingData.repFullName = null;
+        changed = true;
+      }
+
+      if (changed) {
+        await db.client.update({
+          where: { id: context.client.id },
+          data: { onboardingData: updatedOnboarding },
+        });
+      }
+    }
+  } catch (onboardingCleanErr) {
+    console.warn("⚠️ Onboarding data clean notice:", onboardingCleanErr);
+  }
+
+  // If deleted member was the primary emergency contact, sync with remaining emergency contacts or null
+  if (member.isEmergencyContact || context.client.emergencyContactEmail === member.email) {
+    try {
+      const remainingEmergency = await db.familyMember.findFirst({
+        where: { clientId: context.client.id, isEmergencyContact: true },
+        orderBy: { createdAt: "asc" },
+      });
+      await db.client.update({
+        where: { id: context.client.id },
+        data: {
+          emergencyContactName: remainingEmergency?.name || null,
+          emergencyContactPhone: remainingEmergency?.phone || null,
+          emergencyContactEmail: remainingEmergency?.email || null,
+          emergencyContactRelation: remainingEmergency?.relationship || null,
+        },
+      });
+    } catch (syncErr) {
+      console.warn("⚠️ Emergency contact clear sync error:", syncErr);
+    }
+  }
 
   // Audit Log
   try {
@@ -851,6 +1188,18 @@ export async function sendReportToFamilyRecipients(
   const clientName = `${context.client.user?.firstName || ""} ${context.client.user?.lastName || ""}`.trim() || "AgeWellRI Resident";
   const specialistName = report.visit?.technician?.name || "AgeWellRI Safety Specialist";
 
+  let pdfPath: string | undefined = undefined;
+  let downloadUrl: string | undefined = undefined;
+  if (report.fileUrl) {
+    const filename = path.basename(report.fileUrl);
+    const fullPath = path.join(process.cwd(), "uploads", "reports", filename);
+    if (fs.existsSync(fullPath)) {
+      pdfPath = fullPath;
+    }
+    const backendBase = (process.env.BACKEND_URL || "https://khatash5173.ilmifygroup.com").replace(/\/$/, "");
+    downloadUrl = `${backendBase}/uploads/reports/${filename}`;
+  }
+
   let sentCount = 0;
   for (const member of authorizedMembers) {
     try {
@@ -864,6 +1213,8 @@ export async function sendReportToFamilyRecipients(
         reportTitle: report.title || "Safety Visit Report",
         customNote: input.customNote || null,
         reportId: report.id,
+        pdfPath,
+        downloadUrl,
       });
       sentCount++;
     } catch (emailErr) {

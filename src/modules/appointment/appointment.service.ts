@@ -24,6 +24,8 @@ import {
 } from "../notification/notification.service";
 import { calculatePeriodEndDate } from "../../utils/billing-dates.util";
 import { sendSpecialistAssignedEmail } from "../../utils/email";
+import { isDateAnOffDay } from "../off-day/off-day.service";
+import { validateAppointmentTimeWithinSchedule } from "../schedule/schedule.service";
 
 export function isValidObjectId(id?: string | null): boolean {
   if (!id || typeof id !== "string") return false;
@@ -436,25 +438,12 @@ async function validateAndExecuteContractualScheduling(
       ? { startAt: new Date(params.startAt), endAt: new Date(params.endAt) }
       : parseDateAndTimeSlot(params.date, params.timeSlot);
 
-  // Validate working days: Sunday (0) and Wednesday (3) are non-service days (weekends)
-  const dayOfWeek = requestedStart.getDay();
-  if (dayOfWeek === 0 || dayOfWeek === 3) {
-    const dayName = dayOfWeek === 0 ? "Sunday" : "Wednesday";
-    throw new Error(
-      `Visits cannot be scheduled on ${dayName}s as they are non-service days. Working days are Monday, Tuesday, Thursday, Friday, and Saturday.`,
-    );
-  }
+  // Validate strictly against the authoritative Command Schedule (Weekly Schedule, Date Overrides, Week Overrides, Closures)
+  const targetDateStr = params.date
+    ? (params.date.includes("T") ? params.date.split("T")[0] : params.date)
+    : `${requestedStart.getFullYear()}-${String(requestedStart.getMonth() + 1).padStart(2, "0")}-${String(requestedStart.getDate()).padStart(2, "0")}`;
 
-  // Validate working hours: 8:00 AM to 6:00 PM (08:00 - 18:00)
-  const startHour = requestedStart.getHours();
-  const endHour = requestedEnd.getHours();
-  const endMin = requestedEnd.getMinutes();
-
-  if (startHour < 8 || endHour > 18 || (endHour === 18 && endMin > 0)) {
-    throw new Error(
-      "Visits must be scheduled within working hours (8:00 AM – 6:00 PM). Please select a time between 8:00 AM and 6:00 PM.",
-    );
-  }
+  await validateAppointmentTimeWithinSchedule(targetDateStr, requestedStart, requestedEnd);
 
   if (activePeriod && activePeriod.startDate) {
     const periodStart = new Date(activePeriod.startDate);
@@ -749,19 +738,22 @@ async function validateAndExecuteContractualScheduling(
       },
     });
 
-    // If specialist was assigned (e.g. admin dispatch), send confirmation email to client & family
+    // If specialist was assigned (e.g. admin dispatch), send confirmation email to client & representatives
     if (appointment.technicianId && technician) {
       const clientEmail = client.user?.email || client.primaryContactEmail;
       if (clientEmail) {
-        const familyMembers = await (prisma.familyMember.findMany as any)({
-          where: { clientId: client.id },
+        const representatives = await (prisma.familyMember.findMany as any)({
+          where: {
+            clientId: client.id,
+            OR: [{ isEmergencyContact: true }, { portalAccess: true }],
+          },
           include: { user: true },
         });
         const recipientEmails = Array.from(
           new Set(
             [
               clientEmail,
-              ...familyMembers
+              ...representatives
                 .map((f: any) => f.email || f.user?.email)
                 .filter(Boolean),
             ]
@@ -923,7 +915,7 @@ export async function getClientAppointments(userId: string) {
         clientId: client.id,
         isArchived: false,
       },
-      orderBy: [{ createdAt: "desc" }, { startAt: "desc" }],
+      orderBy: [{ startAt: "asc" }, { createdAt: "asc" }],
       include: {
         client: { include: { user: true } },
         createdByUser: true,
@@ -999,7 +991,7 @@ export async function getAdminAppointments(query: AdminAppointmentsQuery = {}) {
     getAllSpecialists(),
     (prisma.appointment.findMany as any)({
       where,
-      orderBy: [{ createdAt: "desc" }, { startAt: "desc" }],
+      orderBy: [{ startAt: "asc" }, { createdAt: "asc" }],
       take: query.limit || 500,
       skip: query.page && query.limit ? (query.page - 1) * query.limit : 0,
       include: {
@@ -1100,25 +1092,12 @@ export async function rescheduleAppointment(
       ? { startAt: new Date(input.startAt), endAt: new Date(input.endAt) }
       : parseDateAndTimeSlot(input.date, input.timeSlot);
 
-  // Validate working days: Sunday (0) and Wednesday (3) are non-service days (weekends)
-  const dayOfWeek = startAt.getDay();
-  if (dayOfWeek === 0 || dayOfWeek === 3) {
-    const dayName = dayOfWeek === 0 ? "Sunday" : "Wednesday";
-    throw new Error(
-      `Visits cannot be rescheduled to ${dayName}s as they are non-service days. Working days are Monday, Tuesday, Thursday, Friday, and Saturday.`,
-    );
-  }
+  // Validate strictly against the authoritative Command Schedule (Weekly Schedule, Date Overrides, Week Overrides, Closures)
+  const targetRescheduleDateStr = input.date
+    ? (input.date.includes("T") ? input.date.split("T")[0] : input.date)
+    : `${startAt.getFullYear()}-${String(startAt.getMonth() + 1).padStart(2, "0")}-${String(startAt.getDate()).padStart(2, "0")}`;
 
-  // Validate working hours: 8:00 AM to 6:00 PM (08:00 - 18:00)
-  const startHour = startAt.getHours();
-  const endHour = endAt.getHours();
-  const endMin = endAt.getMinutes();
-
-  if (startHour < 8 || endHour > 18 || (endHour === 18 && endMin > 0)) {
-    throw new Error(
-      "Visits must be scheduled within working hours (8:00 AM – 6:00 PM). Please select a time between 8:00 AM and 6:00 PM.",
-    );
-  }
+  await validateAppointmentTimeWithinSchedule(targetRescheduleDateStr, startAt, endAt);
 
   const technicianId = input.technicianId || appt.technicianId;
 
@@ -1596,20 +1575,23 @@ export async function acceptVisitRequest(
         "portalAccess",
       );
 
-      // Send Dedicated Email to Client & Authorized Family
+      // Send Dedicated Email to Client & Authorized Representatives
       const clientEmail = updated.client.user?.email || updated.client.primaryContactEmail;
       if (clientEmail) {
         const clientDisplayName = `${updated.client.user?.firstName || updated.client.primaryContactName || "Valued"} ${updated.client.user?.lastName || "Member"}`.trim();
 
-        const familyMembers = await (prisma.familyMember.findMany as any)({
-          where: { clientId: updated.client.id },
+        const representatives = await (prisma.familyMember.findMany as any)({
+          where: {
+            clientId: updated.client.id,
+            OR: [{ isEmergencyContact: true }, { portalAccess: true }],
+          },
           include: { user: true },
         });
         const recipientEmails = Array.from(
           new Set(
             [
               clientEmail,
-              ...familyMembers
+              ...representatives
                 .map((f: any) => f.email || f.user?.email)
                 .filter(Boolean),
             ]

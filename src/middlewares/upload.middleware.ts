@@ -41,7 +41,7 @@ const fileFilter = (
   cb(null, true);
 };
 
-// Multer upload instance
+// Multer upload instance for Reports
 export const uploadReportMiddleware = multer({
   storage,
   fileFilter,
@@ -57,7 +57,7 @@ export const uploadReportMiddleware = multer({
 export function handleReportFileUpload(req: Request, res: Response, next: NextFunction) {
   const upload = uploadReportMiddleware.any();
 
-  upload(req, res, (err: any) => {
+  upload(req, res, async (err: any) => {
     if (err instanceof multer.MulterError) {
       if (err.code === "LIMIT_FILE_SIZE") {
         return res.status(400).json({
@@ -76,8 +76,21 @@ export function handleReportFileUpload(req: Request, res: Response, next: NextFu
       });
     }
 
-    if (!req.file && Array.isArray(req.files) && req.files.length > 0) {
+    if (Array.isArray(req.files) && req.files.length > 0) {
       req.file = req.files[0];
+      // If duplicate/extra files were sent, immediately unlink them so only 1 file is stored
+      if (req.files.length > 1) {
+        for (let i = 1; i < req.files.length; i++) {
+          try {
+            const extraPath = req.files[i]?.path;
+            if (extraPath && fs.existsSync(extraPath)) {
+              await fs.promises.unlink(extraPath);
+            }
+          } catch (unlinkErr) {
+            console.warn("[uploadReport] Failed to clean up duplicate file:", unlinkErr);
+          }
+        }
+      }
     }
 
     next();
@@ -131,13 +144,14 @@ export const uploadAuthorityDocMiddleware = multer({
   fileFilter: authorityDocFileFilter,
   limits: {
     fileSize: 15 * 1024 * 1024, // 15 MB
+    files: 1,
   },
 });
 
 export function handleAuthorityDocFileUpload(req: Request, res: Response, next: NextFunction) {
   const upload = uploadAuthorityDocMiddleware.any();
 
-  upload(req, res, (err: any) => {
+  upload(req, res, async (err: any) => {
     if (err instanceof multer.MulterError) {
       if (err.code === "LIMIT_FILE_SIZE") {
         return res.status(400).json({
@@ -156,8 +170,21 @@ export function handleAuthorityDocFileUpload(req: Request, res: Response, next: 
       });
     }
 
-    if (!req.file && Array.isArray(req.files) && req.files.length > 0) {
+    if (Array.isArray(req.files) && req.files.length > 0) {
       req.file = req.files[0];
+      // If duplicate/extra files were sent, immediately unlink them so only 1 file is stored
+      if (req.files.length > 1) {
+        for (let i = 1; i < req.files.length; i++) {
+          try {
+            const extraPath = req.files[i]?.path;
+            if (extraPath && fs.existsSync(extraPath)) {
+              await fs.promises.unlink(extraPath);
+            }
+          } catch (unlinkErr) {
+            console.warn("[uploadAuthorityDoc] Failed to clean up duplicate file:", unlinkErr);
+          }
+        }
+      }
     }
 
     next();

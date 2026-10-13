@@ -11,6 +11,8 @@ import reportRoutes from "../modules/report/report.routes";
 import familyRoutes from "../modules/family/family.routes";
 import notificationRoutes from "../modules/notification/notification.routes";
 import contactRoutes from "../modules/contact/contact.routes";
+import offDayRoutes from "../modules/off-day/off-day.routes";
+import scheduleRoutes from "../modules/schedule/schedule.routes";
 
 const router = Router();
 
@@ -67,6 +69,14 @@ const moduleRoutes: ModuleRoute[] = [
   {
     path: "/contact",
     route: contactRoutes,
+  },
+  {
+    path: "/off-days",
+    route: offDayRoutes,
+  },
+  {
+    path: "/schedule",
+    route: scheduleRoutes,
   },
 ];
 

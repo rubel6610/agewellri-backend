@@ -22,6 +22,7 @@ import {
   notifyClientAndFamily,
   notifyAdmins,
 } from "../notification/notification.service";
+import { deleteUploadedFile } from "../../utils/fileStorage";
 
 function isValidObjectId(id?: string | null): boolean {
   if (!id || typeof id !== "string") return false;
@@ -593,7 +594,7 @@ export async function uploadVisitReport(
     },
   });
 
-  // 7. Send Client and Authorized Family Notification Emails
+  // 7. Send Client and Authorized Family Notification Emails (Representatives & Report Recipients)
   const clientUser = appointment.client?.user;
   const primaryRecipientEmail =
     clientUser?.email || appointment.client?.primaryContactEmail;
@@ -606,6 +607,10 @@ export async function uploadVisitReport(
     appointment.technician?.name ||
     "AgeWellRI Specialist";
 
+  const fullPdfPath = path.join(process.cwd(), "uploads", "reports", storageFilename);
+  const backendBase = (process.env.BACKEND_URL || "https://khatash5173.ilmifygroup.com").replace(/\/$/, "");
+  const directReportDownloadUrl = `${backendBase}/uploads/reports/${storageFilename}`;
+
   if (primaryRecipientEmail) {
     try {
       await sendReportAvailableEmail({
@@ -615,6 +620,8 @@ export async function uploadVisitReport(
         visitDate: visit.completedAt || appointment.startAt || new Date(),
         specialistName,
         reportTitle: defaultTitle,
+        pdfPath: fullPdfPath,
+        downloadUrl: directReportDownloadUrl,
       });
     } catch (emailErr) {
       console.warn(
@@ -624,14 +631,17 @@ export async function uploadVisitReport(
     }
   }
 
-  // Also dispatch automated report notification to all family members with reportAccess = true
+  // Also dispatch automated report notification to all representatives and authorized report recipients
   try {
     const familyMembersWithReportAccess = await (
       prisma.familyMember.findMany as any
     )({
       where: {
         clientId,
-        reportAccess: true,
+        OR: [
+          { reportAccess: true },
+          { isEmergencyContact: true },
+        ],
       },
     });
 
@@ -651,6 +661,8 @@ export async function uploadVisitReport(
             reportTitle: defaultTitle,
             customNote: null,
             reportId: report.id,
+            pdfPath: fullPdfPath,
+            downloadUrl: directReportDownloadUrl,
           });
         } catch (famErr) {
           console.warn(`Could not email family member ${fam.email}:`, famErr);
@@ -1208,6 +1220,9 @@ export async function deleteReport(actorUserId: string, reportId: string) {
   });
 
   if (report) {
+    if (report.fileUrl) {
+      await deleteUploadedFile(report.fileUrl);
+    }
     await (prisma.report.delete as any)({
       where: { id: reportId },
     });

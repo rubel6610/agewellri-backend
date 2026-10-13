@@ -16,7 +16,10 @@ export const submitAgreementSchema = z.object({
   repCapacity: z.enum(["ATTORNEY_IN_FACT", "GUARDIAN", "CONSERVATOR"]).optional().nullable(),
   repFullName: z.string().optional().nullable(),
   repRelationship: z.string().optional().nullable(),
+  repEmail: z.string().email("Valid representative email required").optional().nullable().or(z.literal("")),
+  repPhone: z.string().optional().nullable(),
   authorityDocumentUrl: z.string().optional().nullable(),
+  authorityDocumentName: z.string().optional().nullable(),
   signerRole: z.enum([
     "RESIDENT",
     "FAMILY_MEMBER",
@@ -24,14 +27,14 @@ export const submitAgreementSchema = z.object({
     "AUTHORIZED_REPRESENTATIVE",
   ]).default("RESIDENT"),
   signerName: z.string().optional().nullable(),
-  signerEmail: z.string().email().optional().nullable(),
+  signerEmail: z.string().email().optional().nullable().or(z.literal("")),
   signerPhone: z.string().optional().nullable(),
   legalAuthority: z.string().optional().nullable(),
   legalAuthorityOther: z.string().optional().nullable(),
   primaryBillingContact: z.string().optional().nullable(),
   primaryContactName: z.string().optional().nullable(),
   primaryContactPhone: z.string().optional().nullable(),
-  primaryContactEmail: z.string().email().optional().nullable(),
+  primaryContactEmail: z.string().email().optional().nullable().or(z.literal("")),
   primaryContactRelation: z.string().optional().nullable(),
 
   // Authorized Recipients (Step 4)

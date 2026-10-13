@@ -5,6 +5,7 @@ import {
   getFirstBillingDate,
   getEasternDateParts,
 } from "../../utils/billing-dates.util";
+import { deleteUploadedFiles } from "../../utils/fileStorage";
 
 export interface AdminClientsQuery {
   search?: string;
@@ -816,7 +817,7 @@ export async function getAdminDashboardStats() {
     allAppointments,
     allAgreements,
     allInvoices,
-    activeSubscriptions,
+    allSubscriptions,
     upcomingRenewalsCount,
     allReports,
     recentAuditLogs,
@@ -856,6 +857,7 @@ export async function getAdminDashboardStats() {
         status: true,
         startAt: true,
         clientId: true,
+        technicianId: true,
         serviceName: true,
         visit: { select: { id: true } },
       },
@@ -883,7 +885,7 @@ export async function getAdminDashboardStats() {
       },
     }),
     (prisma.subscription.findMany as any)({
-      where: { status: "ACTIVE" },
+      where: { isArchived: false },
       include: { plan: true },
     }),
     prisma.subscription.count({
@@ -918,8 +920,23 @@ export async function getAdminDashboardStats() {
   const activeClients = allClients.filter(
     (c: any) =>
       c.onboardingStatus === "COMPLETED" ||
-      c.subscriptions?.length > 0 ||
-      c.agreements?.[0]?.status === "EXECUTED",
+      c.onboardingStatus === "ACTIVE" ||
+      c.subscriptions?.some((s: any) => s.status === "ACTIVE") ||
+      (Boolean(c.agreements?.[0]?.status === "EXECUTED" || c.agreements?.[0]?.signedAt) &&
+        (c.paymentStatus === "PAID" || c.onboardingStatus === "PAYMENT_COMPLETED")),
+  );
+  const paymentPendingClients = allClients.filter(
+    (c: any) =>
+      !activeClients.some((ac: any) => ac.id === c.id) &&
+      (c.onboardingStatus === "PAYMENT_PENDING" ||
+        c.paymentStatus === "UNPAID" ||
+        c.paymentStatus === "PAYMENT_PENDING" ||
+        Boolean(c.agreements?.[0]?.status === "EXECUTED" || c.agreements?.[0]?.signedAt)),
+  );
+  const agreementPendingClients = allClients.filter(
+    (c: any) =>
+      !activeClients.some((ac: any) => ac.id === c.id) &&
+      !paymentPendingClients.some((pc: any) => pc.id === c.id),
   );
   const pendingOnboarding = allClients.filter(
     (c: any) => !activeClients.some((ac: any) => ac.id === c.id),
@@ -930,9 +947,29 @@ export async function getAdminDashboardStats() {
 
   // Appointment & Visit Metrics
   const completedVisits = allAppointments.filter(
-    (a: any) => a.status === "COMPLETED",
+    (a: any) => (a.status || "").toUpperCase() === "COMPLETED",
   );
   const upcomingVisitsCount = upcomingAppointments.length;
+  const requestedAppointmentsCount = allAppointments.filter(
+    (a: any) =>
+      (a.status || "").toUpperCase() === "REQUESTED" ||
+      (!a.technicianId && (a.status || "").toUpperCase() !== "CANCELLED"),
+  ).length;
+  const scheduledAppointmentsCount = allAppointments.filter(
+    (a: any) =>
+      ["SCHEDULED", "CONFIRMED", "RESCHEDULED"].includes(
+        (a.status || "").toUpperCase(),
+      ) && Boolean(a.technicianId),
+  ).length;
+  const cancelledAppointmentsCount = allAppointments.filter(
+    (a: any) => (a.status || "").toUpperCase() === "CANCELLED",
+  ).length;
+  const appointedClientsCount = new Set(
+    allAppointments
+      .filter((a: any) => (a.status || "").toUpperCase() !== "CANCELLED")
+      .map((a: any) => a.clientId)
+      .filter(Boolean),
+  ).size;
 
   // Report Metrics
   const uploadedReportApptIds = new Set(
@@ -954,7 +991,13 @@ export async function getAdminDashboardStats() {
   ).length;
   const pendingAgreementsCount = allAgreements.filter(
     (a: any) =>
-      a.status === "DRAFT" || a.status === "PENDING_SIGNATURE" || !a.signedAt,
+      a.status === "DRAFT" ||
+      a.status === "SENT" ||
+      a.status === "PENDING_SIGNATURE" ||
+      (!a.signedAt && a.status !== "CANCELLED" && a.status !== "EXPIRED"),
+  ).length;
+  const cancelledAgreementsCount = allAgreements.filter(
+    (a: any) => a.status === "CANCELLED" || a.status === "EXPIRED",
   ).length;
 
   // Billing & Invoices Metrics
@@ -962,13 +1005,29 @@ export async function getAdminDashboardStats() {
   const openInvoices = allInvoices.filter(
     (i: any) => i.status === "OPEN" || i.status === "DRAFT",
   );
+  const overdueInvoices = allInvoices.filter((i: any) => i.status === "OVERDUE");
+  const draftInvoices = allInvoices.filter((i: any) => i.status === "DRAFT");
   const totalRevenueCollected = paidInvoices.reduce(
     (sum: number, i: any) => sum + (i.amount || 0),
     0,
   );
-  const totalPendingInvoicesAmount = openInvoices.reduce(
+  const totalPendingInvoicesAmount = [...openInvoices, ...overdueInvoices].reduce(
     (sum: number, i: any) => sum + (i.amount || 0),
     0,
+  );
+
+  // Subscription Metrics
+  const activeSubscriptions = allSubscriptions.filter(
+    (s: any) => s.status === "ACTIVE",
+  );
+  const pendingSubscriptions = allSubscriptions.filter(
+    (s: any) => s.status === "PENDING",
+  );
+  const cancelledSubscriptions = allSubscriptions.filter(
+    (s: any) =>
+      s.status === "CANCELLED" ||
+      s.status === "CANCELLATION_REQUESTED" ||
+      s.status === "EXPIRED",
   );
 
   // Plan Distribution Breakdown
@@ -1050,18 +1109,17 @@ export async function getAdminDashboardStats() {
 
   const pendingPaymentsCount = Math.max(
     openInvoices.length,
-    allClients.filter(
-      (c: any) =>
-        c.onboardingStatus === "PAYMENT_PENDING" ||
-        c.paymentStatus === "UNPAID" ||
-        c.paymentStatus === "PAYMENT_PENDING",
-    ).length,
+    paymentPendingClients.length,
   );
 
   return {
     kpis: {
       activeClientsCount: activeClients.length,
       totalClientsCount: totalClients,
+      activeBillingCount: activeClients.length,
+      appointedClientsCount,
+      confirmedAgreementsCount: executedAgreementsCount,
+      subscriptionClientsCount: activeSubscriptions.length,
       newClientsThisMonth,
       pendingOnboardingCount: pendingOnboarding.length,
       pendingPaymentsCount,
@@ -1076,6 +1134,45 @@ export async function getAdminDashboardStats() {
       totalRevenueCollected: `$${totalRevenueCollected.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       renewalsUpcomingCount: upcomingRenewalsCount,
       activeSubscriptionsCount: activeSubscriptions.length,
+    },
+    domainStats: {
+      clients: {
+        total: totalClients,
+        active: activeClients.length,
+        paymentPending: paymentPendingClients.length,
+        agreementPending: agreementPendingClients.length,
+        newThisMonth: newClientsThisMonth,
+      },
+      billing: {
+        totalInvoices: allInvoices.length,
+        paid: paidInvoices.length,
+        open: openInvoices.length,
+        overdue: overdueInvoices.length,
+        draft: draftInvoices.length,
+        totalRevenueCollected: `$${totalRevenueCollected.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        totalPendingAmount: `$${totalPendingInvoicesAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      },
+      appointments: {
+        total: allAppointments.length,
+        requested: requestedAppointmentsCount,
+        scheduled: scheduledAppointmentsCount,
+        completed: completedVisits.length,
+        cancelled: cancelledAppointmentsCount,
+        reportsPending: reportsPendingCount,
+      },
+      agreements: {
+        total: allAgreements.length,
+        executed: executedAgreementsCount,
+        pending: pendingAgreementsCount,
+        cancelled: cancelledAgreementsCount,
+      },
+      subscriptions: {
+        total: allSubscriptions.length,
+        active: activeSubscriptions.length,
+        pending: pendingSubscriptions.length,
+        cancelled: cancelledSubscriptions.length,
+        upcomingRenewals: upcomingRenewalsCount,
+      },
     },
     upcomingSchedule: upcomingAppointments.map((appt: any) => ({
       id: appt.id,
@@ -1468,7 +1565,47 @@ export async function deleteAdminClient(
     visitIds = visits.map((v: any) => v.id);
   }
 
-  // C. Get assessment IDs for visits
+  // C. Find all client report attachments (including visit reports)
+  let allClientReports: any[] = [];
+  try {
+    allClientReports = await (prisma.report.findMany as any)({
+      where: {
+        OR: [
+          { clientId: realClientId },
+          ...(visitIds.length > 0 ? [{ visitId: { in: visitIds } }] : []),
+        ],
+      },
+      select: { id: true, fileUrl: true },
+    });
+  } catch (repErr: any) {
+    console.warn("[deleteAdminClient] Report fetch warning:", repErr.message);
+  }
+
+  // D. Delete all physical attachment files from uploads folder
+  try {
+    const filesToDelete: (string | null | undefined)[] = [
+      // Client onboarding authority documents
+      (client.onboardingData as any)?.authorityDocumentUrl,
+      (client.onboardingData as any)?.signingData?.authorityDocumentUrl,
+      (client.onboardingData as any)?.authorityDocument,
+      // Service Agreement executed PDFs / authority documents
+      ...((client.agreements || []).map((a: any) => a.documentUrl)),
+      ...((client.agreements || []).map((a: any) => a.authorityDocumentUrl)),
+      // Family member / Representative authority documents
+      ...((client.familyMembers || []).map((fm: any) => fm.authorityDocumentUrl)),
+      // Client safety reports & Visit reports
+      ...((client.reports || []).map((r: any) => r.fileUrl)),
+      ...allClientReports.map((r: any) => r.fileUrl),
+      // Invoices PDF files if any
+      ...((client.invoices || []).map((inv: any) => inv.pdfUrl)),
+    ];
+
+    await deleteUploadedFiles(filesToDelete);
+  } catch (fileErr: any) {
+    console.warn("[deleteAdminClient] File deletion warning:", fileErr.message);
+  }
+
+  // E. Get assessment IDs for visits
   let assessmentIds: string[] = [];
   if (visitIds.length > 0) {
     const assessments = await (prisma.assessment.findMany as any)({

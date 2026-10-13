@@ -7,6 +7,7 @@ import {
   sendAgreementExecutedEmail,
   sendWelcomeInvitationEmail,
 } from "../../utils/email";
+import { deleteUploadedFiles } from "../../utils/fileStorage";
 import { generateNextClientNumber } from "../../utils/client-number.util";
 import { processAgreementPayment } from "../payment/payment.service";
 import {
@@ -278,13 +279,26 @@ export async function submitServiceAgreement(
     representativeCapacity,
     repFullName: isRepresentative ? signerName : null,
     repRelationship: isRepresentative ? relationshipToClient : null,
+    repEmail: isRepresentative ? (input.repEmail || input.signerEmail || null) : null,
+    repPhone: isRepresentative ? (input.repPhone || input.signerPhone || null) : null,
     authorityDocumentUrl: input.authorityDocumentUrl || null,
+    authorityDocumentName: (input as any).authorityDocumentName || null,
     authorizedRecipients: input.authorizedRecipients || [],
     homeAccessAuthorized: input.homeAccessAuthorized ?? true,
     authorizations: input.authorizations || {
       emergencyRightOfEntry: true,
       residentAutonomyAcknowledgment: true,
       automaticBillingAuthorization: true,
+    },
+    signingData: {
+      signingTrack,
+      repFullName: isRepresentative ? signerName : null,
+      repCapacity: representativeCapacity,
+      repRelationship: isRepresentative ? relationshipToClient : null,
+      repEmail: isRepresentative ? (input.repEmail || input.signerEmail || null) : null,
+      repPhone: isRepresentative ? (input.repPhone || input.signerPhone || null) : null,
+      authorityDocumentUrl: input.authorityDocumentUrl || null,
+      authorityDocumentName: (input as any).authorityDocumentName || null,
     },
   };
 
@@ -409,6 +423,7 @@ export async function submitServiceAgreement(
                 reportAccess: true,
                 portalAccess: false,
                 billingAccess: false,
+                isEmergencyContact: false,
                 invitationStatus: "PENDING",
               },
             });
@@ -420,6 +435,81 @@ export async function submitServiceAgreement(
           );
         }
       }
+    }
+  }
+
+  // 4c. Persist Representative (Track B Signer) as FamilyMember record
+  const clientFullNameLower = (input.clientFullName || `${user.firstName || ""} ${user.lastName || ""}`).trim().toLowerCase();
+  const clientEmailLower = (user.email || input.email || "").trim().toLowerCase();
+
+  if (isRepresentative && signerName && (signerName.trim().toLowerCase() !== clientFullNameLower || representativeCapacity)) {
+    try {
+      const repEmail = (
+        input.repEmail ||
+        input.signerEmail ||
+        clientEmailLower ||
+        `${signerName.toLowerCase().replace(/[^a-z0-9]/g, ".")}@representative.contact`
+      ).trim().toLowerCase();
+
+      const repPhone =
+        input.repPhone ||
+        input.signerPhone ||
+        (user.phone && user.phone !== input.phone ? user.phone : null);
+
+      const repRelationship =
+        relationshipToClient ||
+        representativeCapacity ||
+        "Legal Representative / Power of Attorney";
+
+      const existingRep = await (prisma as any).familyMember.findFirst({
+        where: {
+          clientId,
+          OR: [
+            { name: { equals: signerName, mode: "insensitive" } },
+            ...(repEmail ? [{ email: repEmail }] : []),
+          ],
+        },
+      });
+
+      if (existingRep) {
+        await (prisma as any).familyMember.update({
+          where: { id: existingRep.id },
+          data: {
+            name: signerName,
+            relationship: repRelationship,
+            email: repEmail,
+            phone: repPhone || existingRep.phone,
+            legalCapacity: representativeCapacity || existingRep.legalCapacity || "ATTORNEY_IN_FACT",
+            authorityDocumentUrl:
+              input.authorityDocumentUrl || existingRep.authorityDocumentUrl || null,
+            authorityDocumentName:
+              (input as any).authorityDocumentName || existingRep.authorityDocumentName || null,
+            reportAccess: true,
+            billingAccess: true,
+            isEmergencyContact: true,
+          },
+        });
+      } else {
+        await (prisma as any).familyMember.create({
+          data: {
+            clientId,
+            name: signerName,
+            relationship: repRelationship,
+            email: repEmail,
+            phone: repPhone,
+            legalCapacity: representativeCapacity || "ATTORNEY_IN_FACT",
+            authorityDocumentUrl: input.authorityDocumentUrl || null,
+            authorityDocumentName: (input as any).authorityDocumentName || null,
+            reportAccess: true,
+            portalAccess: false,
+            billingAccess: true,
+            isEmergencyContact: true,
+            invitationStatus: "PENDING",
+          },
+        });
+      }
+    } catch (repErr) {
+      console.warn("⚠️ Error saving representative during agreement execution:", repErr);
     }
   }
 
@@ -1201,6 +1291,12 @@ export async function deleteAgreement(
     where: { id: agreementId },
   });
 
+  // Safely delete physical files (executed agreement PDF and authority document)
+  await deleteUploadedFiles([
+    agreement.documentUrl,
+    agreement.authorityDocumentUrl,
+  ]);
+
   // Check if client has any other active/signed agreements remaining
   if (clientId) {
     try {
@@ -1323,8 +1419,17 @@ export async function getAuthorityDocumentForDownload(
         orderBy: { createdAt: "desc" },
       });
       const onboardingData = fullClient.onboardingData as any;
+      const familyMemberDoc = await ((prisma as any).familyMember.findFirst as any)({
+        where: {
+          clientId: fullClient.id,
+          authorityDocumentUrl: { contains: sanitizedFilename },
+        },
+      });
       const clientDoc =
-        agreement?.documentUrl || onboardingData?.authorityDocumentUrl || null;
+        agreement?.documentUrl ||
+        onboardingData?.authorityDocumentUrl ||
+        familyMemberDoc?.authorityDocumentUrl ||
+        null;
       if (!clientDoc || !clientDoc.includes(sanitizedFilename)) {
         throw new Error("You do not have permission to download this document.");
       }
