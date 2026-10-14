@@ -9,7 +9,7 @@ import {
   OverrideStatus,
   OverrideType,
 } from "./schedule.validation";
-import { getUSHolidayForDate, getUSHolidaysForYear } from "../../utils/us-holidays.util";
+import { getUSHolidayForDate } from "../../utils/us-holidays.util";
 
 const db = prisma as any;
 
