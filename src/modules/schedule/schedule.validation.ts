@@ -41,7 +41,7 @@ export const updateWeeklyScheduleSchema = z.object({
 });
 
 export const createScheduleOverrideSchema = z.object({
-  title: z.string().min(2, "Title is required (at least 2 characters)"),
+  title: z.string().optional().default(""),
   description: z.string().optional(),
   overrideType: z.enum(["DATE", "WEEK"]).default("DATE"),
   status: z.enum(["CLOSED", "CUSTOM_HOURS", "OPEN"]).default("CLOSED"),
@@ -53,7 +53,7 @@ export const createScheduleOverrideSchema = z.object({
 });
 
 export const updateScheduleOverrideSchema = z.object({
-  title: z.string().min(2).optional(),
+  title: z.string().optional(),
   description: z.string().optional(),
   overrideType: z.enum(["DATE", "WEEK"]).optional(),
   status: z.enum(["CLOSED", "CUSTOM_HOURS", "OPEN"]).optional(),

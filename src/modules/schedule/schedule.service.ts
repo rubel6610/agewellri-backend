@@ -506,7 +506,7 @@ export async function createScheduleOverride(
     try {
       const off = await db.offDay.create({
         data: {
-          title: input.title.trim(),
+          title: (input.title || "").trim() || (input.status === "CLOSED" ? "Office Closed" : "Custom Hours"),
           description: input.description?.trim() || null,
           startDate,
           endDate,
@@ -543,7 +543,7 @@ export async function createScheduleOverride(
 
   const override = await db.scheduleOverride.create({
     data: {
-      title: input.title.trim(),
+      title: (input.title || "").trim(),
       description: input.description?.trim() || null,
       overrideType: input.overrideType || "DATE",
       status: input.status || "CLOSED",
@@ -1209,6 +1209,11 @@ export async function calculateDateAvailability(
     overrideTitle: effectiveTitle,
     overrideDescription: effectiveDescription,
     overrideStatus: effectiveStatus,
+    overrideItem: dateOverride
+      ? formatScheduleOverride(dateOverride)
+      : weekOverride
+      ? formatScheduleOverride(weekOverride)
+      : null,
     timeWindows: effectiveWindows,
     holiday,
     isHoliday: Boolean(holiday),
@@ -1518,6 +1523,11 @@ export async function getCalendarRangeAvailability(
       overrideTitle: effectiveTitle,
       overrideDescription: effectiveDescription,
       overrideStatus: effectiveStatus,
+      overrideItem: dateOverride
+        ? formatScheduleOverride(dateOverride)
+        : weekOverride
+        ? formatScheduleOverride(weekOverride)
+        : null,
       timeWindows: effectiveWindows,
       holiday,
       isHoliday: Boolean(holiday),
