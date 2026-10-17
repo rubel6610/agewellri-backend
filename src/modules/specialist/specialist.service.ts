@@ -498,13 +498,32 @@ export async function assignSpecialistToAppointment(
   const specialistName = specialist?.name || "Assigned Specialist";
   const specialistTitle = specialist?.title || "Senior Home Safety Specialist® certified by Age Safe® America";
 
-  // Note: Admin can assign specialists in advance even if subscription payment activation is pending.
-  // Subscription payment activation is only required when completing visits.
+  // Verify that specialist is available during the appointment's interval [startAt, endAt)
+  const overlapping = await (prisma.appointment.findFirst as any)({
+    where: {
+      id: { not: input.appointmentId },
+      technicianId: input.specialistId,
+      status: {
+        in: ["SCHEDULED", "CONFIRMED", "RESCHEDULED"],
+      },
+      isArchived: false,
+      startAt: { lt: appointment.endAt },
+      endAt: { gt: appointment.startAt },
+    },
+  });
+
+  if (overlapping) {
+    const conflictErr = new Error(
+      `Specialist ${specialistName} is already assigned to another appointment during this time window. Please select another specialist.`
+    );
+    (conflictErr as any).statusCode = 409;
+    throw conflictErr;
+  }
 
   const updatedAppointment = await prisma.appointment.update({
     where: { id: input.appointmentId },
     data: {
-      technicianId: input.specialistId,
+      technician: { connect: { id: input.specialistId } },
       status: "CONFIRMED",
     },
     include: {

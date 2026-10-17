@@ -48,7 +48,8 @@ export async function handleScheduleClientAppointment(
       return;
     }
     if (error instanceof Error) {
-      res.status(400).json({
+      const statusCode = (error as any).statusCode || 400;
+      res.status(statusCode).json({
         success: false,
         message: formatClientErrorMessage(error),
       });
@@ -91,7 +92,8 @@ export async function handleScheduleAdminAppointment(
       return;
     }
     if (error instanceof Error) {
-      res.status(400).json({
+      const statusCode = (error as any).statusCode || 400;
+      res.status(statusCode).json({
         success: false,
         message: formatClientErrorMessage(error),
       });
@@ -247,7 +249,8 @@ export async function handleRescheduleAppointment(
       return;
     }
     if (error instanceof Error) {
-      res.status(400).json({
+      const statusCode = (error as any).statusCode || 400;
+      res.status(statusCode).json({
         success: false,
         message: formatClientErrorMessage(error),
       });
@@ -385,7 +388,8 @@ export async function handleAcceptVisitRequest(
     });
   } catch (error: any) {
     if (error instanceof Error) {
-      res.status(400).json({
+      const statusCode = (error as any).statusCode || 400;
+      res.status(statusCode).json({
         success: false,
         message: formatClientErrorMessage(error),
       });

@@ -25,7 +25,10 @@ import {
 import { calculatePeriodEndDate } from "../../utils/billing-dates.util";
 import { sendSpecialistAssignedEmail } from "../../utils/email";
 import { isDateAnOffDay } from "../off-day/off-day.service";
-import { validateAppointmentTimeWithinSchedule } from "../schedule/schedule.service";
+import {
+  validateAppointmentTimeWithinSchedule,
+  getActiveEligibleTechnicians,
+} from "../schedule/schedule.service";
 
 export function isValidObjectId(id?: string | null): boolean {
   if (!id || typeof id !== "string") return false;
@@ -191,9 +194,11 @@ export function formatAppointmentRecord(
   appt: any,
   specialistsList: any[] = [],
 ) {
-  let tech = appt.technician;
+  let tech = appt.technician || appt.visit?.technician;
   if (!tech && appt.technicianId && specialistsList.length > 0) {
-    tech = specialistsList.find((s: any) => s.id === appt.technicianId);
+    tech = specialistsList.find(
+      (s: any) => String(s.id) === String(appt.technicianId),
+    );
   }
   tech = tech || {};
   const client = appt.client || {};
@@ -235,7 +240,9 @@ export function formatAppointmentRecord(
 
   const rawStatus = (appt.status || "SCHEDULED").toUpperCase();
   const isRequested =
+    Boolean(appt.isRequested) ||
     rawStatus === "REQUESTED" ||
+    rawStatus === "SCHEDULED" ||
     (!appt.technicianId && rawStatus !== "CANCELLED");
 
   const serviceName = appt.serviceName || appt.plan?.name || "safety Visit";
@@ -263,7 +270,7 @@ export function formatAppointmentRecord(
       ? tech.name || "Assigned Specialist"
       : "Unassigned Specialist",
     technicianTitle: appt.technicianId
-      ? tech.title || "Certified Home safety Specialist"
+      ? tech.title || (isRequested ? "Reserved Specialist (Pending Approval)" : "Certified Home safety Specialist")
       : "Pending Admin Assignment",
     technicianPhone: tech.phone || null,
     technicianColor: tech.color || "#294B68",
@@ -525,13 +532,17 @@ async function validateAndExecuteContractualScheduling(
   const startAt = requestedStart;
   const endAt = requestedEnd;
 
-  // 8. Check client and technician active appointments for same date and cross-date time slot conflicts
-  const activeAppts = await (prisma.appointment.findMany as any)({
+  // 8. Client-Specific Same-Date Visit Restriction
+  // A client cannot have multiple visits scheduled on the same calendar day
+  const startOfDay = new Date(requestedStart);
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date(requestedStart);
+  endOfDay.setHours(23, 59, 59, 999);
+
+  const existingClientSameDayAppt = await (prisma.appointment.findFirst as any)({
     where: {
-      OR: [
-        { clientId: client.id },
-        ...(params.technicianId ? [{ technicianId: params.technicianId }] : []),
-      ],
+      clientId: client.id,
+      startAt: { gte: startOfDay, lte: endOfDay },
       status: {
         in: [
           AppointmentStatus.SCHEDULED,
@@ -543,142 +554,252 @@ async function validateAndExecuteContractualScheduling(
     },
   });
 
-  const reqStartMin = requestedStart.getHours() * 60 + requestedStart.getMinutes();
-  const reqEndMin = requestedEnd.getHours() * 60 + requestedEnd.getMinutes();
-
-  for (const appt of activeAppts) {
-    const apptStart = new Date(appt.startAt);
-
-    const isSameDate =
-      apptStart.getFullYear() === requestedStart.getFullYear() &&
-      apptStart.getMonth() === requestedStart.getMonth() &&
-      apptStart.getDate() === requestedStart.getDate();
-
-    if (isSameDate) {
-      const formattedDate = apptStart.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
-      throw new Error(
-        `A visit is already scheduled for this client on ${formattedDate} (${appt.timeSlot || "Scheduled"}). The same client cannot have multiple visits scheduled on the same date. Please select another date.`,
-      );
-    }
+  if (existingClientSameDayAppt) {
+    const formattedDate = requestedStart.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    throw new Error(
+      `A visit is already scheduled for this client on ${formattedDate} (${existingClientSameDayAppt.timeSlot || "Scheduled"}). The same client cannot have multiple visits scheduled on the same date. Please select another date.`,
+    );
   }
 
-  // 9. Resolve Specialist / Technician
-  const technician = await resolveTechnician(
-    params.technicianId,
-    params.technicianName,
-  );
+  // 9. Load Active Eligible Technicians for Dynamic Capacity
+  const eligibleTechnicians = await getActiveEligibleTechnicians(serviceName);
+  if (eligibleTechnicians.length === 0) {
+    const err = new Error(
+      "No certified technicians are currently available in the system.",
+    );
+    (err as any).statusCode = 409;
+    throw err;
+  }
+
+  let requestedTechnician: any = null;
+  if (params.technicianId || params.technicianName) {
+    requestedTechnician = await resolveTechnician(
+      params.technicianId,
+      params.technicianName,
+    );
+  }
 
   const clientAddress = `${client.address || "100 Main St"}, ${client.city || "Providence"}, ${client.state || "RI"} ${client.postalCode || "02903"}`;
 
-  // 10. TRANSACTION ATOMIC CREATION (Concurrency / Double-Booking Protection)
-  const appointment = await prisma.$transaction(async (tx: any) => {
-    // Re-verify quota atomically within the transaction
-    const currentActiveCount = await tx.appointment.count({
-      where: {
-        clientId: client.id,
-        subscriptionPeriodId: activePeriod.id,
-        status: {
-          in: [
-            AppointmentStatus.SCHEDULED,
-            AppointmentStatus.CONFIRMED,
-            AppointmentStatus.RESCHEDULED,
-            AppointmentStatus.COMPLETED,
-          ],
-        },
-      },
-    });
+  // 10. TRANSACTION ATOMIC CREATION & CONCURRENCY-PROTECTED RESERVATION
+  // Uses write serialization on technician document and retry loop to guarantee no two concurrent requests
+  // can book the last available technician for overlapping intervals.
+  let appointment: any = null;
+  let finalAssignedTechnician: any = null;
+  const maxRetries = 3;
+  let lastError: any = null;
 
-    if (currentActiveCount >= totalAllocated) {
-      throw new Error(
-        `All visit entitlements for ${targetPlan?.name || "your plan"} have already been booked for this cycle.`,
-      );
-    }
-
-    const initialStatus = AppointmentStatus.SCHEDULED;
-    const assignedTechId = isAdmin ? technician?.id || null : null;
-
-    let accessMethodTitle = params.accessMethodTitle || null;
-    let accessMethodType: any = params.accessMethodType || null;
-    let accessMethodCode = params.accessMethodCode || null;
-    let accessMethodInstructions = params.accessMethodInstructions || null;
-
-    if (params.accessMethodId && client.accessMethods) {
-      try {
-        const methods: any[] =
-          typeof client.accessMethods === "string"
-            ? JSON.parse(client.accessMethods)
-            : (client.accessMethods as any);
-        const match = methods.find((m: any) => m.id === params.accessMethodId);
-        if (match) {
-          accessMethodTitle = match.title || accessMethodTitle;
-          accessMethodType = match.type || accessMethodType;
-          accessMethodCode = match.code || accessMethodCode;
-          accessMethodInstructions =
-            match.instructions || accessMethodInstructions;
-        }
-      } catch {}
-    }
-
-    if (!accessMethodType && client.homeAccessType) {
-      accessMethodType = client.homeAccessType;
-      accessMethodCode = accessMethodCode || client.homeAccessCode;
-      accessMethodInstructions =
-        accessMethodInstructions || client.homeAccessInstructions;
-      accessMethodTitle =
-        accessMethodTitle ||
-        (client.homeAccessType === "LOCKBOX"
-          ? "Primary Home Lockbox"
-          : client.homeAccessType === "DIGITAL_CODE"
-            ? "Keypad Entry Code"
-            : client.homeAccessType === "OTHER"
-              ? "Custom Entry Method"
-              : "Resident Answers Door");
-    }
-
-    const createdAppt = await tx.appointment.create({
-      data: {
-        clientId: client.id,
-        serviceName,
-        subscriptionPeriodId: activePeriod.id,
-        technicianId: assignedTechId,
-        startAt,
-        endAt,
-        status: initialStatus,
-        location: params.location || clientAddress,
-        notes: params.notes || null,
-        accessMethodTitle,
-        accessMethodType,
-        accessMethodInstructions,
-        accessMethodCode,
-        createdByUserId: actorUserId,
-      },
-      include: {
-        client: { include: { user: true } },
-        createdByUser: true,
-      },
-    });
-
-    if (assignedTechId) {
-      try {
-        await tx.visit.create({
-          data: {
-            appointmentId: createdAppt.id,
-            technicianId: assignedTechId,
-            status: VisitStatus.SCHEDULED,
-            notes: params.notes || null,
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      appointment = await prisma.$transaction(async (tx: any) => {
+        // Re-verify quota atomically within the transaction
+        const currentActiveCount = await tx.appointment.count({
+          where: {
+            clientId: client.id,
+            subscriptionPeriodId: activePeriod.id,
+            status: {
+              in: [
+                AppointmentStatus.SCHEDULED,
+                AppointmentStatus.CONFIRMED,
+                AppointmentStatus.RESCHEDULED,
+                AppointmentStatus.COMPLETED,
+              ],
+            },
           },
         });
-      } catch (visitErr) {
-        console.warn("⚠️ Linked Visit creation warning:", visitErr);
-      }
-    }
 
-    return createdAppt;
-  });
+        if (currentActiveCount >= totalAllocated) {
+          throw new Error(
+            `All visit entitlements for ${targetPlan?.name || "your plan"} have already been booked for this cycle.`,
+          );
+        }
+
+        // Query all overlapping active appointments for this interval
+        // Standard half-open overlap: existingStart < requestedEnd && existingEnd > requestedStart
+        const overlappingAppts = await tx.appointment.findMany({
+          where: {
+            status: {
+              in: [
+                AppointmentStatus.SCHEDULED,
+                AppointmentStatus.CONFIRMED,
+                AppointmentStatus.RESCHEDULED,
+              ],
+            },
+            isArchived: false,
+            startAt: { lt: endAt },
+            endAt: { gt: startAt },
+          },
+          select: { technicianId: true },
+        });
+
+        const occupiedTechIds = new Set<string>();
+        for (const appt of overlappingAppts) {
+          if (appt.technicianId) {
+            occupiedTechIds.add(appt.technicianId);
+          }
+        }
+
+        let assignedTech: any = null;
+        if (isAdmin && requestedTechnician) {
+          if (occupiedTechIds.has(requestedTechnician.id)) {
+            const conflictErr = new Error(
+              `Specialist ${requestedTechnician.name} is already booked for another appointment during this time window (${params.timeSlot}). Please select another specialist or time.`,
+            );
+            (conflictErr as any).statusCode = 409;
+            throw conflictErr;
+          }
+          assignedTech = requestedTechnician;
+        } else {
+          // Find first available eligible technician not occupied
+          const freeTechs = eligibleTechnicians.filter(
+            (t: any) => !occupiedTechIds.has(t.id),
+          );
+          if (freeTechs.length === 0) {
+            const conflictErr = new Error(
+              `All specialists are fully booked for this time slot (${params.timeSlot}). Please choose another time or date.`,
+            );
+            (conflictErr as any).statusCode = 409;
+            throw conflictErr;
+          }
+          assignedTech = freeTechs[0];
+        }
+
+        // MongoDB write lock on technician document for concurrency serialization
+        await tx.technician.update({
+          where: { id: assignedTech.id },
+          data: { updatedAt: new Date() },
+        });
+
+        // Re-verify no overlapping appointment was committed for assignedTech
+        const concurrentConflict = await tx.appointment.findFirst({
+          where: {
+            technicianId: assignedTech.id,
+            status: {
+              in: [
+                AppointmentStatus.SCHEDULED,
+                AppointmentStatus.CONFIRMED,
+                AppointmentStatus.RESCHEDULED,
+              ],
+            },
+            isArchived: false,
+            startAt: { lt: endAt },
+            endAt: { gt: startAt },
+          },
+        });
+        if (concurrentConflict) {
+          const conflictErr = new Error(
+            `Specialist ${assignedTech.name} was just booked by another concurrent request. Retrying available capacity...`,
+          );
+          (conflictErr as any).statusCode = 409;
+          throw conflictErr;
+        }
+
+        // Prepare access methods
+        let accessMethodTitle = params.accessMethodTitle || null;
+        let accessMethodType: any = params.accessMethodType || null;
+        let accessMethodCode = params.accessMethodCode || null;
+        let accessMethodInstructions = params.accessMethodInstructions || null;
+
+        if (params.accessMethodId && client.accessMethods) {
+          try {
+            const methods: any[] =
+              typeof client.accessMethods === "string"
+                ? JSON.parse(client.accessMethods)
+                : (client.accessMethods as any);
+            const match = methods.find((m: any) => m.id === params.accessMethodId);
+            if (match) {
+              accessMethodTitle = match.title || accessMethodTitle;
+              accessMethodType = match.type || accessMethodType;
+              accessMethodCode = match.code || accessMethodCode;
+              accessMethodInstructions =
+                match.instructions || accessMethodInstructions;
+            }
+          } catch {}
+        }
+
+        if (!accessMethodType && client.homeAccessType) {
+          accessMethodType = client.homeAccessType;
+          accessMethodCode = accessMethodCode || client.homeAccessCode;
+          accessMethodInstructions =
+            accessMethodInstructions || client.homeAccessInstructions;
+          accessMethodTitle =
+            accessMethodTitle ||
+            (client.homeAccessType === "LOCKBOX"
+              ? "Primary Home Lockbox"
+              : client.homeAccessType === "DIGITAL_CODE"
+                ? "Keypad Entry Code"
+                : client.homeAccessType === "OTHER"
+                  ? "Custom Entry Method"
+                  : "Resident Answers Door");
+        }
+
+        const initialStatus = isAdmin
+          ? AppointmentStatus.CONFIRMED
+          : AppointmentStatus.SCHEDULED;
+
+        const createdAppt = await tx.appointment.create({
+          data: {
+            clientId: client.id,
+            serviceName,
+            subscriptionPeriodId: activePeriod.id,
+            technicianId: assignedTech.id,
+            startAt,
+            endAt,
+            status: initialStatus,
+            location: params.location || clientAddress,
+            notes: params.notes || null,
+            accessMethodTitle,
+            accessMethodType,
+            accessMethodInstructions,
+            accessMethodCode,
+            createdByUserId: actorUserId,
+          },
+          include: {
+            client: { include: { user: true } },
+            createdByUser: true,
+            technician: true,
+          },
+        });
+
+        try {
+          await tx.visit.create({
+            data: {
+              appointmentId: createdAppt.id,
+              technicianId: assignedTech.id,
+              status: VisitStatus.SCHEDULED,
+              notes: params.notes || null,
+            },
+          });
+        } catch (visitErr) {
+          console.warn("⚠️ Linked Visit creation warning:", visitErr);
+        }
+
+        finalAssignedTechnician = assignedTech;
+        return createdAppt;
+      });
+
+      break;
+    } catch (err: any) {
+      lastError = err;
+      const isRetryable =
+        err?.code === "P2034" ||
+        err?.message?.includes("WriteConflict") ||
+        err?.message?.includes("Retrying available capacity");
+      if (isRetryable && attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, 50 * attempt));
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  if (!appointment) {
+    throw lastError || new Error("Failed to reserve appointment slot.");
+  }
 
   // 11. Audit Log
   await createAppointmentAuditLog({
@@ -695,8 +816,8 @@ async function validateAndExecuteContractualScheduling(
       subscriptionPeriodId: activePeriod.id,
       serviceType: serviceName,
       technicianName: isAdmin
-        ? technician?.name
-        : "Unassigned (Pending Admin Review)",
+        ? (finalAssignedTechnician?.name || "Unassigned")
+        : (finalAssignedTechnician?.name ? `${finalAssignedTechnician.name} (Auto-Reserved)` : "Unassigned (Pending Admin Review)"),
       startAt,
       endAt,
     },
@@ -738,8 +859,8 @@ async function validateAndExecuteContractualScheduling(
       },
     });
 
-    // If specialist was assigned (e.g. admin dispatch), send confirmation email to client & representatives
-    if (appointment.technicianId && technician) {
+    // If specialist was assigned directly by admin, send confirmation email to client & representatives
+    if (isAdmin && appointment.technicianId && finalAssignedTechnician) {
       const clientEmail = client.user?.email || client.primaryContactEmail;
       if (clientEmail) {
         const representatives = await (prisma.familyMember.findMany as any)({
@@ -763,10 +884,10 @@ async function validateAndExecuteContractualScheduling(
         await sendSpecialistAssignedEmail({
           to: recipientEmails.length === 1 ? recipientEmails[0] : recipientEmails,
           clientName: clientDisplayName || "Valued Member",
-          specialistName: technician.name,
-          specialistTitle: technician.title || "Senior Home Safety Specialist® certified by Age Safe® America",
-          specialistPhone: technician.phone || undefined,
-          specialistBio: technician.bio || undefined,
+          specialistName: finalAssignedTechnician.name,
+          specialistTitle: finalAssignedTechnician.title || "Senior Home Safety Specialist® certified by Age Safe® America",
+          specialistPhone: finalAssignedTechnician.phone || undefined,
+          specialistBio: finalAssignedTechnician.bio || undefined,
           serviceName: serviceName,
           planName: targetPlan?.name || undefined,
           scheduledDate: startAt,
@@ -783,7 +904,8 @@ async function validateAndExecuteContractualScheduling(
     console.warn("⚠️ Failed to dispatch appointment creation notifications:", notifErr.message);
   }
 
-  return formatAppointmentRecord(appointment, technician ? [technician] : []);
+  const allSpecialists = await getAllSpecialists();
+  return formatAppointmentRecord(appointment, allSpecialists);
 }
 
 /**
@@ -919,6 +1041,7 @@ export async function getClientAppointments(userId: string) {
       include: {
         client: { include: { user: true } },
         createdByUser: true,
+        technician: true,
         visit: {
           include: {
             technician: true,
@@ -942,7 +1065,17 @@ export async function getAdminAppointments(query: AdminAppointmentsQuery = {}) {
   const where: any = { isArchived: false };
 
   if (query.status) {
-    where.status = query.status.toUpperCase();
+    const s = query.status.toUpperCase();
+    if (s === "REQUESTED") {
+      where.OR = [
+        { isRequested: true },
+        { status: "REQUESTED" },
+        { status: "SCHEDULED" },
+        { technicianId: null, status: { not: "CANCELLED" } },
+      ];
+    } else {
+      where.status = s;
+    }
   }
 
   if (query.clientId) {
@@ -997,6 +1130,7 @@ export async function getAdminAppointments(query: AdminAppointmentsQuery = {}) {
       include: {
         client: { include: { user: true } },
         createdByUser: true,
+        technician: true,
         visit: {
           include: {
             technician: true,
@@ -1029,6 +1163,7 @@ export async function getAppointmentById(
     include: {
       client: { include: { user: true } },
       createdByUser: true,
+      technician: true,
       visit: {
         include: {
           technician: true,
@@ -1099,16 +1234,17 @@ export async function rescheduleAppointment(
 
   await validateAppointmentTimeWithinSchedule(targetRescheduleDateStr, startAt, endAt);
 
-  const technicianId = input.technicianId || appt.technicianId;
+  // 1. Client-Specific Same-Date Visit Restriction on destination date
+  const targetStartOfDay = new Date(startAt);
+  targetStartOfDay.setHours(0, 0, 0, 0);
+  const targetEndOfDay = new Date(startAt);
+  targetEndOfDay.setHours(23, 59, 59, 999);
 
-  // Validate time slot conflict for client and technician (excluding current appointment)
-  const activeAppts = await (prisma.appointment.findMany as any)({
+  const clientSameDayConflict = await (prisma.appointment.findFirst as any)({
     where: {
       id: { not: appointmentId },
-      OR: [
-        { clientId: appt.clientId },
-        ...(technicianId ? [{ technicianId }] : []),
-      ],
+      clientId: appt.clientId,
+      startAt: { gte: targetStartOfDay, lte: targetEndOfDay },
       status: {
         in: [
           AppointmentStatus.SCHEDULED,
@@ -1120,44 +1256,136 @@ export async function rescheduleAppointment(
     },
   });
 
-  const reqStartMin = startAt.getHours() * 60 + startAt.getMinutes();
-  const reqEndMin = endAt.getHours() * 60 + endAt.getMinutes();
-
-  for (const otherAppt of activeAppts) {
-    const otherStart = new Date(otherAppt.startAt);
-
-    const isSameDate =
-      otherStart.getFullYear() === startAt.getFullYear() &&
-      otherStart.getMonth() === startAt.getMonth() &&
-      otherStart.getDate() === startAt.getDate();
-
-    if (isSameDate) {
-      const formattedDate = otherStart.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
-      throw new Error(
-        `A visit is already scheduled on ${formattedDate} (${otherAppt.timeSlot || "Scheduled"}). The same client cannot have multiple visits scheduled on the same date. Please select another date.`,
-      );
-    }
+  if (clientSameDayConflict) {
+    const formattedDate = targetStartOfDay.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    throw new Error(
+      `A visit is already scheduled for this client on ${formattedDate} (${clientSameDayConflict.timeSlot || "Scheduled"}). The same client cannot have multiple visits scheduled on the same date. Please select another date.`,
+    );
   }
 
-  const updated = await (prisma.appointment.update as any)({
-    where: { id: appointmentId },
-    data: {
-      startAt,
-      endAt,
-      technicianId,
-      status: AppointmentStatus.RESCHEDULED,
-      notes: input.reason
-        ? `${appt.notes || ""}\nRescheduled: ${input.reason}`.trim()
-        : appt.notes,
+  // 2. Resolve destination technician with dynamic multi-technician capacity
+  const eligibleTechs = await getActiveEligibleTechnicians(appt.serviceName);
+  if (eligibleTechs.length === 0) {
+    const conflictErr = new Error("No active technicians available in the system.");
+    (conflictErr as any).statusCode = 409;
+    throw conflictErr;
+  }
+
+  // Find all blocking appointments overlapping the destination interval
+  const overlappingDestinationAppts = await (prisma.appointment.findMany as any)({
+    where: {
+      id: { not: appointmentId },
+      status: {
+        in: [
+          AppointmentStatus.SCHEDULED,
+          AppointmentStatus.CONFIRMED,
+          AppointmentStatus.RESCHEDULED,
+        ],
+      },
+      isArchived: false,
+      startAt: { lt: endAt },
+      endAt: { gt: startAt },
     },
-    include: {
-      client: { include: { user: true } },
-      createdByUser: true,
-    },
+    select: { technicianId: true },
+  });
+
+  const occupiedDestinationTechIds = new Set(
+    overlappingDestinationAppts.map((a: any) => a.technicianId).filter(Boolean)
+  );
+
+  let finalTechnicianId = input.technicianId || appt.technicianId;
+
+  if (input.technicianId) {
+    // Admin explicitly specified a technician
+    if (occupiedDestinationTechIds.has(input.technicianId)) {
+      const conflictErr = new Error(
+        "The selected specialist is not available for this time interval. Please select another specialist or time."
+      );
+      (conflictErr as any).statusCode = 409;
+      throw conflictErr;
+    }
+  } else if (appt.technicianId && !occupiedDestinationTechIds.has(appt.technicianId)) {
+    // Current technician is free at destination slot
+    finalTechnicianId = appt.technicianId;
+  } else {
+    // Current technician is busy or none was assigned; find another free eligible technician
+    const freeTech = eligibleTechs.find((t: any) => !occupiedDestinationTechIds.has(t.id));
+    if (!freeTech) {
+      const conflictErr = new Error(
+        "All technicians are fully booked for the requested reschedule slot. Please choose another time or date."
+      );
+      (conflictErr as any).statusCode = 409;
+      throw conflictErr;
+    }
+    finalTechnicianId = freeTech.id;
+  }
+
+  // 3. Commit the reassignment atomically inside transaction with write lock
+  const updated = await prisma.$transaction(async (tx: any) => {
+    // Lock technician document
+    await tx.technician.update({
+      where: { id: finalTechnicianId },
+      data: { updatedAt: new Date() },
+    });
+
+    // Re-verify no concurrent conflict
+    const concurrentDestConflict = await tx.appointment.findFirst({
+      where: {
+        id: { not: appointmentId },
+        technicianId: finalTechnicianId,
+        status: {
+          in: [
+            AppointmentStatus.SCHEDULED,
+            AppointmentStatus.CONFIRMED,
+            AppointmentStatus.RESCHEDULED,
+          ],
+        },
+        isArchived: false,
+        startAt: { lt: endAt },
+        endAt: { gt: startAt },
+      },
+    });
+
+    if (concurrentDestConflict) {
+      const conflictErr = new Error(
+        "Specialist was just booked by another concurrent request for this time slot. Please choose another slot."
+      );
+      (conflictErr as any).statusCode = 409;
+      throw conflictErr;
+    }
+
+    const apptUpdated = await tx.appointment.update({
+      where: { id: appointmentId },
+      data: {
+        startAt,
+        endAt,
+        technician: finalTechnicianId ? { connect: { id: finalTechnicianId } } : undefined,
+        status: AppointmentStatus.RESCHEDULED,
+        notes: input.reason
+          ? `${appt.notes || ""}\nRescheduled: ${input.reason}`.trim()
+          : appt.notes,
+      },
+      include: {
+        client: { include: { user: true } },
+        createdByUser: true,
+        technician: true,
+      },
+    });
+
+    try {
+      await tx.visit.updateMany({
+        where: { appointmentId },
+        data: { technicianId: finalTechnicianId, status: VisitStatus.SCHEDULED },
+      });
+    } catch (vErr) {
+      console.warn("⚠️ Linked Visit update warning during reschedule:", vErr);
+    }
+
+    return apptUpdated;
   });
 
   await createAppointmentAuditLog({
@@ -1492,13 +1720,39 @@ export async function acceptVisitRequest(
     endAt = parsed.endAt;
   }
 
+  // Validate technician availability for [startAt, endAt) excluding current appointment
+  const overlapping = await (prisma.appointment.findFirst as any)({
+    where: {
+      id: { not: appointmentId },
+      technicianId: technician.id,
+      status: {
+        in: [
+          AppointmentStatus.SCHEDULED,
+          AppointmentStatus.CONFIRMED,
+          AppointmentStatus.RESCHEDULED,
+        ],
+      },
+      isArchived: false,
+      startAt: { lt: endAt },
+      endAt: { gt: startAt },
+    },
+  });
+
+  if (overlapping) {
+    const conflictErr = new Error(
+      `Specialist ${technician.name} is already booked for an overlapping appointment during this time window. Please select another specialist or time.`,
+    );
+    (conflictErr as any).statusCode = 409;
+    throw conflictErr;
+  }
+
   const updated = await (prisma.appointment.update as any)({
     where: { id: appointmentId },
     data: {
-      technicianId: technician.id,
+      technician: { connect: { id: technician.id } },
       startAt,
       endAt,
-      status: AppointmentStatus.SCHEDULED,
+      status: AppointmentStatus.CONFIRMED,
       notes: input.notes
         ? `${appt.notes || ""}\nSpecialist Assigned: ${technician.name}. ${input.notes}`.trim()
         : appt.notes,
@@ -1506,6 +1760,7 @@ export async function acceptVisitRequest(
     include: {
       client: { include: { user: true } },
       createdByUser: true,
+      technician: true,
       visit: {
         include: {
           technician: true,

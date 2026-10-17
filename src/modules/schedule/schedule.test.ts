@@ -66,20 +66,20 @@ async function runTests() {
 
   // 4. Availability Engine Execution & Calculations
   try {
-    const mondayAvail = await calculateDateAvailability("2026-10-12"); // Monday
-    assert(mondayAvail.dayName === "Monday", "2026-10-12 is Monday");
+    const mondayAvail = await calculateDateAvailability("2026-12-07"); // Monday
+    assert(mondayAvail.dayName === "Monday", "2026-12-07 is Monday");
     assert(mondayAvail.isOpen === true, "Monday is open by default");
     assert(mondayAvail.isClosed === false, "Monday is not closed");
     assert(mondayAvail.timeWindows.length > 0, "Monday has operational time windows");
     assert(mondayAvail.availableSlots.length > 0, "Monday produces available booking slots");
 
-    const sundayAvail = await calculateDateAvailability("2026-10-18"); // Sunday
-    assert(sundayAvail.dayName === "Sunday", "2026-10-18 is Sunday");
+    const sundayAvail = await calculateDateAvailability("2026-12-06"); // Sunday
+    assert(sundayAvail.dayName === "Sunday", "2026-12-06 is Sunday");
     assert(sundayAvail.isOpen === false, "Sunday is closed by default");
     assert(sundayAvail.isClosed === true, "Sunday is closed");
 
     // Calendar Range test
-    const rangeRes = await getCalendarRangeAvailability("2026-10-01", "2026-10-07");
+    const rangeRes = await getCalendarRangeAvailability("2026-12-01", "2026-12-07");
     assert(rangeRes.days.length === 7, "Calendar range returned 7 days");
     assert(rangeRes.summary.totalDays === 7, "Summary totalDays is 7");
     assert(rangeRes.summary.openDaysCount > 0, "Open days count is positive");
