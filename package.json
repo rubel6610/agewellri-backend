@@ -9,9 +9,9 @@
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "tsc",
-    "start": "npx tsx src/server.ts",
-    "dev": "npx tsx watch src/server.ts",
+    "build": "node api.js && tsc",
+    "start": "node api.js && npx tsx src/server.ts",
+    "dev": "node api.js && npx tsx watch src/server.ts",
     "postinstall": "prisma generate",
     "seed:admin": "npx tsx prisma/seed.ts",
     "db:seed": "npx tsx prisma/seed.ts",
