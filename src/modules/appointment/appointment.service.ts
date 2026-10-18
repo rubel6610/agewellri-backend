@@ -17,7 +17,10 @@ import {
   ensureVisitAllocationsForPeriod,
   formatPeriodEntitlements,
 } from "../payment/visit-entitlement.service";
-import { getAllSpecialists } from "../specialist/specialist.service";
+import {
+  getAllSpecialists,
+  isTechnicianWorkingSlot,
+} from "../specialist/specialist.service";
 import {
   notifyClientAndFamily,
   notifyAdmins,
@@ -643,6 +646,22 @@ async function validateAndExecuteContractualScheduling(
           }
         }
 
+        const apptStart = new Date(startAt);
+        const apptEnd = new Date(endAt);
+        const targetDayOfWeek = apptStart.getDay();
+        const startMin = apptStart.getHours() * 60 + apptStart.getMinutes();
+        const endMin = apptEnd.getHours() * 60 + apptEnd.getMinutes();
+        const dayNames = [
+          "Sunday",
+          "Monday",
+          "Tuesday",
+          "Wednesday",
+          "Thursday",
+          "Friday",
+          "Saturday",
+        ];
+        const dayName = dayNames[targetDayOfWeek];
+
         let assignedTech: any = null;
         if (isAdmin && requestedTechnician) {
           if (occupiedTechIds.has(requestedTechnician.id)) {
@@ -652,15 +671,36 @@ async function validateAndExecuteContractualScheduling(
             (conflictErr as any).statusCode = 409;
             throw conflictErr;
           }
+          if (
+            !isTechnicianWorkingSlot(
+              requestedTechnician,
+              targetDayOfWeek,
+              startMin,
+              endMin,
+            )
+          ) {
+            const conflictErr = new Error(
+              `Specialist ${requestedTechnician.name} is not scheduled to work on ${dayName} during ${params.timeSlot}. Please adjust their availability or select another specialist.`,
+            );
+            (conflictErr as any).statusCode = 409;
+            throw conflictErr;
+          }
           assignedTech = requestedTechnician;
         } else {
-          // Find first available eligible technician not occupied
+          // Find first available eligible technician not occupied AND scheduled to work for this slot
           const freeTechs = eligibleTechnicians.filter(
-            (t: any) => !occupiedTechIds.has(t.id),
+            (t: any) =>
+              !occupiedTechIds.has(t.id) &&
+              isTechnicianWorkingSlot(
+                t,
+                targetDayOfWeek,
+                startMin,
+                endMin,
+              ),
           );
           if (freeTechs.length === 0) {
             const conflictErr = new Error(
-              `All specialists are fully booked for this time slot (${params.timeSlot}). Please choose another time or date.`,
+              `All specialists are either booked or not scheduled to work for this time slot (${params.timeSlot}). Please choose another time or date.`,
             );
             (conflictErr as any).statusCode = 409;
             throw conflictErr;
@@ -1299,6 +1339,12 @@ export async function rescheduleAppointment(
 
   let finalTechnicianId = input.technicianId || appt.technicianId;
 
+  const reschedApptStart = new Date(startAt);
+  const reschedApptEnd = new Date(endAt);
+  const reschedDayOfWeek = reschedApptStart.getDay();
+  const reschedStartMin = reschedApptStart.getHours() * 60 + reschedApptStart.getMinutes();
+  const reschedEndMin = reschedApptEnd.getHours() * 60 + reschedApptEnd.getMinutes();
+
   if (input.technicianId) {
     // Admin explicitly specified a technician
     if (occupiedDestinationTechIds.has(input.technicianId)) {
@@ -1308,15 +1354,26 @@ export async function rescheduleAppointment(
       (conflictErr as any).statusCode = 409;
       throw conflictErr;
     }
-  } else if (appt.technicianId && !occupiedDestinationTechIds.has(appt.technicianId)) {
-    // Current technician is free at destination slot
+  } else if (
+    appt.technicianId &&
+    !occupiedDestinationTechIds.has(appt.technicianId) &&
+    (() => {
+      const curTech = eligibleTechs.find((t: any) => t.id === appt.technicianId);
+      return !curTech || isTechnicianWorkingSlot(curTech, reschedDayOfWeek, reschedStartMin, reschedEndMin);
+    })()
+  ) {
+    // Current technician is free at destination slot and scheduled to work
     finalTechnicianId = appt.technicianId;
   } else {
-    // Current technician is busy or none was assigned; find another free eligible technician
-    const freeTech = eligibleTechs.find((t: any) => !occupiedDestinationTechIds.has(t.id));
+    // Current technician is busy or not working; find another free eligible technician scheduled to work
+    const freeTech = eligibleTechs.find(
+      (t: any) =>
+        !occupiedDestinationTechIds.has(t.id) &&
+        isTechnicianWorkingSlot(t, reschedDayOfWeek, reschedStartMin, reschedEndMin)
+    );
     if (!freeTech) {
       const conflictErr = new Error(
-        "All technicians are fully booked for the requested reschedule slot. Please choose another time or date."
+        "All technicians are fully booked or not scheduled to work for the requested reschedule slot. Please choose another time or date."
       );
       (conflictErr as any).statusCode = 409;
       throw conflictErr;
@@ -1721,6 +1778,29 @@ export async function acceptVisitRequest(
   }
 
   // Validate technician availability for [startAt, endAt) excluding current appointment
+  const acceptStart = new Date(startAt);
+  const acceptEnd = new Date(endAt);
+  const acceptDayOfWeek = acceptStart.getDay();
+  const acceptStartMin = acceptStart.getHours() * 60 + acceptStart.getMinutes();
+  const acceptEndMin = acceptEnd.getHours() * 60 + acceptEnd.getMinutes();
+  const acceptDayNames = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ];
+
+  if (!isTechnicianWorkingSlot(technician, acceptDayOfWeek, acceptStartMin, acceptEndMin)) {
+    const conflictErr = new Error(
+      `Specialist ${technician.name} is not scheduled to work on ${acceptDayNames[acceptDayOfWeek]} during this time interval. Please adjust their availability or select another specialist.`
+    );
+    (conflictErr as any).statusCode = 409;
+    throw conflictErr;
+  }
+
   const overlapping = await (prisma.appointment.findFirst as any)({
     where: {
       id: { not: appointmentId },

@@ -189,6 +189,33 @@ export async function getAllSpecialists(_forceRefresh = true) {
         const cprExpiryDate = parseDateStr(doc.cprExpiryDate || doc.cprRenewalDate);
         const aedExpiryDate = parseDateStr(doc.aedExpiryDate || doc.aedRenewalDate);
 
+        const weeklySchedule = Array.isArray(doc.weeklySchedule)
+          ? doc.weeklySchedule.map((d: any) => ({
+              dayOfWeek: Number(d.dayOfWeek),
+              dayName: String(d.dayName || ""),
+              isOpen: Boolean(
+                d.isOpen !== undefined
+                  ? d.isOpen
+                  : d.isAvailable !== undefined
+                  ? d.isAvailable
+                  : true,
+              ),
+              isAvailable: Boolean(
+                d.isAvailable !== undefined
+                  ? d.isAvailable
+                  : d.isOpen !== undefined
+                  ? d.isOpen
+                  : true,
+              ),
+              timeWindows: Array.isArray(d.timeWindows)
+                ? d.timeWindows.map((tw: any) => ({
+                    start: String(tw.start),
+                    end: String(tw.end),
+                  }))
+                : [],
+            }))
+          : null;
+
         return {
           id,
           name: doc.name || "Specialist",
@@ -209,6 +236,7 @@ export async function getAllSpecialists(_forceRefresh = true) {
           status: doc.status || "ACTIVE",
           notes: doc.notes || null,
           displayOrder: doc.displayOrder ?? 0,
+          weeklySchedule,
           activeAssignmentsCount: 0,
           createdAt: doc.createdAt?.$date || doc.createdAt || new Date(),
           updatedAt: doc.updatedAt?.$date || doc.updatedAt || new Date(),
@@ -243,6 +271,7 @@ export async function getAllSpecialists(_forceRefresh = true) {
         status: doc.status || "ACTIVE",
         notes: doc.notes || null,
         displayOrder: doc.displayOrder ?? 0,
+        weeklySchedule: (doc.weeklySchedule as any) || null,
         activeAssignmentsCount: 0,
         createdAt: doc.createdAt || new Date(),
         updatedAt: doc.updatedAt || new Date(),
@@ -289,6 +318,7 @@ export async function createSpecialist(input: CreateSpecialistInput, actorUserId
     status: input.status || "ACTIVE",
     notes: input.notes || null,
     displayOrder: input.displayOrder ?? 0,
+    weeklySchedule: input.weeklySchedule || null,
     isArchived: false,
     createdAt: { $date: nowIso },
     updatedAt: { $date: nowIso },
@@ -362,6 +392,7 @@ export async function updateSpecialist(
   if (input.notes !== undefined) updateFields.notes = input.notes;
   if (input.displayOrder !== undefined) updateFields.displayOrder = input.displayOrder;
   if (input.isArchived !== undefined) updateFields.isArchived = input.isArchived;
+  if (input.weeklySchedule !== undefined) updateFields.weeklySchedule = input.weeklySchedule;
 
   const rawSet = {
     ...updateFields,
@@ -498,6 +529,23 @@ export async function assignSpecialistToAppointment(
   const specialistName = specialist?.name || "Assigned Specialist";
   const specialistTitle = specialist?.title || "Senior Home Safety Specialist® certified by Age Safe® America";
 
+  // Verify that specialist is scheduled to work during this interval according to custom availability
+  const targetSpecialist = await getSpecialistById(input.specialistId);
+  const apptStart = new Date(appointment.startAt);
+  const apptEnd = new Date(appointment.endAt);
+  const targetDayOfWeek = apptStart.getDay();
+  const startMin = apptStart.getHours() * 60 + apptStart.getMinutes();
+  const endMin = apptEnd.getHours() * 60 + apptEnd.getMinutes();
+
+  if (targetSpecialist && !isTechnicianWorkingSlot(targetSpecialist, targetDayOfWeek, startMin, endMin)) {
+    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const conflictErr = new Error(
+      `Specialist ${specialistName} is not scheduled to work on ${dayNames[targetDayOfWeek]} during this time interval. Please update their availability or choose another specialist.`
+    );
+    (conflictErr as any).statusCode = 409;
+    throw conflictErr;
+  }
+
   // Verify that specialist is available during the appointment's interval [startAt, endAt)
   const overlapping = await (prisma.appointment.findFirst as any)({
     where: {
@@ -629,5 +677,70 @@ export async function assignSpecialistToAppointment(
 }
 
 /**
- * Seed initial Rhode Island specialists if catalog is empty.
+ * Check if a specialist is scheduled to work during a specific day and time interval.
+ * Returns true if the specialist's configured weeklySchedule includes this interval,
+ * or if no custom schedule is set and the slot falls within default operational hours.
  */
+export function isTechnicianWorkingSlot(
+  technician: any,
+  dayOfWeek: number,
+  slotStartMin: number,
+  slotEndMin: number,
+  fallbackTimeWindows?: Array<{ start: string; end: string }>,
+): boolean {
+  if (!technician || technician.status !== "ACTIVE" || technician.isArchived) {
+    return false;
+  }
+
+  const schedule = technician.weeklySchedule;
+
+  // Fallback if no custom schedule is defined for this technician
+  if (!Array.isArray(schedule) || schedule.length === 0) {
+    if (!fallbackTimeWindows || fallbackTimeWindows.length === 0) {
+      // Default company operational hours: Sun(0) & Wed(3) closed, others 08:00 - 18:00
+      if (dayOfWeek === 0 || dayOfWeek === 3) return false;
+      return slotStartMin >= 480 && slotEndMin <= 1080;
+    }
+    return fallbackTimeWindows.some((win) => {
+      const wStart = parseTimeStrToMinutes(win.start);
+      const wEnd = parseTimeStrToMinutes(win.end);
+      return wStart <= slotStartMin && wEnd >= slotEndMin;
+    });
+  }
+
+  const dayEntry = schedule.find((d: any) => Number(d.dayOfWeek) === dayOfWeek);
+  if (!dayEntry) return false;
+
+  const isOpen = Boolean(
+    dayEntry.isOpen !== undefined ? dayEntry.isOpen : dayEntry.isAvailable,
+  );
+  if (!isOpen) return false;
+
+  const windows = Array.isArray(dayEntry.timeWindows) ? dayEntry.timeWindows : [];
+  if (windows.length === 0) return false;
+
+  return windows.some((win: any) => {
+    const wStart = parseTimeStrToMinutes(win.start);
+    const wEnd = parseTimeStrToMinutes(win.end);
+    return wStart <= slotStartMin && wEnd >= slotEndMin;
+  });
+}
+
+export function parseTimeStrToMinutes(str: string): number {
+  if (!str) return 0;
+  const match12 = str.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if (match12) {
+    let hour = parseInt(match12[1], 10);
+    const min = parseInt(match12[2], 10);
+    const isPM = match12[3].toUpperCase() === "PM";
+    if (isPM && hour < 12) hour += 12;
+    if (!isPM && hour === 12) hour = 0;
+    return hour * 60 + min;
+  }
+  const parts = str.split(":");
+  if (parts.length >= 2) {
+    return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+  }
+  return 0;
+}
+

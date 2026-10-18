@@ -12,7 +12,7 @@ import {
   rescheduleAppointment,
   parseDateAndTimeSlot,
 } from "../appointment/appointment.service";
-import { assignSpecialistToAppointment } from "../specialist/specialist.service";
+import { assignSpecialistToAppointment, updateSpecialist, isTechnicianWorkingSlot } from "../specialist/specialist.service";
 
 console.log("==================================================");
 console.log("🧪 RUNNING COMPREHENSIVE MULTI-TECHNICIAN SCHEDULING TESTS");
@@ -408,6 +408,89 @@ async function runMultiTechTests() {
     for (const ca of concurrentAppts) {
       createdApptIds.push(ca.id);
     }
+
+    // ---------------------------------------------------------
+    // TEST 28-31: Custom Individual Specialist Availability
+    // ---------------------------------------------------------
+    console.log("Testing custom specialist availability scheduling...");
+
+    // Configure Tech A to ONLY work on Tuesdays (dayOfWeek 2) from 09:00 to 13:00.
+    // Friday (dayOfWeek 5) is marked closed for Tech A.
+    await updateSpecialist(techA.id, {
+      weeklySchedule: [
+        { dayOfWeek: 0, dayName: "Sunday", isOpen: false, timeWindows: [] },
+        { dayOfWeek: 1, dayName: "Monday", isOpen: false, timeWindows: [] },
+        { dayOfWeek: 2, dayName: "Tuesday", isOpen: true, timeWindows: [{ start: "09:00", end: "13:00" }] },
+        { dayOfWeek: 3, dayName: "Wednesday", isOpen: false, timeWindows: [] },
+        { dayOfWeek: 4, dayName: "Thursday", isOpen: false, timeWindows: [] },
+        { dayOfWeek: 5, dayName: "Friday", isOpen: false, timeWindows: [] },
+        { dayOfWeek: 6, dayName: "Saturday", isOpen: false, timeWindows: [] },
+      ],
+    });
+
+    const allSpecialistsAfterUpdate = await (await import("../specialist/specialist.service")).getAllSpecialists(true);
+    const techAFromService = allSpecialistsAfterUpdate.find((s: any) => s.id === techA.id);
+
+    // TEST 28: isTechnicianWorkingSlot check
+    const isWorkingFriday = isTechnicianWorkingSlot(techAFromService, 5, 600, 660); // 10:00-11:00 on Friday
+    const isWorkingTuesday = isTechnicianWorkingSlot(techAFromService, 2, 600, 660); // 10:00-11:00 on Tuesday
+    assert(!isWorkingFriday && isWorkingTuesday,
+      "Tech A custom schedule correctly evaluates: NOT working Friday, working Tuesday 10:00-11:00");
+
+    // TEST 29: Dynamic date availability on Friday excludes Tech A
+    const fridayAvail = await calculateDateAvailability(testDate, { durationMinutes: 60 });
+    const fridaySlot = fridayAvail.allPossibleSlots.find((s: any) => s.startTime === "10:00 AM" || s.startMinutes === 600);
+    assert(fridaySlot && !fridaySlot.availableTechnicianIds.includes(techA.id),
+      "Friday 10:00-11:00 slot dynamically excludes Tech A who is not scheduled to work");
+
+    // TEST 30: Assigning Tech A to an appointment on Friday is rejected with 409 conflict
+    const fridaySlotDates = parseDateAndTimeSlot("2026-11-13", "10:00 AM – 11:00 AM");
+    const fridayApptForTechA = await db.appointment.create({
+      data: {
+        client: { connect: { id: testClient.id } },
+        createdByUser: { connect: { id: testUser.id } },
+        serviceName: "Home Safety Assessment",
+        startAt: fridaySlotDates.startAt,
+        endAt: fridaySlotDates.endAt,
+        status: AppointmentStatus.SCHEDULED,
+        location: "100 Main St, Providence, RI",
+      },
+    });
+    createdApptIds.push(fridayApptForTechA.id);
+
+    let assignFridayError: any = null;
+    try {
+      await assignSpecialistToAppointment({
+        appointmentId: fridayApptForTechA.id,
+        specialistId: techA.id,
+      });
+    } catch (err: any) {
+      assignFridayError = err;
+    }
+    assert(assignFridayError && assignFridayError.statusCode === 409 && assignFridayError.message.includes("not scheduled to work"),
+      "Assigning Tech A to Friday slot fails with 409 conflict indicating specialist is not scheduled to work");
+
+    // TEST 31: Assigning Tech A to a Tuesday slot (when scheduled to work) succeeds
+    const tuesdaySlotDates = parseDateAndTimeSlot("2026-11-17", "10:00 AM – 11:00 AM");
+    const tuesdayApptForTechA = await db.appointment.create({
+      data: {
+        client: { connect: { id: testClient.id } },
+        createdByUser: { connect: { id: testUser.id } },
+        serviceName: "Home Safety Assessment",
+        startAt: tuesdaySlotDates.startAt,
+        endAt: tuesdaySlotDates.endAt,
+        status: AppointmentStatus.SCHEDULED,
+        location: "100 Main St, Providence, RI",
+      },
+    });
+    createdApptIds.push(tuesdayApptForTechA.id);
+
+    const assignedTuesday = await assignSpecialistToAppointment({
+      appointmentId: tuesdayApptForTechA.id,
+      specialistId: techA.id,
+    });
+    assert(assignedTuesday && assignedTuesday.technicianId === techA.id,
+      "Assigning Tech A to Tuesday slot succeeds when specialist is scheduled to work");
 
     console.log("==================================================");
     console.log(`🎉 ALL ${passed} MULTI-TECHNICIAN SCHEDULING TESTS PASSED!`);

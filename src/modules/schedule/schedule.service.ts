@@ -10,6 +10,10 @@ import {
   OverrideType,
 } from "./schedule.validation";
 import { getUSHolidayForDate } from "../../utils/us-holidays.util";
+import {
+  getAllSpecialists,
+  isTechnicianWorkingSlot,
+} from "../specialist/specialist.service";
 
 const db = prisma as any;
 
@@ -913,13 +917,21 @@ export async function previewOverrideConflicts(
  */
 export async function getActiveEligibleTechnicians(serviceType?: string): Promise<any[]> {
   try {
-    const rawTechnicians = await db.technician.findMany({
-      where: {
-        status: "ACTIVE",
-        isArchived: false,
-      },
-      orderBy: { displayOrder: "asc" },
-    });
+    let rawTechnicians: any[] = [];
+    try {
+      const all = await getAllSpecialists();
+      rawTechnicians = all.filter(
+        (t: any) => t.status === "ACTIVE" && !t.isArchived,
+      );
+    } catch {
+      rawTechnicians = await db.technician.findMany({
+        where: {
+          status: "ACTIVE",
+          isArchived: false,
+        },
+        orderBy: { displayOrder: "asc" },
+      });
+    }
 
     if (!serviceType) {
       return rawTechnicians;
@@ -1248,14 +1260,23 @@ export async function calculateDateAvailability(
           }
         }
 
-        const availableTechs = eligibleTechnicians.filter(
+        // DYNAMIC MULTI-TECHNICIAN OVERLAP & CUSTOM AVAILABILITY CALCULATION
+        // Only include technicians who are actively scheduled to work this slot
+        const workingTechsForSlot = eligibleTechnicians.filter((t: any) =>
+          isTechnicianWorkingSlot(t, dayOfWeek, m, slotEnd, effectiveWindows)
+        );
+
+        const availableTechs = workingTechsForSlot.filter(
           (t: any) => !occupiedTechIds.has(t.id)
         );
 
-        // Effective booked count is unique occupied technicians plus any unassigned bookings
-        const effectiveBookedCount = Math.min(totalCapacity, occupiedTechIds.size + unassignedOverlapCount);
-        const remainingCapacity = Math.max(0, totalCapacity - effectiveBookedCount);
-        const isFull = totalCapacity > 0 ? remainingCapacity <= 0 : bookedSlots.length > 0;
+        const slotCapacity = workingTechsForSlot.length;
+        const effectiveBookedCount = Math.min(
+          slotCapacity,
+          workingTechsForSlot.filter((t: any) => occupiedTechIds.has(t.id)).length + unassignedOverlapCount
+        );
+        const remainingCapacity = Math.max(0, slotCapacity - effectiveBookedCount);
+        const isFull = slotCapacity > 0 ? remainingCapacity <= 0 : bookedSlots.length > 0;
 
         // Check if today and slot is in the past
         const isPastSlot = isToday && m <= currentMinutesFromMidnight + 15; // 15 min buffer
@@ -1267,7 +1288,7 @@ export async function calculateDateAvailability(
           startMinutes: m,
           endMinutes: slotEnd,
           windowIndex: winIdx,
-          totalCapacity,
+          totalCapacity: slotCapacity,
           bookedCount: effectiveBookedCount,
           remainingCapacity,
           isAvailable: !isFull && !isPastSlot,
