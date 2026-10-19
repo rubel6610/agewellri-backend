@@ -24,6 +24,9 @@ import {
   handleWebhook,
   handleGetClientVisitEntitlements,
   handleGetAdminClientVisitEntitlements,
+  handleGetAdminStripeSettings,
+  handleUpdateAdminStripeSettings,
+  handleTestStripeConnection,
 } from "./payment.controller";
 
 const router = Router();
@@ -56,6 +59,11 @@ router.get("/admin/renewals", authenticate, handleGetAdminUpcomingRenewals);
 router.get("/admin/client/:id/visit-entitlements", authenticate, handleGetAdminClientVisitEntitlements);
 router.post("/admin/trigger-reminders", authenticate, handleAdminTriggerReminders);
 router.post("/admin/retry-charge", authenticate, handleAdminRetryCharge);
+
+// Admin Stripe Gateway Settings & Connectivity
+router.get("/admin/stripe-settings", authenticate, handleGetAdminStripeSettings);
+router.put("/admin/stripe-settings", authenticate, handleUpdateAdminStripeSettings);
+router.post("/admin/test-connection", authenticate, handleTestStripeConnection);
 
 export default router;
 

@@ -9,10 +9,18 @@ import { globalErrorHandler, notFoundHandler } from "./middlewares/error.middlew
 
 const app: Application = express();
 
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  "http://localhost:3000",
+  ...(process.env.ADDITIONAL_ALLOWED_ORIGINS
+    ? process.env.ADDITIONAL_ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+    : []),
+].filter(Boolean) as string[];
+
 // Middlewares
 app.use(
   cors({
-    origin: [process.env.FRONTEND_URL!, "https://arfanrubel3000.ilmifygroup.com", "http://localhost:3000"],
+    origin: allowedOrigins,
     credentials: true,
   })
 );

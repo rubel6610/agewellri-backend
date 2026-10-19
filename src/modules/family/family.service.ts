@@ -1196,7 +1196,7 @@ export async function sendReportToFamilyRecipients(
     if (fs.existsSync(fullPath)) {
       pdfPath = fullPath;
     }
-    const backendBase = (process.env.BACKEND_URL || "https://khatash5173.ilmifygroup.com").replace(/\/$/, "");
+    const backendBase = (process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5173}`).replace(/\/$/, "");
     downloadUrl = `${backendBase}/uploads/reports/${filename}`;
   }
 
