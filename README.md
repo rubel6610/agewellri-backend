@@ -32,8 +32,8 @@ Before starting, ensure you have the following installed on your system:
 ### 1. Clone & Navigate to Repository
 
 ```bash
-git clone https://github.com/rubel6610/agewellri-backend.git
-cd agewellri-backend
+git clone <repository-url>
+cd age-well-ri-backend
 ```
 
 ### 2. Install Dependencies
