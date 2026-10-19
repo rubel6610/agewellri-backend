@@ -6,6 +6,9 @@ temp_interactive_push.bat
 .gitignore
 nul
 .env*
+!.env.example
 .env
 public/fonts/**
 uploads/authority-documents/*
+api.js
+

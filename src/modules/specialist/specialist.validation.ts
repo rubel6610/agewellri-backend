@@ -1,5 +1,20 @@
 import { z } from "zod";
 
+export const specialistTimeWindowSchema = z.object({
+  start: z.string().regex(/^\d{1,2}:\d{2}$/, "Start time must be HH:MM"),
+  end: z.string().regex(/^\d{1,2}:\d{2}$/, "End time must be HH:MM"),
+});
+
+export const specialistDayScheduleSchema = z.object({
+  dayOfWeek: z.number().int().min(0).max(6),
+  dayName: z.string().optional(),
+  isOpen: z.boolean().default(true),
+  isAvailable: z.boolean().optional(),
+  timeWindows: z.array(specialistTimeWindowSchema).default([]),
+});
+
+export const specialistWeeklyScheduleSchema = z.array(specialistDayScheduleSchema);
+
 export const createSpecialistSchema = z.object({
   name: z.string().min(2, "Specialist name is required"),
   email: z.string().email("Valid email is required").optional().nullable(),
@@ -8,14 +23,20 @@ export const createSpecialistSchema = z.object({
   specialties: z.array(z.string()).default([]),
   shssCertified: z.boolean().default(false).optional(),
   shssRenewalDate: z.string().optional().nullable(),
+  shssExpiryDate: z.string().optional().nullable(),
   cprCertified: z.boolean().default(false).optional(),
+  cprExpiryDate: z.string().optional().nullable(),
+  cprRenewalDate: z.string().optional().nullable(),
   aedCertified: z.boolean().default(false).optional(),
+  aedExpiryDate: z.string().optional().nullable(),
+  aedRenewalDate: z.string().optional().nullable(),
   backgroundChecked: z.boolean().default(false).optional(),
   bilingualSpanish: z.boolean().default(false).optional(),
   color: z.string().default("#294B68").optional(),
   notes: z.string().optional().nullable(),
   displayOrder: z.number().int().default(0).optional(),
   status: z.enum(["ACTIVE", "INACTIVE", "SUSPENDED", "PENDING"]).default("ACTIVE"),
+  weeklySchedule: specialistWeeklyScheduleSchema.optional().nullable(),
 });
 
 export const updateSpecialistSchema = z.object({
@@ -26,8 +47,13 @@ export const updateSpecialistSchema = z.object({
   specialties: z.array(z.string()).optional(),
   shssCertified: z.boolean().optional(),
   shssRenewalDate: z.string().optional().nullable(),
+  shssExpiryDate: z.string().optional().nullable(),
   cprCertified: z.boolean().optional(),
+  cprExpiryDate: z.string().optional().nullable(),
+  cprRenewalDate: z.string().optional().nullable(),
   aedCertified: z.boolean().optional(),
+  aedExpiryDate: z.string().optional().nullable(),
+  aedRenewalDate: z.string().optional().nullable(),
   backgroundChecked: z.boolean().optional(),
   bilingualSpanish: z.boolean().optional(),
   color: z.string().optional(),
@@ -35,6 +61,7 @@ export const updateSpecialistSchema = z.object({
   displayOrder: z.number().int().optional(),
   status: z.enum(["ACTIVE", "INACTIVE", "SUSPENDED", "PENDING"]).optional(),
   isArchived: z.boolean().optional(),
+  weeklySchedule: specialistWeeklyScheduleSchema.optional().nullable(),
 });
 
 export const assignSpecialistSchema = z.object({

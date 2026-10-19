@@ -608,7 +608,7 @@ export async function uploadVisitReport(
     "AgeWellRI Specialist";
 
   const fullPdfPath = path.join(process.cwd(), "uploads", "reports", storageFilename);
-  const backendBase = (process.env.BACKEND_URL || "https://khatash5173.ilmifygroup.com").replace(/\/$/, "");
+  const backendBase = (process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5173}`).replace(/\/$/, "");
   const directReportDownloadUrl = `${backendBase}/uploads/reports/${storageFilename}`;
 
   if (primaryRecipientEmail) {

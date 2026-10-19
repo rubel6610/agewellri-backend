@@ -78,3 +78,18 @@ model StripeWebhookEvent {
 
   @@index([eventType])
 }
+
+model PaymentGatewaySetting {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  provider        String    @unique @default("STRIPE")
+  publishableKey  String?
+  secretKey       String?
+  webhookSecret   String?
+  isLiveMode      Boolean   @default(false)
+  isActive        Boolean   @default(true)
+  lastTestedAt    DateTime?
+  updatedBy       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+

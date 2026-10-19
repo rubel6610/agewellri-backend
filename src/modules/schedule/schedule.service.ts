@@ -9,7 +9,11 @@ import {
   OverrideStatus,
   OverrideType,
 } from "./schedule.validation";
-import { getUSHolidayForDate, getUSHolidaysForYear } from "../../utils/us-holidays.util";
+import { getUSHolidayForDate } from "../../utils/us-holidays.util";
+import {
+  getAllSpecialists,
+  isTechnicianWorkingSlot,
+} from "../specialist/specialist.service";
 
 const db = prisma as any;
 
@@ -506,7 +510,7 @@ export async function createScheduleOverride(
     try {
       const off = await db.offDay.create({
         data: {
-          title: input.title.trim(),
+          title: (input.title || "").trim() || (input.status === "CLOSED" ? "Office Closed" : "Custom Hours"),
           description: input.description?.trim() || null,
           startDate,
           endDate,
@@ -543,7 +547,7 @@ export async function createScheduleOverride(
 
   const override = await db.scheduleOverride.create({
     data: {
-      title: input.title.trim(),
+      title: (input.title || "").trim(),
       description: input.description?.trim() || null,
       overrideType: input.overrideType || "DATE",
       status: input.status || "CLOSED",
@@ -907,8 +911,53 @@ export async function previewOverrideConflicts(
 }
 
 /**
+ * Query active, eligible technicians for dynamic capacity calculations.
+ * Excludes archived or inactive technicians.
+ * Optionally filters by required service specialty.
+ */
+export async function getActiveEligibleTechnicians(serviceType?: string): Promise<any[]> {
+  try {
+    let rawTechnicians: any[] = [];
+    try {
+      const all = await getAllSpecialists();
+      rawTechnicians = all.filter(
+        (t: any) => t.status === "ACTIVE" && !t.isArchived,
+      );
+    } catch {
+      rawTechnicians = await db.technician.findMany({
+        where: {
+          status: "ACTIVE",
+          isArchived: false,
+        },
+        orderBy: { displayOrder: "asc" },
+      });
+    }
+
+    if (!serviceType) {
+      return rawTechnicians;
+    }
+
+    const sTypeLower = serviceType.toLowerCase();
+    if (sTypeLower.includes("clean")) {
+      const filtered = rawTechnicians.filter((t: any) => {
+        const specs = Array.isArray(t.specialties) ? t.specialties : [];
+        const title = (t.title || "").toLowerCase();
+        return specs.some((s: string) => String(s).toLowerCase().includes("clean")) || title.includes("clean");
+      });
+      return filtered.length > 0 ? filtered : rawTechnicians;
+    }
+
+    return rawTechnicians;
+  } catch (err) {
+    console.warn("⚠️ Failed to load technicians for capacity calculation:", err);
+    return [];
+  }
+}
+
+/**
  * Core Authoritative Availability Engine
  * Resolves Date Override > Week Override > Default Weekly Schedule minus Booked Slots
+ * Dynamic Multi-Technician Capacity: Slot capacity is derived from total active eligible technicians.
  */
 export async function calculateDateAvailability(
   targetDateStr: string,
@@ -917,6 +966,7 @@ export async function calculateDateAvailability(
     clientId?: string;
     technicianId?: string;
     excludeAppointmentId?: string;
+    serviceType?: string;
   } = {}
 ) {
   const durationMinutes = options.durationMinutes || 60;
@@ -1088,6 +1138,13 @@ export async function calculateDateAvailability(
   const startOfDay = new Date(Date.UTC(tY, tM, tD, 0, 0, 0, 0));
   const endOfDay = new Date(Date.UTC(tY, tM, tD, 23, 59, 59, 999));
 
+  // Load active eligible technicians for dynamic multi-technician capacity
+  let eligibleTechnicians = await getActiveEligibleTechnicians(options.serviceType);
+  if (options.technicianId) {
+    eligibleTechnicians = eligibleTechnicians.filter((t: any) => t.id === options.technicianId);
+  }
+  const totalCapacity = eligibleTechnicians.length;
+
   const existingAppts = await db.appointment.findMany({
     where: {
       startAt: { gte: startOfDay, lte: endOfDay },
@@ -1129,8 +1186,10 @@ export async function calculateDateAvailability(
       timeSlot: `${minutesToTimeString(startMin)} – ${minutesToTimeString(endMin)}`,
       startTime: minutesToTimeString(startMin),
       endTime: minutesToTimeString(endMin),
+      technicianId: appt.technicianId || null,
       technicianName: appt.technician?.name || "Unassigned",
       status: appt.status,
+      isRequested: Boolean(appt.isRequested),
     };
   });
 
@@ -1142,6 +1201,12 @@ export async function calculateDateAvailability(
     startMinutes: number;
     endMinutes: number;
     windowIndex: number;
+    totalCapacity: number;
+    bookedCount: number;
+    remainingCapacity: number;
+    isAvailable: boolean;
+    availableTechnicianIds: string[];
+    availableTechnicians: Array<{ id: string; name: string; title?: string }>;
   }> = [];
 
   const allPossibleSlots: Array<{
@@ -1151,6 +1216,12 @@ export async function calculateDateAvailability(
     startMinutes: number;
     endMinutes: number;
     windowIndex: number;
+    totalCapacity: number;
+    bookedCount: number;
+    remainingCapacity: number;
+    isAvailable: boolean;
+    availableTechnicianIds: string[];
+    availableTechnicians: Array<{ id: string; name: string; title?: string }>;
   }> = [];
 
   // Check if date is in the past
@@ -1172,6 +1243,44 @@ export async function calculateDateAvailability(
       for (let m = wStartMin; m + durationMinutes <= wEndMin; m += step) {
         const slotEnd = m + durationMinutes;
         const slotFormatted = `${minutesToTimeString(m)} – ${minutesToTimeString(slotEnd)}`;
+
+        // DYNAMIC MULTI-TECHNICIAN OVERLAP CALCULATION
+        // Standard half-open interval rule: max(m, booked.startMinutes) < min(slotEnd, booked.endMinutes)
+        const overlappingBookings = bookedSlots.filter((booked: any) => {
+          return Math.max(m, booked.startMinutes) < Math.min(slotEnd, booked.endMinutes);
+        });
+
+        const occupiedTechIds = new Set<string>();
+        let unassignedOverlapCount = 0;
+        for (const b of overlappingBookings) {
+          if (b.technicianId) {
+            occupiedTechIds.add(b.technicianId);
+          } else {
+            unassignedOverlapCount++;
+          }
+        }
+
+        // DYNAMIC MULTI-TECHNICIAN OVERLAP & CUSTOM AVAILABILITY CALCULATION
+        // Only include technicians who are actively scheduled to work this slot
+        const workingTechsForSlot = eligibleTechnicians.filter((t: any) =>
+          isTechnicianWorkingSlot(t, dayOfWeek, m, slotEnd, effectiveWindows)
+        );
+
+        const availableTechs = workingTechsForSlot.filter(
+          (t: any) => !occupiedTechIds.has(t.id)
+        );
+
+        const slotCapacity = workingTechsForSlot.length;
+        const effectiveBookedCount = Math.min(
+          slotCapacity,
+          workingTechsForSlot.filter((t: any) => occupiedTechIds.has(t.id)).length + unassignedOverlapCount
+        );
+        const remainingCapacity = Math.max(0, slotCapacity - effectiveBookedCount);
+        const isFull = slotCapacity > 0 ? remainingCapacity <= 0 : bookedSlots.length > 0;
+
+        // Check if today and slot is in the past
+        const isPastSlot = isToday && m <= currentMinutesFromMidnight + 15; // 15 min buffer
+
         const slotObj = {
           slot: slotFormatted,
           startTime: minutesToTimeString(m),
@@ -1179,19 +1288,21 @@ export async function calculateDateAvailability(
           startMinutes: m,
           endMinutes: slotEnd,
           windowIndex: winIdx,
+          totalCapacity: slotCapacity,
+          bookedCount: effectiveBookedCount,
+          remainingCapacity,
+          isAvailable: !isFull && !isPastSlot,
+          availableTechnicianIds: availableTechs.map((t: any) => t.id),
+          availableTechnicians: availableTechs.map((t: any) => ({
+            id: t.id,
+            name: t.name,
+            title: t.title,
+          })),
         };
 
         allPossibleSlots.push(slotObj);
 
-        // Check conflicts with existing bookings
-        const hasConflict = bookedSlots.some((booked: any) => {
-          return Math.max(m, booked.startMinutes) < Math.min(slotEnd, booked.endMinutes);
-        });
-
-        // Check if today and slot is in the past
-        const isPastSlot = isToday && m <= currentMinutesFromMidnight + 15; // 15 min buffer
-
-        if (!hasConflict && !isPastSlot) {
+        if (!isFull && !isPastSlot) {
           availableSlots.push(slotObj);
         }
       }
@@ -1209,11 +1320,17 @@ export async function calculateDateAvailability(
     overrideTitle: effectiveTitle,
     overrideDescription: effectiveDescription,
     overrideStatus: effectiveStatus,
+    overrideItem: dateOverride
+      ? formatScheduleOverride(dateOverride)
+      : weekOverride
+      ? formatScheduleOverride(weekOverride)
+      : null,
     timeWindows: effectiveWindows,
     holiday,
     isHoliday: Boolean(holiday),
     isPastDate,
     isToday,
+    totalCapacity,
     availableSlots,
     bookedSlots,
     allPossibleSlots,
@@ -1221,6 +1338,7 @@ export async function calculateDateAvailability(
       totalPossibleSlots: allPossibleSlots.length,
       availableCount: availableSlots.length,
       bookedCount: bookedSlots.length,
+      totalCapacity,
     },
   };
 }
@@ -1315,6 +1433,13 @@ export async function getCalendarRangeAvailability(
   const now = new Date();
   const currentMidnightUTC = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
   const currentMinutesFromMidnight = now.getHours() * 60 + now.getMinutes();
+
+  // Load active eligible technicians for dynamic multi-technician capacity
+  let eligibleTechnicians = await getActiveEligibleTechnicians();
+  if (options.technicianId) {
+    eligibleTechnicians = eligibleTechnicians.filter((t: any) => t.id === options.technicianId);
+  }
+  const totalCapacity = eligibleTechnicians.length;
 
   while (current.getTime() <= endDate.getTime()) {
     const y = current.getUTCFullYear();
@@ -1464,6 +1589,7 @@ export async function getCalendarRangeAvailability(
         timeSlot: `${minutesToTimeString(startMin)} – ${minutesToTimeString(endMin)}`,
         startTime: minutesToTimeString(startMin),
         endTime: minutesToTimeString(endMin),
+        technicianId: appt.technicianId || null,
         technicianName: appt.technician?.name || "Unassigned",
         status: appt.status,
       };
@@ -1485,6 +1611,30 @@ export async function getCalendarRangeAvailability(
         for (let min = wStartMin; min + durationMinutes <= wEndMin; min += step) {
           const slotEnd = min + durationMinutes;
           const slotFormatted = `${minutesToTimeString(min)} – ${minutesToTimeString(slotEnd)}`;
+
+          const overlappingBookings = bookedSlots.filter((b: any) => {
+            return Math.max(min, b.startMinutes) < Math.min(slotEnd, b.endMinutes);
+          });
+
+          const occupiedTechIds = new Set<string>();
+          let unassignedOverlapCount = 0;
+          for (const b of overlappingBookings) {
+            if (b.technicianId) {
+              occupiedTechIds.add(b.technicianId);
+            } else {
+              unassignedOverlapCount++;
+            }
+          }
+
+          const availableTechs = eligibleTechnicians.filter(
+            (t: any) => !occupiedTechIds.has(t.id)
+          );
+
+          const effectiveBookedCount = Math.min(totalCapacity, occupiedTechIds.size + unassignedOverlapCount);
+          const remainingCapacity = Math.max(0, totalCapacity - effectiveBookedCount);
+          const isFull = totalCapacity > 0 ? remainingCapacity <= 0 : bookedSlots.length > 0;
+          const isPastSlot = isToday && min <= currentMinutesFromMidnight + 15;
+
           const slotObj = {
             slot: slotFormatted,
             startTime: minutesToTimeString(min),
@@ -1492,15 +1642,20 @@ export async function getCalendarRangeAvailability(
             startMinutes: min,
             endMinutes: slotEnd,
             windowIndex: winIdx,
+            totalCapacity,
+            bookedCount: effectiveBookedCount,
+            remainingCapacity,
+            isAvailable: !isFull && !isPastSlot,
+            availableTechnicianIds: availableTechs.map((t: any) => t.id),
+            availableTechnicians: availableTechs.map((t: any) => ({
+              id: t.id,
+              name: t.name,
+              title: t.title,
+            })),
           };
           allPossibleSlots.push(slotObj);
 
-          const hasConflict = bookedSlots.some((b) => {
-            return Math.max(min, b.startMinutes) < Math.min(slotEnd, b.endMinutes);
-          });
-          const isPastSlot = isToday && min <= currentMinutesFromMidnight + 15;
-
-          if (!hasConflict && !isPastSlot) {
+          if (!isFull && !isPastSlot) {
             availableSlots.push(slotObj);
           }
         }
@@ -1518,17 +1673,25 @@ export async function getCalendarRangeAvailability(
       overrideTitle: effectiveTitle,
       overrideDescription: effectiveDescription,
       overrideStatus: effectiveStatus,
+      overrideItem: dateOverride
+        ? formatScheduleOverride(dateOverride)
+        : weekOverride
+        ? formatScheduleOverride(weekOverride)
+        : null,
       timeWindows: effectiveWindows,
       holiday,
       isHoliday: Boolean(holiday),
       isPastDate,
       isToday,
+      totalCapacity,
       availableSlots,
       bookedSlots,
+      allPossibleSlots,
       metrics: {
         totalPossibleSlots: allPossibleSlots.length,
         availableCount: availableSlots.length,
         bookedCount: bookedSlots.length,
+        totalCapacity,
       },
     });
 
@@ -1578,14 +1741,20 @@ export async function validateAppointmentTimeWithinSchedule(
     );
   }
 
+  if (endAt.getTime() <= startAt.getTime()) {
+    throw new Error(
+      "Appointment end time must be strictly after the start time."
+    );
+  }
+
   const reqStartMin = startAt.getHours() * 60 + startAt.getMinutes();
   const reqEndMin = endAt.getHours() * 60 + endAt.getMinutes();
 
-  // Check if requested range falls inside any open window
+  // Check if requested range falls strictly inside any open window
   const fallsWithinWindow = availability.timeWindows.some((win) => {
     const wStart = timeStringToMinutes(win.start);
     const wEnd = timeStringToMinutes(win.end);
-    return reqStartMin >= wStart && reqEndMin <= wEnd;
+    return reqEndMin > reqStartMin && reqStartMin >= wStart && reqEndMin <= wEnd;
   });
 
   if (!fallsWithinWindow) {

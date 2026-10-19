@@ -952,14 +952,16 @@ export async function getAdminDashboardStats() {
   const upcomingVisitsCount = upcomingAppointments.length;
   const requestedAppointmentsCount = allAppointments.filter(
     (a: any) =>
+      Boolean(a.isRequested) ||
       (a.status || "").toUpperCase() === "REQUESTED" ||
       (!a.technicianId && (a.status || "").toUpperCase() !== "CANCELLED"),
   ).length;
   const scheduledAppointmentsCount = allAppointments.filter(
     (a: any) =>
+      !a.isRequested &&
       ["SCHEDULED", "CONFIRMED", "RESCHEDULED"].includes(
         (a.status || "").toUpperCase(),
-      ) && Boolean(a.technicianId),
+      ),
   ).length;
   const cancelledAppointmentsCount = allAppointments.filter(
     (a: any) => (a.status || "").toUpperCase() === "CANCELLED",

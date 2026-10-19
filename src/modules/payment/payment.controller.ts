@@ -17,7 +17,7 @@ import {
 
 /**
  * GET /api/v1/payments/config
- * Returns Stripe publishable key to client apps.
+ * Returns Stripe publishable key and configuration status to client apps.
  */
 export async function handleGetConfig(
   req: AuthenticatedRequest,
@@ -25,11 +25,14 @@ export async function handleGetConfig(
   next: NextFunction,
 ): Promise<void> {
   try {
+    const creds = await paymentService.getAdminStripeSettings();
     res.status(200).json({
       success: true,
       message: "Stripe configuration retrieved successfully.",
       data: {
-        publishableKey: STRIPE_PUBLISHABLE_KEY,
+        publishableKey: creds.publishableKey,
+        isConfigured: creds.isConfigured,
+        isLiveMode: creds.isLiveMode,
       },
     });
   } catch (error) {
@@ -799,6 +802,101 @@ export async function handleAdminDeleteInvoice(
     });
   } catch (error) {
     next(error);
+  }
+}
+
+/**
+ * GET /api/v1/payments/admin/stripe-settings
+ * Admin endpoint to inspect current Stripe Gateway configuration status.
+ */
+export async function handleGetAdminStripeSettings(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      res
+        .status(403)
+        .json({ success: false, message: "Admin authorization required." });
+      return;
+    }
+
+    const settings = await paymentService.getAdminStripeSettings();
+    res.status(200).json({
+      success: true,
+      message: "Admin Stripe gateway settings retrieved.",
+      data: settings,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * PUT /api/v1/payments/admin/stripe-settings
+ * Admin endpoint to update and validate Stripe credentials in Database.
+ */
+export async function handleUpdateAdminStripeSettings(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      res
+        .status(403)
+        .json({ success: false, message: "Admin authorization required." });
+      return;
+    }
+
+    const adminUserId = req.user.id;
+    const updated = await paymentService.updateAdminStripeSettings(
+      req.body,
+      adminUserId,
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Stripe gateway settings updated and verified successfully.",
+      data: updated,
+    });
+  } catch (error: any) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Failed to update Stripe settings.",
+    });
+  }
+}
+
+/**
+ * POST /api/v1/payments/admin/test-connection
+ * Admin endpoint to test Stripe API connectivity with provided or stored keys.
+ */
+export async function handleTestStripeConnection(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      res
+        .status(403)
+        .json({ success: false, message: "Admin authorization required." });
+      return;
+    }
+
+    const result = await paymentService.testStripeConnection(req.body);
+    res.status(200).json({
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (error: any) {
+    res.status(400).json({
+      success: false,
+      message: error.message || "Stripe connection test failed.",
+    });
   }
 }
 

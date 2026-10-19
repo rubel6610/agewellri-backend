@@ -11,9 +11,15 @@ import prisma from "../../lib/prisma";
 import { generateNextClientNumber } from "../../utils/client-number.util";
 import {
   stripe,
+  getActiveStripeCredentials,
+  getActivePublishableKey,
+  getActiveWebhookSecret,
+  syncStripeConfigFromDb,
   STRIPE_PUBLISHABLE_KEY,
   STRIPE_WEBHOOK_SECRET,
 } from "../../config/stripe";
+import Stripe from "stripe";
+import { encryptString, decryptString } from "../../utils/crypto.util";
 import {
   CreatePaymentIntentInput,
   CreateSetupIntentInput,
@@ -288,7 +294,7 @@ export async function createSetupIntent(
     clientSecret: setupIntent.client_secret,
     setupIntentId: setupIntent.id,
     customerId,
-    publishableKey: STRIPE_PUBLISHABLE_KEY,
+    publishableKey: (await getActivePublishableKey()) || STRIPE_PUBLISHABLE_KEY,
   };
 }
 
@@ -335,7 +341,7 @@ export async function createPaymentIntent(
     paymentIntentId: paymentIntent.id,
     amount: pricing.totalPrice,
     currency: input.currency || "usd",
-    publishableKey: STRIPE_PUBLISHABLE_KEY,
+    publishableKey: (await getActivePublishableKey()) || STRIPE_PUBLISHABLE_KEY,
   };
 }
 
@@ -1609,7 +1615,9 @@ export async function handleStripeWebhook(
   signature: string,
   rawBody: string | Buffer,
 ) {
-  if (!STRIPE_WEBHOOK_SECRET) {
+  const webhookSecret =
+    (await getActiveWebhookSecret()) || STRIPE_WEBHOOK_SECRET;
+  if (!webhookSecret) {
     console.warn("⚠️ Stripe Webhook secret not configured.");
     return { received: true, warning: "Webhook secret missing" };
   }
@@ -1619,7 +1627,7 @@ export async function handleStripeWebhook(
     event = stripe.webhooks.constructEvent(
       rawBody,
       signature,
-      STRIPE_WEBHOOK_SECRET,
+      webhookSecret,
     );
   } catch (err: any) {
     throw new Error(`Webhook signature verification failed: ${err.message}`);
@@ -3181,4 +3189,241 @@ export async function deleteInvoice(
     invoice: deleted,
   };
 }
+
+/**
+ * Mask sensitive key string for safe UI presentation (e.g. "rk_test_51Tx...2hRF")
+ */
+function maskKey(key?: string | null): string {
+  if (!key) return "";
+  if (key.length <= 12) return "••••••••••••";
+  const prefix = key.slice(0, 10);
+  const suffix = key.slice(-4);
+  return `${prefix}${"•".repeat(Math.max(key.length - 14, 6))}${suffix}`;
+}
+
+/**
+ * Get Admin Stripe Gateway Settings and Status
+ */
+export async function getAdminStripeSettings() {
+  const [dbSetting, currentCreds] = await Promise.all([
+    (prisma as any).paymentGatewaySetting.findUnique({
+      where: { provider: "STRIPE" },
+    }),
+    getActiveStripeCredentials(),
+  ]);
+
+  const activePublishableKey = currentCreds.publishableKey;
+  const activeSecretKey = currentCreds.secretKey;
+  const activeWebhookSecret = currentCreds.webhookSecret;
+
+  const hasSecretKey = Boolean(activeSecretKey);
+  const hasPublishableKey = Boolean(activePublishableKey);
+  const hasWebhookSecret = Boolean(activeWebhookSecret);
+
+  // Derive webhook endpoint URL
+  const backendBaseUrl =
+    process.env.BACKEND_URL ||
+    (process.env.FRONTEND_URL
+      ? process.env.FRONTEND_URL.replace(/:\d+$/, `:${process.env.PORT || 5173}`)
+      : `http://localhost:${process.env.PORT || 5173}`);
+  const webhookEndpointUrl = `${backendBaseUrl.replace(/\/$/, "")}/api/v1/payments/webhook`;
+
+  return {
+    isConfigured: hasPublishableKey && hasSecretKey,
+    hasPublishableKey,
+    hasSecretKey,
+    hasWebhookSecret,
+    publishableKey: activePublishableKey || "",
+    maskedSecretKey: maskKey(activeSecretKey),
+    maskedWebhookSecret: maskKey(activeWebhookSecret),
+    isLiveMode: currentCreds.isLiveMode,
+    source: currentCreds.source,
+    webhookEndpointUrl,
+    lastTestedAt: dbSetting?.lastTestedAt || null,
+    updatedAt: dbSetting?.updatedAt || null,
+    requiredEvents: [
+      "invoice.paid",
+      "invoice.payment_failed",
+      "customer.subscription.deleted",
+      "setup_intent.succeeded",
+      "payment_intent.succeeded",
+      "payment_intent.payment_failed",
+    ],
+  };
+}
+
+/**
+ * Test Stripe Connection with provided or active keys
+ */
+export async function testStripeConnection(input?: {
+  secretKey?: string;
+  publishableKey?: string;
+}) {
+  const currentCreds = await getActiveStripeCredentials();
+  const secretKeyToTest = input?.secretKey?.includes("•")
+    ? currentCreds.secretKey
+    : input?.secretKey || currentCreds.secretKey;
+
+  if (!secretKeyToTest) {
+    throw new Error(
+      "No Stripe Secret/Restricted Key found to test. Please provide a key.",
+    );
+  }
+
+  try {
+    const testClient = new Stripe(secretKeyToTest, {
+      apiVersion: "2026-07-29.dahlia" as any,
+      typescript: true,
+    });
+
+    // Verify key works by listing a single customer
+    const customers = await testClient.customers.list({ limit: 1 });
+    const isLive =
+      secretKeyToTest.startsWith("sk_live_") ||
+      secretKeyToTest.startsWith("rk_live_");
+
+    return {
+      success: true,
+      message: `Stripe connection verified successfully! (${isLive ? "Live Mode" : "Test Mode"})`,
+      livemode: isLive,
+      testedAt: new Date(),
+    };
+  } catch (err: any) {
+    throw new Error(`Stripe connection test failed: ${err.message}`);
+  }
+}
+
+/**
+ * Update Admin Stripe Gateway Settings in Database
+ */
+export async function updateAdminStripeSettings(
+  input: {
+    publishableKey?: string;
+    secretKey?: string;
+    webhookSecret?: string;
+    isLiveMode?: boolean;
+  },
+  actorUserId?: string | null,
+) {
+  const currentDb = await (prisma as any).paymentGatewaySetting.findUnique({
+    where: { provider: "STRIPE" },
+  });
+
+  let effectivePub = input.publishableKey?.trim();
+  let effectiveSec = input.secretKey?.trim();
+  let effectiveWh = input.webhookSecret?.trim();
+
+  // If user left masked value unchanged, keep existing DB or env value
+  if (effectiveSec && effectiveSec.includes("•")) {
+    effectiveSec = currentDb?.secretKey
+      ? decryptString(currentDb.secretKey) || currentDb.secretKey
+      : process.env.STRIPE_KEY ||
+        process.env.STRIPE_SECRET_KEY ||
+        undefined;
+  }
+  if (effectiveWh && effectiveWh.includes("•")) {
+    effectiveWh = currentDb?.webhookSecret
+      ? decryptString(currentDb.webhookSecret) || currentDb.webhookSecret
+      : process.env.STRIPE_WEBHOOK_SECRET || undefined;
+  }
+
+  // Basic format validations if provided
+  if (
+    effectivePub &&
+    !effectivePub.startsWith("pk_test_") &&
+    !effectivePub.startsWith("pk_live_")
+  ) {
+    throw new Error(
+      "Invalid Publishable Key format. Must start with 'pk_test_' or 'pk_live_'.",
+    );
+  }
+
+  if (
+    effectiveSec &&
+    !effectiveSec.startsWith("sk_test_") &&
+    !effectiveSec.startsWith("sk_live_") &&
+    !effectiveSec.startsWith("rk_test_") &&
+    !effectiveSec.startsWith("rk_live_")
+  ) {
+    throw new Error(
+      "Invalid Secret/Restricted Key format. Must start with 'sk_test_', 'sk_live_', 'rk_test_', or 'rk_live_'.",
+    );
+  }
+
+  if (effectiveWh && !effectiveWh.startsWith("whsec_")) {
+    throw new Error(
+      "Invalid Webhook Secret format. Must start with 'whsec_'.",
+    );
+  }
+
+  // Verify connectivity if secret key is present
+  let testSuccess = false;
+  if (effectiveSec) {
+    try {
+      const testClient = new Stripe(effectiveSec, {
+        apiVersion: "2026-07-29.dahlia" as any,
+        typescript: true,
+      });
+      await testClient.customers.list({ limit: 1 });
+      testSuccess = true;
+    } catch (testErr: any) {
+      throw new Error(
+        `Failed to verify Stripe Secret/Restricted Key with Stripe API: ${testErr.message}`,
+      );
+    }
+  }
+
+  const isLive =
+    input.isLiveMode ??
+    (effectiveSec
+      ? effectiveSec.startsWith("sk_live_") || effectiveSec.startsWith("rk_live_")
+      : (effectivePub || "").startsWith("pk_live_"));
+
+  // Encrypt sensitive secrets at rest using AES-256-GCM before database insertion
+  const encryptedSec = effectiveSec ? encryptString(effectiveSec) : null;
+  const encryptedWh = effectiveWh ? encryptString(effectiveWh) : null;
+
+  const updatedSetting = await (prisma as any).paymentGatewaySetting.upsert({
+    where: { provider: "STRIPE" },
+    create: {
+      provider: "STRIPE",
+      publishableKey: effectivePub || null,
+      secretKey: encryptedSec,
+      webhookSecret: encryptedWh,
+      isLiveMode: isLive,
+      isActive: true,
+      lastTestedAt: testSuccess ? new Date() : null,
+      updatedBy: actorUserId || null,
+    },
+    update: {
+      ...(effectivePub !== undefined && { publishableKey: effectivePub }),
+      ...(effectiveSec !== undefined && { secretKey: encryptedSec }),
+      ...(effectiveWh !== undefined && { webhookSecret: encryptedWh }),
+      isLiveMode: isLive,
+      isActive: true,
+      ...(testSuccess && { lastTestedAt: new Date() }),
+      updatedBy: actorUserId || null,
+    },
+  });
+
+  // Hot reload in-memory Stripe instance
+  await syncStripeConfigFromDb();
+
+  await createBillingAuditLog({
+    actorUserId,
+    action: "STRIPE_GATEWAY_CONFIG_UPDATED",
+    entityType: "PaymentGatewaySetting",
+    entityId: updatedSetting.id,
+    metadata: {
+      hasPublishableKey: Boolean(updatedSetting.publishableKey),
+      hasSecretKey: Boolean(updatedSetting.secretKey),
+      hasWebhookSecret: Boolean(updatedSetting.webhookSecret),
+      isLiveMode: updatedSetting.isLiveMode,
+      testedAt: updatedSetting.lastTestedAt,
+    },
+  });
+
+  return getAdminStripeSettings();
+}
+
 
